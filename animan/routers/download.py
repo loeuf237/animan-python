@@ -264,6 +264,12 @@ async def get_episode_size(
                     qualities_dict = json.loads(info.video_qualities_json)
                 except Exception:
                     pass
+            qualities_sizes_dict = {}
+            if getattr(info, "qualities_sizes_json", None):
+                try:
+                    qualities_sizes_dict = json.loads(info.qualities_sizes_json)
+                except Exception:
+                    pass
             return {
                 "success": True,
                 "formattedSize": info.formatted_size,
@@ -273,6 +279,7 @@ async def get_episode_size(
                 "serverType": info.server_type,
                 "availableServers": info.available_servers,
                 "qualities": list(qualities_dict.keys()),
+                "qualitiesSizes": qualities_sizes_dict,
                 "currentQuality": info.selected_quality,
                 "currentServer": info.selected_server,
             }

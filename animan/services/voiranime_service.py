@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from animan.config import settings
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
+from animan.models.download_task import format_bytes
 from animan.services.proxy_service import proxy_service
 from animan.security import is_safe_url
 
@@ -567,6 +568,9 @@ class VoirAnimeScrapingService:
             "serverType": "unknown",
             "availableServers": "[]",
             "selectedQuality": "",
+            "size": -1,
+            "formattedSize": "Taille inconnue",
+            "qualitiesSizes": "{}",
         }
 
         try:
@@ -614,6 +618,9 @@ class VoirAnimeScrapingService:
                 qualities: Dict[str, str] = {}
                 subtitle_url = ""
                 resolved_server = "unknown"
+                qualities_sizes_bytes: Dict[str, int] = {}
+                qualities_sizes_formatted: Dict[str, str] = {}
+                detected_size: int = -1
 
                 # 3. Résolution selon l'ordre de priorité (avec fallback automatique si indisponible)
                 for s_name in try_order:
@@ -622,10 +629,19 @@ class VoirAnimeScrapingService:
                     s_lower = s_name.lower()
 
                     if s_lower == "mytv" or any(h in s_url for h in ["voembed", "vidmoly"]):
-                        u, q, sub = self._resolve_mytv(s_url, episode_url, client)
+                        mytv_res = self._resolve_mytv(s_url, episode_url, client)
+                        if len(mytv_res) >= 4:
+                            u, q, sub, q_sizes_bytes = mytv_res[:4]
+                        else:
+                            u, q, sub = mytv_res[:3]
+                            q_sizes_bytes = {}
                         if u:
                             best_url, qualities, subtitle_url = u, q, sub
                             resolved_server = "myTV"
+                            qualities_sizes_bytes = q_sizes_bytes
+                            for qk, qsz in q_sizes_bytes.items():
+                                if qsz > 0:
+                                    qualities_sizes_formatted[qk] = format_bytes(qsz)
                             break
 
                     elif s_lower in ["stape", "streamtape"] or "streamtape" in s_url:
@@ -634,6 +650,15 @@ class VoirAnimeScrapingService:
                             best_url = mp4_url
                             qualities = {"1080p (Streamtape)": mp4_url}
                             resolved_server = "stape"
+                            try:
+                                hr = client.head(mp4_url, headers={"Referer": "https://streamtape.com/"}, timeout=5.0, follow_redirects=True)
+                                cl = hr.headers.get("Content-Length")
+                                if cl and cl.isdigit() and int(cl) > 0:
+                                    detected_size = int(cl)
+                                    qualities_sizes_bytes["1080p (Streamtape)"] = detected_size
+                                    qualities_sizes_formatted["1080p (Streamtape)"] = format_bytes(detected_size)
+                            except Exception:
+                                pass
                             break
 
                     elif s_lower == "voe" or "voe" in s_url:
@@ -641,6 +666,24 @@ class VoirAnimeScrapingService:
                         if u:
                             best_url, qualities = u, q
                             resolved_server = "voe"
+                            if ".m3u8" in u.lower():
+                                q_sizes = self._estimate_m3u8_sizes_sync(u, qualities, {}, client, referer="https://voe.sx/")
+                                if q_sizes:
+                                    qualities_sizes_bytes = q_sizes
+                                    for qk, qsz in q_sizes.items():
+                                        if qsz > 0:
+                                            qualities_sizes_formatted[qk] = format_bytes(qsz)
+                            else:
+                                try:
+                                    hr = client.head(u, headers={"Referer": "https://voe.sx/"}, timeout=5.0, follow_redirects=True)
+                                    cl = hr.headers.get("Content-Length")
+                                    if cl and cl.isdigit() and int(cl) > 0:
+                                        detected_size = int(cl)
+                                        for qk in qualities.keys():
+                                            qualities_sizes_bytes[qk] = detected_size
+                                            qualities_sizes_formatted[qk] = format_bytes(detected_size)
+                                except Exception:
+                                    pass
                             break
 
                     elif s_lower == "fhd1" or "mail.ru" in s_url:
@@ -648,6 +691,16 @@ class VoirAnimeScrapingService:
                         if u:
                             best_url, qualities = u, q
                             resolved_server = "fhd1"
+                            try:
+                                hr = client.head(u, headers={"Referer": "https://my.mail.ru/"}, timeout=5.0, follow_redirects=True)
+                                cl = hr.headers.get("Content-Length")
+                                if cl and cl.isdigit() and int(cl) > 0:
+                                    detected_size = int(cl)
+                                    for qk in qualities.keys():
+                                        qualities_sizes_bytes[qk] = detected_size
+                                        qualities_sizes_formatted[qk] = format_bytes(detected_size)
+                            except Exception:
+                                pass
                             break
 
                     elif s_lower == "moon" or "gn1r5n" in s_url or "byse" in s_url:
@@ -681,20 +734,32 @@ class VoirAnimeScrapingService:
                         selected_q_label = next(iter(qualities.keys()))
                         best_url = qualities[selected_q_label]
 
+                if selected_q_label in qualities_sizes_bytes and qualities_sizes_bytes[selected_q_label] > 0:
+                    detected_size = qualities_sizes_bytes[selected_q_label]
+                elif detected_size <= 0 and qualities_sizes_bytes:
+                    detected_size = next((sz for sz in qualities_sizes_bytes.values() if sz > 0), -1)
+
+                formatted_sz = format_bytes(detected_size) if detected_size > 0 else "Taille inconnue"
+
                 result["videoUrl"] = best_url
                 result["videoQualities"] = json.dumps(qualities)
                 result["videoChunks"] = json.dumps([best_url] if best_url else [])
                 result["subtitleUrl"] = subtitle_url
                 result["serverType"] = resolved_server
                 result["selectedQuality"] = selected_q_label
+                result["size"] = detected_size
+                result["formattedSize"] = formatted_sz
+                result["qualitiesSizes"] = json.dumps(qualities_sizes_formatted)
 
         except Exception as e:
             logger.error("[voir-anime] extract_download_info error: %s", e)
 
         return result
 
-    def _resolve_mytv(self, ifr_url: str, episode_url: str, client: httpx.Client) -> Tuple[str, Dict[str, str], str]:
-        """Résout le lecteur myTV (Voembed / Vidmoly) en playlist HLS m3u8 et extrait toutes les résolutions."""
+    def _resolve_mytv(
+        self, ifr_url: str, episode_url: str, client: httpx.Client
+    ) -> Tuple[str, Dict[str, str], str, Dict[str, int]]:
+        """Résout le lecteur myTV (Voembed / Vidmoly) en playlist HLS m3u8 et extrait toutes les résolutions avec tailles estimées."""
         code_m = re.search(r"embed-([a-zA-Z0-9]+)\.html", ifr_url)
         file_code = code_m.group(1) if code_m else ""
 
@@ -722,6 +787,8 @@ class VoirAnimeScrapingService:
                 pass
 
         qualities: Dict[str, str] = {}
+        bandwidths: Dict[str, int] = {}
+        qualities_sizes: Dict[str, int] = {}
         best_url = ""
         subtitle_url = ""
 
@@ -734,9 +801,10 @@ class VoirAnimeScrapingService:
                     master_m3u8 = m_gen.group(1)
 
             if master_m3u8:
-                parsed = self._extract_qualities_from_m3u8(master_m3u8, client)
-                if parsed:
-                    qualities.update(parsed)
+                parsed_q, parsed_bw = self._extract_qualities_and_bandwidths_from_m3u8(master_m3u8, client)
+                if parsed_q:
+                    qualities.update(parsed_q)
+                    bandwidths.update(parsed_bw)
                     for q_key in ["1080p", "720p", "480p", "360p"]:
                         if q_key in qualities:
                             best_url = qualities[q_key]
@@ -751,7 +819,15 @@ class VoirAnimeScrapingService:
             if sub_m:
                 subtitle_url = sub_m.group(1)
 
-        return best_url, qualities, subtitle_url
+            if best_url:
+                try:
+                    q_sizes = self._estimate_m3u8_sizes_sync(best_url, qualities, bandwidths, client)
+                    if q_sizes:
+                        qualities_sizes.update(q_sizes)
+                except Exception as e:
+                    logger.debug("[voir-anime] Erreur estimation taille myTV: %s", e)
+
+        return best_url, qualities, subtitle_url, qualities_sizes
 
     def _resolve_streamtape(self, ifr_url: str, referer: str, client: httpx.Client) -> Optional[str]:
         """Résout l'URL directe d'une vidéo Streamtape."""
@@ -892,23 +968,109 @@ class VoirAnimeScrapingService:
             logger.debug("[voir-anime] _resolve_moon error: %s", e)
         return "", {}
 
-    def _extract_qualities_from_m3u8(self, master_url: str, client: httpx.Client) -> Dict[str, str]:
+    def _extract_qualities_and_bandwidths_from_m3u8(
+        self, master_url: str, client: httpx.Client, referer: Optional[str] = None
+    ) -> Tuple[Dict[str, str], Dict[str, int]]:
         qualities: Dict[str, str] = {}
+        bandwidths: Dict[str, int] = {}
         try:
-            resp = client.get(master_url, headers={"Referer": "https://voembed.net/"})
+            try:
+                resp = client.get(master_url, headers={"Referer": referer or "https://voembed.net/"})
+            except TypeError:
+                resp = client.get(master_url)
             if resp.status_code == 200:
                 lines = resp.text.strip().split("\n")
+                current_bw = 0
                 for i, line in enumerate(lines):
-                    if line.startswith("#EXT-X-STREAM-INF:"):
-                        res_m = re.search(r"RESOLUTION=\d+x(\d+)", line)
+                    line_s = line.strip()
+                    if line_s.startswith("#EXT-X-STREAM-INF:"):
+                        res_m = re.search(r"RESOLUTION=\d+x(\d+)", line_s)
+                        bw_m = re.search(r"BANDWIDTH=(\d+)", line_s)
+                        current_bw = int(bw_m.group(1)) if bw_m else 0
                         label = f"{res_m.group(1)}p" if res_m else "Stream"
                         if i + 1 < len(lines):
                             stream_url = lines[i + 1].strip()
                             if not stream_url.startswith("#"):
-                                qualities[label] = urljoin(master_url, stream_url)
+                                full_url = urljoin(master_url, stream_url)
+                                qualities[label] = full_url
+                                if current_bw > 0:
+                                    bandwidths[label] = current_bw
         except Exception as e:
-            logger.debug("[voir-anime] _extract_qualities_from_m3u8: %s", e)
+            logger.debug("[voir-anime] _extract_qualities_and_bandwidths_from_m3u8: %s", e)
+        return qualities, bandwidths
+
+    def _extract_qualities_from_m3u8(self, master_url: str, client: httpx.Client) -> Dict[str, str]:
+        qualities, _ = self._extract_qualities_and_bandwidths_from_m3u8(master_url, client)
         return qualities
+
+    def _estimate_m3u8_sizes_sync(
+        self,
+        sample_url: str,
+        qualities: Dict[str, str],
+        bandwidths: Dict[str, int],
+        client: httpx.Client,
+        referer: Optional[str] = None,
+    ) -> Dict[str, int]:
+        qualities_sizes: Dict[str, int] = {}
+        if not sample_url:
+            return qualities_sizes
+
+        ref = referer or "https://voembed.net/"
+        try:
+            try:
+                resp = client.get(sample_url, headers={"Referer": ref})
+            except TypeError:
+                resp = client.get(sample_url)
+            if resp.status_code != 200:
+                return qualities_sizes
+
+            text = resp.text
+            durations = [float(d) for d in re.findall(r"#EXTINF:([\d.]+)", text)]
+            total_duration = sum(durations)
+            segs = [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+
+            if total_duration <= 0 and segs:
+                td_m = re.search(r"#EXT-X-TARGETDURATION:(\d+)", text)
+                target_dur = float(td_m.group(1)) if td_m else 10.0
+                total_duration = len(segs) * target_dur
+
+            # 1. Calcul exact via débits binaires
+            if bandwidths and total_duration > 0:
+                for q_label, bw in bandwidths.items():
+                    if bw > 0:
+                        qualities_sizes[q_label] = int((bw * total_duration) / 8)
+
+            # 2. Fallback: échantillonnage parallèle HEAD sur 2 segments
+            if not qualities_sizes and segs:
+                sample_indices = list(set([0, len(segs) // 2, max(0, len(segs) - 2)]))
+                sample_sizes: List[int] = []
+                for idx in sample_indices:
+                    seg_u = segs[idx]
+                    if not seg_u.startswith("http"):
+                        seg_u = urljoin(sample_url, seg_u)
+                    try:
+                        try:
+                            hr = client.head(seg_u, headers={"Referer": ref})
+                        except TypeError:
+                            hr = client.head(seg_u)
+                        cl = hr.headers.get("Content-Length")
+                        if cl and cl.isdigit() and int(cl) > 0:
+                            sample_sizes.append(int(cl))
+                    except Exception:
+                        pass
+                if sample_sizes:
+                    avg_sz = sum(sample_sizes) / len(sample_sizes)
+                    estimated_sz = int(avg_sz * len(segs))
+                    for q_label in (qualities.keys() if qualities else ["Stream"]):
+                        qualities_sizes[q_label] = estimated_sz
+                elif total_duration > 0:
+                    for q_label in (qualities.keys() if qualities else ["Stream"]):
+                        qualities_sizes[q_label] = int((1_800_000 * total_duration) / 8)
+
+        except Exception as e:
+            logger.debug("[voir-anime] _estimate_m3u8_sizes_sync error: %s", e)
+
+        return qualities_sizes
 
     def extract_video_chunks(self, episode_url: str) -> List[str]:
         info = self.extract_download_info(episode_url)

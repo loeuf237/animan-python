@@ -39,6 +39,7 @@ class ResolvedVideoInfo:
         self.available_servers: List[str] = []
         self.selected_server: str = ""
         self.selected_quality: str = ""
+        self.qualities_sizes_json: str = "{}"
 
 class DownloadManagerService:
     def __init__(self):
@@ -154,16 +155,59 @@ class DownloadManagerService:
 
         return None
 
-    async def get_remote_file_size(self, url: str) -> int:
+    def get_headers_for_url(self, url: str, server_type: Optional[str] = None) -> Dict[str, str]:
+        ua = proxy_service.get_user_agent()
+        headers = {"User-Agent": ua}
+        u_lower = (url or "").lower()
+        s_lower = (server_type or "").lower()
+
+        if "tapecontent.net" in u_lower or "streamtape.com" in u_lower or s_lower in ["stape", "streamtape"]:
+            headers["Referer"] = "https://streamtape.com/"
+        elif any(h in u_lower for h in ["voembed", "vidmoly", "vmeas.cloud", "vmpx.online"]) or s_lower in ["mytv", "vidmoly", "voembed"]:
+            headers["Referer"] = "https://voembed.net/"
+        elif "mail.ru" in u_lower or s_lower in ["fhd1", "mailru"]:
+            headers["Referer"] = "https://my.mail.ru/"
+        elif any(h in u_lower for h in ["voe.sx", "johnfullwonder", "voe-un-block"]) or s_lower == "voe":
+            headers["Referer"] = "https://voe.sx/"
+        elif any(h in u_lower for h in ["gn1r5n", "byse", "weneverbeenfree"]) or s_lower == "moon":
+            headers["Referer"] = "https://gn1r5n.org/"
+            headers["X-Embed-Origin"] = "voir-anime.to"
+            headers["X-Embed-Referer"] = "https://voir-anime.to/"
+        elif "vidzy" in u_lower or s_lower == "vidzy":
+            headers["Referer"] = "https://vidzy.live/"
+        else:
+            try:
+                parsed = urllib.parse.urlparse(url)
+                if parsed.scheme and parsed.netloc:
+                    headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
+                else:
+                    headers["Referer"] = "https://vidzy.live/"
+            except Exception:
+                headers["Referer"] = "https://vidzy.live/"
+
+        return headers
+
+    async def get_remote_file_size(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        server_type: Optional[str] = None,
+    ) -> int:
         if not url:
             return -1
+        if ".m3u8" in url.lower():
+            return await self.estimate_hls_size(url, headers=headers, server_type=server_type)
+
         try:
-            headers = {
-                "User-Agent": proxy_service.get_user_agent(),
-                "Referer": "https://vidzy.live/",
-            }
+            req_headers = headers or self.get_headers_for_url(url, server_type)
             proxy = proxy_service.get_random_proxy()
-            async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=10.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+            async with httpx.AsyncClient(
+                headers=req_headers,
+                proxy=proxy,
+                timeout=8.0,
+                follow_redirects=True,
+                verify=settings.SSL_VERIFY,
+            ) as client:
                 resp = await client.head(url)
                 cl = resp.headers.get("Content-Length")
                 if cl and cl.isdigit() and int(cl) > 0:
@@ -177,10 +221,107 @@ class DownloadManagerService:
                     if total_str.isdigit():
                         return int(total_str)
                 cl2 = range_resp.headers.get("Content-Length")
-                if cl2 and cl2.isdigit():
+                if cl2 and cl2.isdigit() and int(cl2) > 0 and range_resp.status_code == 200:
                     return int(cl2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Erreur get_remote_file_size pour %s: %s", url, e)
+        return -1
+
+    async def estimate_hls_size(
+        self,
+        m3u8_url: str,
+        headers: Optional[Dict[str, str]] = None,
+        bandwidth: Optional[int] = None,
+        server_type: Optional[str] = None,
+    ) -> int:
+        if not m3u8_url:
+            return -1
+        req_headers = headers or self.get_headers_for_url(m3u8_url, server_type or "myTV")
+        proxy = proxy_service.get_random_proxy()
+
+        try:
+            async with httpx.AsyncClient(
+                headers=req_headers,
+                proxy=proxy,
+                timeout=8.0,
+                follow_redirects=True,
+                verify=settings.SSL_VERIFY,
+            ) as client:
+                resp = await client.get(m3u8_url)
+                if resp.status_code != 200:
+                    return -1
+
+                text = resp.text
+                target_variant_url = m3u8_url
+                est_bandwidth = bandwidth or 0
+
+                # Cas 1: Master playlist (#EXT-X-STREAM-INF)
+                if "#EXT-X-STREAM-INF:" in text:
+                    lines = text.strip().splitlines()
+                    best_bw = 0
+                    chosen_rel = ""
+                    for i, line in enumerate(lines):
+                        line_s = line.strip()
+                        if line_s.startswith("#EXT-X-STREAM-INF:"):
+                            bw_m = re.search(r"BANDWIDTH=(\d+)", line_s)
+                            bw = int(bw_m.group(1)) if bw_m else 0
+                            if i + 1 < len(lines):
+                                cand_url = lines[i + 1].strip()
+                                if not cand_url.startswith("#") and bw >= best_bw:
+                                    best_bw = bw
+                                    chosen_rel = cand_url
+                    if chosen_rel:
+                        target_variant_url = urljoin(m3u8_url, chosen_rel)
+                        if best_bw > 0:
+                            est_bandwidth = best_bw
+                        v_resp = await client.get(target_variant_url)
+                        if v_resp.status_code == 200:
+                            text = v_resp.text
+
+                # Cas 2: Analyse de la variante
+                durations = [float(d) for d in re.findall(r"#EXTINF:([\d.]+)", text)]
+                total_duration = sum(durations)
+                segs = [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+
+                if not segs:
+                    return -1
+
+                if total_duration <= 0:
+                    td_m = re.search(r"#EXT-X-TARGETDURATION:(\d+)", text)
+                    target_dur = float(td_m.group(1)) if td_m else 10.0
+                    total_duration = len(segs) * target_dur
+
+                if est_bandwidth > 0 and total_duration > 0:
+                    return int((est_bandwidth * total_duration) / 8)
+
+                # Fallback: échantillonnage parallèle HEAD de 2 à 3 segments
+                sample_indices = list(set([0, len(segs) // 2, max(0, len(segs) - 2)]))
+
+                async def sample_seg(idx: int) -> int:
+                    seg_u = segs[idx]
+                    if not seg_u.startswith("http"):
+                        seg_u = urljoin(target_variant_url, seg_u)
+                    try:
+                        hr = await client.head(seg_u, timeout=5.0)
+                        cl = hr.headers.get("Content-Length")
+                        if cl and cl.isdigit() and int(cl) > 0:
+                            return int(cl)
+                    except Exception:
+                        pass
+                    return -1
+
+                sampled_results = await asyncio.gather(*(sample_seg(i) for i in sample_indices), return_exceptions=True)
+                valid_samples = [s for s in sampled_results if isinstance(s, int) and s > 0]
+                if valid_samples:
+                    avg_seg_size = sum(valid_samples) / len(valid_samples)
+                    return int(avg_seg_size * len(segs))
+
+                if total_duration > 0:
+                    return int((1_800_000 * total_duration) / 8)
+
+        except Exception as e:
+            logger.debug("Erreur estimate_hls_size pour %s: %s", m3u8_url, e)
+
         return -1
 
     async def get_or_resolve_episode_info(
@@ -191,7 +332,8 @@ class DownloadManagerService:
     ) -> Optional[ResolvedVideoInfo]:
         if not download_page_url:
             return None
-        cache_key = f"{download_page_url}::{preferred_server or ''}::{preferred_quality or ''}"
+        eff_server_key = preferred_server or self.voiranime_default_server
+        cache_key = f"{download_page_url}::{eff_server_key}::{preferred_quality or ''}"
         if cache_key in self.resolved_info_cache:
             return self.resolved_info_cache[cache_key]
 
@@ -224,6 +366,11 @@ class DownloadManagerService:
                         info.available_servers = raw_avail
                     info.selected_server = dl_info.get("serverType", "")
                     info.selected_quality = dl_info.get("selectedQuality", "")
+                    info.qualities_sizes_json = dl_info.get("qualitiesSizes", "{}")
+
+                    # Si extract_download_info a déjà extrait une taille positive
+                    if dl_info.get("size") and int(dl_info.get("size", -1)) > 0:
+                        info.size = int(dl_info["size"])
                 else:
                     dl_info = await asyncio.to_thread(scraping_service.extract_download_info, download_page_url)
                     info.server_type = "vidzy"
@@ -232,25 +379,23 @@ class DownloadManagerService:
                 info.subtitle_url = dl_info.get("subtitleUrl", "")
                 info.subtitles_json = dl_info.get("subtitles", "[]")
 
-                if info.direct_url:
-                    info.size = await self.get_remote_file_size(info.direct_url)
-
-                if info.server_type == "myTV" and info.video_chunks_json:
-                    try:
-                        chunks = json.loads(info.video_chunks_json)
-                        total_sz = 0
-                        for c_url in chunks:
-                            sz = await self.get_remote_file_size(c_url)
-                            if sz > 0:
-                                total_sz += sz
-                        if total_sz > 0:
-                            info.size = total_sz
-                    except Exception:
-                        pass
+                # Si la taille n'est pas encore déterminée
+                if info.size <= 0 and info.direct_url:
+                    if ".m3u8" in info.direct_url.lower() or info.server_type == "myTV":
+                        info.size = await self.estimate_hls_size(info.direct_url, server_type=info.server_type)
+                    else:
+                        info.size = await self.get_remote_file_size(info.direct_url, server_type=info.server_type)
 
                 info.formatted_size = format_bytes(info.size) if info.size > 0 else "Taille inconnue"
-                self.resolved_info_cache[cache_key] = info
-                self.resolved_info_cache[download_page_url] = info
+
+                # Si qualities_sizes_json est vide mais qu'on a la taille, générer pour la qualité sélectionnée
+                if (not info.qualities_sizes_json or info.qualities_sizes_json == "{}") and info.size > 0:
+                    info.qualities_sizes_json = json.dumps({info.selected_quality or "HD": info.formatted_size})
+
+                # Mettre en cache seulement les résultats avec taille valide
+                if info.size > 0:
+                    self.resolved_info_cache[cache_key] = info
+
                 return info
             except Exception as e:
                 logger.error("Erreur get_or_resolve_episode_info: %s", e)
@@ -1335,9 +1480,19 @@ class DownloadManagerService:
         if temp_output.exists():
             temp_output.unlink(missing_ok=True)
 
+        if task.totalBytes <= 0:
+            try:
+                est_sz = await self.estimate_hls_size(m3u8_url)
+                if est_sz > 0:
+                    task.totalBytes = est_sz
+                    self.broadcast_update(task)
+            except Exception:
+                pass
+
         if self.is_ffmpeg_available():
-            ua = proxy_service.get_user_agent()
-            referer = "https://voembed.net/"
+            hdrs = self.get_headers_for_url(m3u8_url)
+            ua = hdrs.get("User-Agent", proxy_service.get_user_agent())
+            referer = hdrs.get("Referer", "https://voembed.net/")
             headers_arg = f"User-Agent: {ua}\r\nReferer: {referer}\r\n"
             cmd = [
                 "ffmpeg", "-y",
@@ -1393,6 +1548,8 @@ class DownloadManagerService:
                             downloaded = int(text.split("=")[1])
                             if downloaded > 0:
                                 task.downloadedBytes = downloaded
+                                if task.totalBytes > 0:
+                                    task.progress = min(99.0, (downloaded / task.totalBytes) * 100.0)
                                 now = time.time()
                                 if now - last_time >= 0.5:
                                     task.speed = int((downloaded - last_bytes) / (now - last_time))

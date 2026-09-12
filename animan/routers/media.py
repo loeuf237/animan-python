@@ -2,16 +2,20 @@ import json
 import logging
 import os
 import re
+import urllib.parse
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Request, Header, HTTPException, Response
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import APIRouter, Request, Header, HTTPException, Response, Query
+from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 
 import httpx
 from animan.config import settings
 from animan.security import is_safe_url, is_safe_path
 from animan.services.download_manager import download_manager
 from animan.services.proxy_service import proxy_service
+from animan.services.library_service import library_service
+from animan.services.voiranime_service import voiranime_service
+from animan.services.scraping_service import scraping_service
 
 logger = logging.getLogger("animan.router.media")
 router = APIRouter()
@@ -80,6 +84,133 @@ def parse_subtitle_paths(path_field: Optional[str]) -> List[str]:
         except Exception:
             pass
     return [path_field]
+
+@router.get("/api/media/stream/resolve")
+async def resolve_stream(
+    animeName: str = Query(...),
+    episodeNumber: int = Query(...),
+    episodeUrl: str = Query(...),
+    animeUrl: Optional[str] = Query(""),
+    version: Optional[str] = Query(""),
+    source: Optional[str] = Query("voir-anime"),
+    server: Optional[str] = Query(None),
+    quality: Optional[str] = Query(None),
+):
+    """
+    Résout le flux de lecture pour un épisode :
+    1. Si l'épisode est déjà téléchargé sur le disque dur, renvoie le flux local (/api/media/stream/{task_id}).
+    2. S'il n'est pas téléchargé, résout le flux en ligne direct sur les serveurs d'hébergement.
+    """
+    logger.info("Résolution streaming: %s - Ep %s (source=%s, server=%s, quality=%s)",
+                animeName, episodeNumber, source, server, quality)
+
+    # 1. Vérification si l'épisode est déjà téléchargé sur le disque dur
+    local_task = library_service.find_downloaded_episode(
+        anime_name=animeName,
+        episode_number=episodeNumber,
+        version=version or "",
+        episode_url=episodeUrl,
+    )
+
+    if local_task:
+        logger.info("Épisode trouvé sur le disque dur: %s (task_id=%s)", local_task.savePath, local_task.id)
+        # Récupérer les sous-titres locaux s'ils existent
+        subtitles = []
+        try:
+            subtitles = await get_subtitles_list(local_task.id)
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "isDownloaded": True,
+            "sourceType": "local",
+            "taskId": local_task.id,
+            "streamUrl": f"/api/media/stream/{local_task.id}",
+            "filePath": local_task.savePath,
+            "title": f"{animeName} - Épisode {episodeNumber}",
+            "subtitles": subtitles,
+            "serverType": "Disque dur (Local)",
+            "selectedQuality": "Original (Local)",
+            "qualities": {},
+        }
+
+    # 2. Épisode non téléchargé -> Résolution du streaming direct sur les serveurs d'hébergement
+    logger.info("Épisode non téléchargé sur disque dur. Extraction du flux distant...")
+    video_url = ""
+    server_type = server or "auto"
+    selected_quality = quality or "auto"
+    qualities_dict: Dict[str, str] = {}
+    tracks: List[Dict[str, Any]] = []
+
+    if source == "voir-anime":
+        pref_srv = server if (server and server != "auto") else None
+        pref_q = quality if (quality and quality != "auto") else None
+        info = voiranime_service.extract_download_info(
+            episodeUrl,
+            preferred_server=pref_srv,
+            preferred_quality=pref_q,
+        )
+        video_url = info.get("videoUrl") or ""
+        server_type = info.get("serverType") or server_type
+        selected_quality = info.get("selectedQuality") or selected_quality
+        raw_qualities = info.get("videoQualities")
+        if isinstance(raw_qualities, str):
+            try:
+                qualities_dict = json.loads(raw_qualities)
+            except Exception:
+                qualities_dict = {}
+        elif isinstance(raw_qualities, dict):
+            qualities_dict = raw_qualities
+
+        sub_url = info.get("subtitleUrl")
+        if sub_url:
+            tracks.append({
+                "kind": "captions",
+                "label": "Français",
+                "srclang": "fr",
+                "src": f"/api/media/subtitle-proxy?url={urllib.parse.quote(sub_url)}",
+                "default": True,
+            })
+    else:
+        # french-manga
+        info = scraping_service.extract_download_info(episodeUrl)
+        video_url = info.get("videoUrl") or info.get("directUrl") or ""
+        server_type = "vidzy"
+        sub_url = info.get("subtitleUrl")
+        if sub_url:
+            tracks.append({
+                "kind": "captions",
+                "label": "Français",
+                "srclang": "fr",
+                "src": f"/api/media/subtitle-proxy?url={urllib.parse.quote(sub_url)}",
+                "default": True,
+            })
+
+    if not video_url:
+        logger.warning("Aucun flux vidéo direct trouvé pour l'épisode distant: %s", episodeUrl)
+        return JSONResponse(
+            status_code=404,
+            content={
+                "success": False,
+                "error": "Impossible de trouver un flux vidéo direct sur les serveurs d'hébergement.",
+                "isDownloaded": False,
+                "sourceType": "remote",
+                "serverType": server_type,
+            }
+        )
+
+    return {
+        "success": True,
+        "isDownloaded": False,
+        "sourceType": "remote",
+        "streamUrl": video_url,
+        "serverType": server_type,
+        "selectedQuality": selected_quality,
+        "qualities": qualities_dict,
+        "title": f"{animeName} - Épisode {episodeNumber}",
+        "subtitles": tracks,
+    }
 
 @router.get("/api/media/stream/{task_id}")
 async def stream_video(task_id: str, request: Request, range: Optional[str] = Header(None)):
@@ -208,3 +339,41 @@ async def stream_subtitle_at_index(task_id: str, index: int):
         content_type = "text/ass"
 
     return FileResponse(path=file_path, media_type=content_type)
+
+@router.get("/api/media/subtitle-proxy")
+async def proxy_subtitle(url: str = Query(...)):
+    """
+    Proxy pour sous-titres distants avec en-têtes CORS universels pour HTML5 <track>.
+    """
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL de sous-titre invalide")
+    if not is_safe_url(url):
+        logger.warning("SSRF bloqué sur subtitle-proxy: %s", url)
+        raise HTTPException(status_code=400, detail="URL de sous-titre non autorisée")
+
+    headers = {
+        "User-Agent": proxy_service.get_user_agent(),
+        "Referer": "https://voir-anime.to/" if "voir-anime" in url else "https://vidzy.org/",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Sous-titres distants inaccessibles")
+            content = resp.text
+            content_type = "text/vtt; charset=utf-8" if "WEBVTT" in content.upper() else "text/plain; charset=utf-8"
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Cache-Control": "public, max-age=86400",
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug("Erreur subtitle-proxy: %s", e)
+        raise HTTPException(status_code=502, detail="Erreur lors de la récupération des sous-titres")
+

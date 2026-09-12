@@ -151,7 +151,8 @@
                data-title="{{ ep.title }}"
                data-version="{{ ep.version }}"
                data-subtitle="{{ ep.subtitleUrl or '' }}"
-               data-player="{{ ep.playerUrl }}">
+               data-player="{{ ep.playerUrl }}"
+               data-downloaded="{{ 'true' if is_dl else 'false' }}">
             <div class="ep-row-main">
               <input type="checkbox" class="episode-check"
                      id="ep-check-{{ ep.number }}-{{ ep.version }}"
@@ -165,7 +166,10 @@
               {% endif %}
 
               {% if is_dl %}
-              <span class="ep-done-badge">Téléchargé</span>
+              <span class="ep-done-badge" title="Fichier disponible sur le disque dur">
+                <svg viewBox="0 0 24 24" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;margin-right:3px;fill:currentColor;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Téléchargé
+              </span>
               {% endif %}
               {% if is_watched %}
               <span class="ep-watched-badge">Vu</span>
@@ -190,11 +194,13 @@
               </div>
 
               <div class="ep-row-actions">
-                <button class="btn btn-icon btn-play-ep"
+                <button class="btn btn-icon btn-play-ep {% if is_dl %}btn-play-local{% else %}btn-play-stream{% endif %}"
                         data-url="{{ ep_url }}"
                         data-num="{{ ep.number }}"
                         data-title="{{ ep.title }}"
-                        onclick="playEpisode(this)" title="Mode Cinéma (Lecture)">
+                        data-downloaded="{{ 'true' if is_dl else 'false' }}"
+                        onclick="playEpisode(this)"
+                        title="{% if is_dl %}Lecture locale (Disque dur){% else %}Streaming direct (En ligne){% endif %}">
                   <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8Z"/></svg>
                 </button>
 
@@ -226,9 +232,10 @@
 <div id="cinema-modal" class="cinema-modal">
   <div class="cinema-container">
     <div class="cinema-header">
-      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap;">
         <svg viewBox="0 0 24 24" style="width:20px;height:20px;color:var(--accent);flex-shrink:0;"><path d="M7 4v16l13-8Z"/></svg>
         <h3 class="cinema-title" id="cinema-title">{{ anime.title }}</h3>
+        <span id="cinema-source-badge" class="cinema-badge" style="display:none;"></span>
       </div>
       <button class="btn btn-sm" type="button" onclick="closeCinemaPlayer()" title="Fermer (Échap)">
         <svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M18 6 6 18M6 6l12 12"/></svg>

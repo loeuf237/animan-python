@@ -232,4 +232,44 @@ class LibraryService:
                 ])
             ).all()
 
+    def find_downloaded_episode(
+        self,
+        anime_name: str,
+        episode_number: int,
+        version: str = "",
+        episode_url: str = ""
+    ) -> Optional[DownloadTaskEntity]:
+        """
+        Recherche une tâche de téléchargement terminée correspondant à l'épisode,
+        ET valide que le fichier existe physiquement sur le disque dur et est non vide.
+        """
+        import os
+        from sqlalchemy import or_
+
+        with SessionLocal() as db:
+            q = db.query(DownloadTaskEntity).filter(
+                DownloadTaskEntity.status == DownloadStatus.COMPLETED.value,
+                DownloadTaskEntity.episodeNumber == episode_number
+            )
+
+            filters = []
+            if episode_url:
+                filters.append(DownloadTaskEntity.downloadPageUrl == episode_url)
+                filters.append(DownloadTaskEntity.fileUrl == episode_url)
+            if anime_name:
+                filters.append(DownloadTaskEntity.animeName == anime_name)
+                filters.append(DownloadTaskEntity.animeName.ilike(anime_name.strip()))
+
+            if filters:
+                q = q.filter(or_(*filters))
+
+            candidates = q.order_by(DownloadTaskEntity.completedAt.desc(), DownloadTaskEntity.createdAt.desc()).all()
+
+            for task in candidates:
+                if task.savePath and os.path.isfile(task.savePath) and os.path.getsize(task.savePath) > 0:
+                    return task
+
+            return None
+
 library_service = LibraryService()
+

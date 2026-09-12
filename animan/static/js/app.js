@@ -191,7 +191,7 @@ let activeSizeFetches = 0;
 const sizeFetchQueue = [];
 
 function processSizeFetchQueue() {
-  const MAX_CONCURRENT_SIZE_FETCHES = 2;
+  const MAX_CONCURRENT_SIZE_FETCHES = 4;
   while (activeSizeFetches < MAX_CONCURRENT_SIZE_FETCHES && sizeFetchQueue.length > 0) {
     const { span, url, server, quality } = sizeFetchQueue.shift();
     const cacheKey = `${url}::${server || ''}::${quality || ''}`;
@@ -232,6 +232,9 @@ function applySizeData(span, data) {
   if (row && data && data.success) {
     if (data.currentServer) row.dataset.server = data.currentServer;
     if (data.currentQuality) row.dataset.quality = data.currentQuality;
+    if (data.qualitiesSizes) {
+      row.dataset.qualitiesSizes = JSON.stringify(data.qualitiesSizes);
+    }
 
     const qSelect = row.querySelector('.episode-quality-select');
     if (qSelect && data.qualities && data.qualities.length > 0) {
@@ -258,6 +261,24 @@ async function onEpisodeQualityChange(selectEl) {
   const server = row.dataset.server || document.getElementById('batch-server-select')?.value || '';
   row.dataset.quality = quality;
   const span = row.querySelector('.episode-size');
+
+  // Vérifier si la taille est déjà connue localement dans qualitiesSizes
+  if (row.dataset.qualitiesSizes) {
+    try {
+      const qSizes = JSON.parse(row.dataset.qualitiesSizes);
+      if (qSizes[quality]) {
+        if (span) span.textContent = qSizes[quality];
+        return;
+      }
+      for (const [k, v] of Object.entries(qSizes)) {
+        if (k.toLowerCase().includes(quality.toLowerCase()) || quality.toLowerCase().includes(k.toLowerCase())) {
+          if (span) span.textContent = v;
+          return;
+        }
+      }
+    } catch (e) {}
+  }
+
   if (span) span.textContent = '...';
   try {
     const qParam = encodeURIComponent(quality);
@@ -266,6 +287,9 @@ async function onEpisodeQualityChange(selectEl) {
     const data = await resp.json();
     if (data.success && span) {
       span.textContent = data.formattedSize;
+      if (data.qualitiesSizes) {
+        row.dataset.qualitiesSizes = JSON.stringify(data.qualitiesSizes);
+      }
     }
   } catch (e) {
     if (span) span.textContent = '-';
@@ -273,20 +297,24 @@ async function onEpisodeQualityChange(selectEl) {
 }
 
 function onBatchServerChange(server) {
+  // Réinitialiser la file d'attente pour éviter les requêtes obsolètes
+  sizeFetchQueue.length = 0;
   document.querySelectorAll('.episode-item').forEach(row => {
     row.dataset.server = server;
+    delete row.dataset.qualitiesSizes;
     const span = row.querySelector('.episode-size');
     const url = row.dataset.url;
     if (span && url) {
       span.textContent = '...';
-      const sParam = server && server !== 'auto' ? `&server=${encodeURIComponent(server)}` : '';
-      const qParam = row.dataset.quality ? `&quality=${encodeURIComponent(row.dataset.quality)}` : '';
-      fetch(`/api/episode/size?url=${encodeURIComponent(url)}${sParam}${qParam}`)
-        .then(r => r.json())
-        .then(data => applySizeData(span, data))
-        .catch(() => { span.textContent = '-'; });
+      sizeFetchQueue.push({
+        span,
+        url,
+        server: server && server !== 'auto' ? server : '',
+        quality: row.dataset.quality || ''
+      });
     }
   });
+  processSizeFetchQueue();
 }
 
 function onBatchQualityChange(quality) {
@@ -304,15 +332,33 @@ function onBatchQualityChange(quality) {
     const span = row.querySelector('.episode-size');
     const url = row.dataset.url;
     if (span && url && quality !== 'auto') {
+      // Vérifier si la taille est déjà connue localement
+      if (row.dataset.qualitiesSizes) {
+        try {
+          const qSizes = JSON.parse(row.dataset.qualitiesSizes);
+          let found = false;
+          for (const [k, v] of Object.entries(qSizes)) {
+            if (k.toLowerCase().includes(quality.toLowerCase()) || quality.toLowerCase().includes(k.toLowerCase())) {
+              span.textContent = v;
+              found = true;
+              break;
+            }
+          }
+          if (found) return;
+        } catch (e) {}
+      }
+
       span.textContent = '...';
       const server = row.dataset.server || document.getElementById('batch-server-select')?.value || '';
-      const sParam = server && server !== 'auto' ? `&server=${encodeURIComponent(server)}` : '';
-      fetch(`/api/episode/size?url=${encodeURIComponent(url)}&quality=${encodeURIComponent(quality)}${sParam}`)
-        .then(r => r.json())
-        .then(data => applySizeData(span, data))
-        .catch(() => { span.textContent = '-'; });
+      sizeFetchQueue.push({
+        span,
+        url,
+        server: server && server !== 'auto' ? server : '',
+        quality
+      });
     }
   });
+  processSizeFetchQueue();
 }
 
 function loadEpisodeSizes() {
@@ -628,46 +674,64 @@ async function playEpisode(btn) {
   const source = typeof SOURCE !== 'undefined' ? SOURCE : 'french-manga';
   const animeName = typeof ANIME_NAME !== 'undefined' ? ANIME_NAME : '';
   const animeUrl = typeof ANIME_URL !== 'undefined' ? ANIME_URL : '';
-  const version = btn.closest('.episode-item')?.dataset.version || '';
+  const row = btn.closest('.episode-item');
+  const version = row?.dataset.version || '';
+  const server = row?.dataset.server || document.getElementById('batch-server-select')?.value || '';
+  const quality = row?.dataset.quality || document.getElementById('batch-quality-select')?.value || '';
 
   showToast('Résolution du flux vidéo...', 'info');
   try {
-    let videoUrl = '';
-    let tracks = [];
+    const params = new URLSearchParams({
+      animeName,
+      animeUrl,
+      episodeUrl: url,
+      episodeNumber: epNum,
+      version,
+      source
+    });
+    if (server && server !== 'auto') params.set('server', server);
+    if (quality && quality !== 'auto') params.set('quality', quality);
 
-    const statusResp = await fetch('/api/download/status');
-    const tasks = await statusResp.json();
-    const localTask = tasks.find(task =>
-      (task.animeName || '').toLowerCase() === animeName.toLowerCase() &&
-      String(task.episodeNumber) === String(epNum) &&
-      task.status === 'COMPLETED'
-    );
+    const resp = await fetch(`/api/media/stream/resolve?${params.toString()}`);
+    const data = await resp.json();
 
-    if (localTask) {
-      videoUrl = '/api/media/stream/' + localTask.id;
-      const subsResp = await fetch('/api/media/subtitles/' + localTask.id);
-      const subs = await subsResp.json();
-      tracks = subs.map(sub => ({ kind: 'captions', label: sub.label, srclang: sub.srclang, src: sub.src, default: sub.srclang === 'fr' }));
-    } else if (source === 'voir-anime') {
-      const resp = await fetch('/api/voiranime/download-info?episodeUrl=' + encodeURIComponent(url));
-      const info = await resp.json();
-      videoUrl = info.videoUrl || '';
-      if (info.subtitleUrl) tracks.push({ kind: 'captions', label: 'Français', srclang: 'fr', src: info.subtitleUrl, default: true });
-    } else {
-      const resp = await fetch('/api/episode/size?url=' + encodeURIComponent(url));
-      const info = await resp.json();
-      videoUrl = info.directUrl || '';
-      if (info.subtitleUrl) tracks.push({ kind: 'captions', label: 'Français', srclang: 'fr', src: info.subtitleUrl, default: true });
-    }
-
-    if (!videoUrl) {
-      showToast('Flux vidéo introuvable', 'error');
+    if (!resp.ok || !data.success) {
+      showToast(data.error || 'Flux vidéo introuvable', 'error');
       return;
     }
 
+    const videoUrl = data.streamUrl;
+    const tracks = data.subtitles || [];
+    const isDownloaded = Boolean(data.isDownloaded);
+
+    // Mettre à jour visuellement la ligne et le bouton
+    if (row && isDownloaded) {
+      row.classList.add('ep-downloaded');
+      row.dataset.downloaded = 'true';
+      btn.classList.add('btn-play-local');
+      btn.classList.remove('btn-play-stream');
+      btn.title = 'Lecture locale (Disque dur)';
+    }
+
+    if (isDownloaded) {
+      showToast('Lecture locale depuis le disque dur', 'success');
+    } else {
+      const srvLabel = data.serverType && data.serverType !== 'unknown' ? data.serverType : 'En ligne';
+      showToast(`Streaming direct depuis ${srvLabel}...`, 'info');
+    }
+
+    const sourceMeta = {
+      isDownloaded,
+      sourceType: data.sourceType,
+      serverType: data.serverType,
+      selectedQuality: data.selectedQuality,
+      qualities: data.qualities,
+      filePath: data.filePath
+    };
+
     const cinemaModal = document.getElementById('cinema-modal');
     if (cinemaModal) {
-      openCinemaModal(videoUrl, `${animeName} - Épisode ${epNum}`, tracks, epNum);
+      openCinemaModal(videoUrl, `${animeName} - Épisode ${epNum}`, tracks, epNum, sourceMeta);
     } else {
       const playerSection = document.getElementById('player-section');
       const video = document.getElementById('plyr-player');
@@ -695,9 +759,9 @@ async function playEpisode(btn) {
           } else {
             plyrInstance.source = { type: 'video', sources: [{ src: videoUrl, type: 'video/mp4' }], tracks };
           }
-          plyrInstance.play();
+          plyrInstance.play().catch(() => {});
         } else {
-          video.play();
+          video.play().catch(() => {});
         }
       }
     }
@@ -708,7 +772,6 @@ async function playEpisode(btn) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ animeUrl, animeName, episodeNumber: String(epNum), version })
       });
-      const row = btn.closest('.episode-item');
       row?.classList.add('ep-watched');
     }
   } catch (error) {
@@ -716,16 +779,34 @@ async function playEpisode(btn) {
   }
 }
 
-function openCinemaModal(videoUrl, title, tracks = [], epNum = null) {
+function openCinemaModal(videoUrl, title, tracks = [], epNum = null, sourceMeta = null) {
   const modal = document.getElementById('cinema-modal');
   const video = document.getElementById('cinema-player');
   const titleEl = document.getElementById('cinema-title');
   const infoEl = document.getElementById('cinema-ep-info');
+  const badgeEl = document.getElementById('cinema-source-badge');
   if (!modal || !video) return;
 
   if (titleEl && title) titleEl.textContent = title;
   if (infoEl && epNum) infoEl.textContent = `Épisode ${epNum}`;
   currentPlayingEpNum = epNum;
+
+  // Mise à jour du badge de source
+  if (badgeEl) {
+    if (sourceMeta && sourceMeta.isDownloaded) {
+      badgeEl.className = 'cinema-badge badge-local';
+      badgeEl.innerHTML = '<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> Disque dur (Local)';
+      badgeEl.style.display = 'inline-flex';
+    } else if (sourceMeta && !sourceMeta.isDownloaded) {
+      badgeEl.className = 'cinema-badge badge-remote';
+      const srv = (sourceMeta.serverType && sourceMeta.serverType !== 'unknown') ? sourceMeta.serverType : 'En ligne';
+      const q = sourceMeta.selectedQuality && sourceMeta.selectedQuality !== 'auto' ? ` • ${sourceMeta.selectedQuality}` : '';
+      badgeEl.innerHTML = `<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;"><path d="M5 3l14 9-14 9V3z"/></svg> Streaming (${srv}${q})`;
+      badgeEl.style.display = 'inline-flex';
+    } else {
+      badgeEl.style.display = 'none';
+    }
+  }
 
   modal.classList.add('open');
 
@@ -737,9 +818,28 @@ function openCinemaModal(videoUrl, title, tracks = [], epNum = null) {
   const isHls = videoUrl.includes('.m3u8');
   if (isHls && window.Hls && Hls.isSupported()) {
     video.innerHTML = '';
-    cinemaHlsInstance = new Hls();
+    cinemaHlsInstance = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+    });
     cinemaHlsInstance.loadSource(videoUrl);
     cinemaHlsInstance.attachMedia(video);
+    cinemaHlsInstance.on(Hls.Events.ERROR, function(event, data) {
+      if (data.fatal) {
+        console.warn("HLS fatal error, trying recover:", data);
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            cinemaHlsInstance.startLoad();
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            cinemaHlsInstance.recoverMediaError();
+            break;
+          default:
+            cinemaHlsInstance.destroy();
+            break;
+        }
+      }
+    });
   } else {
     video.innerHTML = `<source src="${videoUrl}" type="${isHls ? 'application/x-mpegURL' : 'video/mp4'}"/>`;
   }
@@ -766,9 +866,9 @@ function openCinemaModal(videoUrl, title, tracks = [], epNum = null) {
         cinemaPlyrInstance.source = { type: 'video', sources: [{ src: videoUrl, type: 'video/mp4' }], tracks };
       }
     }
-    cinemaPlyrInstance.play();
+    cinemaPlyrInstance.play().catch(() => {});
   } else {
-    video.play();
+    video.play().catch(() => {});
   }
 }
 
@@ -1639,7 +1739,7 @@ async function playDownloadedTask(taskId, animeName, episodeNumber) {
     const title = animeName ? `${animeName}${epDisplay}` : 'Lecture vidéo';
     const cinemaModal = document.getElementById('cinema-modal');
     if (cinemaModal) {
-      openCinemaModal(videoUrl, title, tracks, episodeNumber);
+      openCinemaModal(videoUrl, title, tracks, episodeNumber, { isDownloaded: true, serverType: 'Disque dur (Local)' });
     } else {
       const playerSection = document.getElementById('player-section');
       const video = document.getElementById('plyr-player');
