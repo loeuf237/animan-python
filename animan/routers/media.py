@@ -8,6 +8,8 @@ from fastapi import APIRouter, Request, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse, FileResponse
 
 import httpx
+from animan.config import settings
+from animan.security import is_safe_url, is_safe_path
 from animan.services.download_manager import download_manager
 from animan.services.proxy_service import proxy_service
 
@@ -15,11 +17,17 @@ logger = logging.getLogger("animan.router.media")
 router = APIRouter()
 
 IMAGE_CACHE: Dict[str, tuple[bytes, str]] = {}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 Mo max pour prévenir les attaques OOM
 
 @router.get("/api/media/image-proxy")
 async def proxy_image(url: str):
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL d'image invalide")
+
+    # Protection SSRF
+    if not is_safe_url(url):
+        logger.warning("SSRF bloqué sur image-proxy pour l'URL: %s", url)
+        raise HTTPException(status_code=400, detail="URL d'image non autorisée ou non sécurisée")
 
     if url in IMAGE_CACHE:
         content, ctype = IMAGE_CACHE[url]
@@ -32,19 +40,31 @@ async def proxy_image(url: str):
             "Referer": referer,
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
         }
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=False) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="Image inaccessible")
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+            async with client.stream("GET", url, headers=headers) as resp:
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail="Image inaccessible")
 
-            content = resp.content
-            ctype = resp.headers.get("content-type", "image/jpeg")
+                ctype = resp.headers.get("content-type", "image/jpeg")
+                if not (ctype.startswith("image/") or ctype == "application/octet-stream"):
+                    raise HTTPException(status_code=400, detail="Le contenu distant n'est pas une image valide")
 
-            if len(IMAGE_CACHE) > 500:
-                IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
-            IMAGE_CACHE[url] = (content, ctype)
+                clength = resp.headers.get("content-length")
+                if clength and int(clength) > MAX_IMAGE_SIZE:
+                    raise HTTPException(status_code=413, detail="Image trop volumineuse (max 10 Mo)")
 
-            return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+                content = bytearray()
+                async for chunk in resp.aiter_bytes(65536):
+                    content.extend(chunk)
+                    if len(content) > MAX_IMAGE_SIZE:
+                        raise HTTPException(status_code=413, detail="Image trop volumineuse (max 10 Mo)")
+
+                final_bytes = bytes(content)
+                if len(IMAGE_CACHE) > 100:
+                    IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
+                IMAGE_CACHE[url] = (final_bytes, ctype)
+
+                return Response(content=final_bytes, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
     except HTTPException:
         raise
     except Exception as e:
@@ -68,6 +88,11 @@ async def stream_video(task_id: str, request: Request, range: Optional[str] = He
         raise HTTPException(status_code=404, detail="Vidéo introuvable")
 
     file_path = Path(task.savePath)
+    # Protection Path Traversal
+    if not is_safe_path(file_path):
+        logger.warning("Path Traversal bloqué sur streaming: %s", file_path)
+        raise HTTPException(status_code=403, detail="Accès refusé : fichier hors du répertoire autorisé")
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Fichier vidéo introuvable sur le disque")
 
@@ -169,6 +194,10 @@ async def stream_subtitle_at_index(task_id: str, index: int):
         raise HTTPException(status_code=404, detail="Index de sous-titre invalide")
 
     file_path = Path(paths[index])
+    if not is_safe_path(file_path):
+        logger.warning("Path Traversal bloqué sur sous-titres: %s", file_path)
+        raise HTTPException(status_code=403, detail="Accès refusé : fichier de sous-titres hors du répertoire autorisé")
+
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Fichier de sous-titres introuvable")
 

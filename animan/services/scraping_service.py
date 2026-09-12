@@ -12,6 +12,7 @@ from animan.config import settings
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
 from animan.services.proxy_service import proxy_service
 from animan.services.unpacking import try_unpack
+from animan.security import is_safe_url
 
 logger = logging.getLogger("animan.scraping")
 
@@ -39,7 +40,7 @@ class ScrapingService:
             proxy=proxy,
             timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
             follow_redirects=follow_redirects,
-            verify=False,
+            verify=settings.SSL_VERIFY,
         )
 
     def _get_async_client(self, follow_redirects: bool = True) -> httpx.AsyncClient:
@@ -55,7 +56,7 @@ class ScrapingService:
             proxy=proxy,
             timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
             follow_redirects=follow_redirects,
-            verify=False,
+            verify=settings.SSL_VERIFY,
         )
 
     # -------------------------------------------------------------------------
@@ -241,6 +242,9 @@ class ScrapingService:
     # -------------------------------------------------------------------------
 
     async def get_anime_detail(self, anime_url: str) -> Optional[AnimeDetail]:
+        if not is_safe_url(anime_url):
+            logger.warning("[french-manga] SSRF bloqué pour l'URL: %s", anime_url)
+            return None
         logger.info("Chargement détails anime: %s", anime_url)
         try:
             async with self._get_async_client() as client:
@@ -560,7 +564,7 @@ class ScrapingService:
                 "Referer": self.base_url + "/",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             }
-            with httpx.Client(headers=headers, timeout=5.0, follow_redirects=True, verify=False) as sub_client:
+            with httpx.Client(headers=headers, timeout=5.0, follow_redirects=True, verify=settings.SSL_VERIFY) as sub_client:
                 embed_resp = sub_client.get(embed_url)
                 if embed_resp.status_code == 200:
                     search_source = try_unpack(embed_resp.text)

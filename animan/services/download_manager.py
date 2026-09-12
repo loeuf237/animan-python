@@ -22,6 +22,7 @@ from animan.services.proxy_service import proxy_service
 from animan.services.scraping_service import scraping_service
 from animan.services.voiranime_service import voiranime_service
 from animan.services.verification_service import verification_service, VerificationResult
+from animan.security import is_safe_path
 
 logger = logging.getLogger("animan.download_manager")
 
@@ -162,7 +163,7 @@ class DownloadManagerService:
                 "Referer": "https://vidzy.live/",
             }
             proxy = proxy_service.get_random_proxy()
-            async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=10.0, follow_redirects=True, verify=False) as client:
+            async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=10.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
                 resp = await client.head(url)
                 cl = resp.headers.get("Content-Length")
                 if cl and cl.isdigit() and int(cl) > 0:
@@ -289,6 +290,9 @@ class DownloadManagerService:
         else:
             anime_dir = Path(self.download_dir) / clean_anime
             final_file_name = self.sanitize_file_name(file_name)
+
+        if not is_safe_path(anime_dir, [self.download_dir]):
+            anime_dir = Path(self.download_dir) / "Downloads"
 
         anime_dir.mkdir(parents=True, exist_ok=True)
         save_path = str(anime_dir / final_file_name)
@@ -1040,7 +1044,7 @@ class DownloadManagerService:
         proxy = proxy_service.get_random_proxy()
 
         timeout = httpx.Timeout(connect=settings.CONNECTION_TIMEOUT, read=120.0, write=30.0, pool=None)
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=timeout, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
             req_headers = dict(headers)
             is_resume = existing_len > 0
             if is_resume:
@@ -1258,7 +1262,7 @@ class DownloadManagerService:
         headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://vidzy.live/"}
         proxy = proxy_service.get_random_proxy()
 
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
             for idx, curl in enumerate(chunks):
                 if task.cancelled:
                     task.status = DownloadStatus.CANCELLED
@@ -1436,7 +1440,7 @@ class DownloadManagerService:
         }
         proxy = proxy_service.get_random_proxy()
 
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
             resp = await client.get(m3u8_url)
             if resp.status_code != 200:
                 raise ConnectionError(f"HTTP {resp.status_code} sur playlist m3u8")
@@ -1611,7 +1615,7 @@ class DownloadManagerService:
         headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://vidzy.live/"}
         proxy = proxy_service.get_random_proxy()
 
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=15.0, follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=15.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
             for sub in subs:
                 url = sub.get("url", "")
                 label = sub.get("label", "Sous-titres")
@@ -1791,8 +1795,10 @@ class DownloadManagerService:
     def sanitize_file_name(self, name: str) -> str:
         if not name:
             return "download"
-        clean = re.sub(r'[<>:"/\\|?*]', "_", name)
-        clean = re.sub(r"\s+", " ", clean).strip()
+        clean = name.replace("\0", "")
+        clean = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", clean)
+        clean = re.sub(r"\.{2,}", "_", clean)
+        clean = re.sub(r"\s+", " ", clean).strip(" .")
         return clean or "download"
 
     def _needs_scraping_resolution(self, url: str) -> bool:

@@ -972,9 +972,10 @@ function renderTaskRowInner(task, queueIndex = 1) {
   }
 
   const limitKb = task.maxSpeedLimit > 0 ? Math.round(task.maxSpeedLimit / 1024) : 0;
+  const safeId = escapeHtml(task.id);
   const limitHtml = limitKb > 0
-    ? `<span class="dl-speed-limit-badge">Max: ${limitKb} KB/s <button class="speed-limit-btn" onclick="changeTaskSpeedLimit('${task.id}')">Modifier</button></span>`
-    : `<button class="speed-limit-btn" onclick="changeTaskSpeedLimit('${task.id}')">Limiter</button>`;
+    ? `<span class="dl-speed-limit-badge">Max: ${limitKb} KB/s <button class="speed-limit-btn" onclick="changeTaskSpeedLimit('${safeId}')">Modifier</button></span>`
+    : `<button class="speed-limit-btn" onclick="changeTaskSpeedLimit('${safeId}')">Limiter</button>`;
 
   return `
     <div class="dl-main">
@@ -1375,7 +1376,7 @@ function showToast(message, type = 'info') {
   if (!container) return;
   const toast = document.createElement('div');
   toast.className = 'toast ' + type;
-  toast.innerHTML = message;
+  toast.textContent = message;
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
 }

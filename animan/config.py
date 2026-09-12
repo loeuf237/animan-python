@@ -8,7 +8,8 @@ DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
 
 class Settings:
     PORT: int = int(os.getenv("ANIMAN_PORT", "8080"))
-    HOST: str = os.getenv("ANIMAN_HOST", "0.0.0.0")
+    HOST: str = os.getenv("ANIMAN_HOST", "127.0.0.1")
+    SSL_VERIFY: bool = os.getenv("ANIMAN_SSL_VERIFY", "true").lower() in ("1", "true", "yes")
 
     # Sources anime
     BASE_URL: str = os.getenv("ANIMAN_BASE_URL", "https://w16.french-manga.net")

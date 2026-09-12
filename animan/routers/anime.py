@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse
 from animan.config import settings
 from animan.models.anime import AnimeResult
+from animan.security import is_safe_url
 from animan.services.library_service import library_service
 from animan.services.scraping_service import scraping_service
 from animan.services.voiranime_service import voiranime_service
@@ -81,6 +82,21 @@ async def anime_detail(
     source: str = Query("french-manga", alias="source")
 ):
     logger.info("Détail anime [%s]: %s", source, url)
+    if not is_safe_url(url):
+        logger.warning("SSRF bloqué sur détail anime: %s", url)
+        favorites = library_service.get_all_favorites()
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "error": "URL d'animé invalide ou non sécurisée.",
+                "favorites": favorites,
+                "results": None,
+                "latestFrenchManga": [],
+                "latestVoirAnime": [],
+            }
+        )
+
     if source == "voir-anime":
         detail = await voiranime_service.get_anime_detail(url)
     else:

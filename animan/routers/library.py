@@ -12,6 +12,7 @@ from animan.services.download_manager import download_manager
 from animan.services.library_service import library_service
 from animan.services.voiranime_service import voiranime_service
 from animan.services.watchdog_service import watchdog_service
+from animan.security import anonymize_path, is_safe_url
 
 logger = logging.getLogger("animan.router.library")
 router = APIRouter()
@@ -44,6 +45,19 @@ async def history_page(request: Request):
 
 @router.get("/voiranime", response_class=HTMLResponse)
 async def voiranime_detail_page(request: Request, url: str = Query(...)):
+    if not is_safe_url(url):
+        logger.warning("[voiranime] SSRF bloqué pour l'URL: %s", url)
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "error": "URL d'animé invalide ou non sécurisée",
+                "favorites": library_service.get_all_favorites(),
+                "results": None,
+                "latestFrenchManga": [],
+                "latestVoirAnime": [],
+            }
+        )
     logger.info("Détail voir-anime page: %s", url)
     detail = await voiranime_service.get_anime_detail(url)
     if not detail:
@@ -217,7 +231,7 @@ async def get_system_storage():
             "usedBytes": used,
             "freeBytes": free,
             "usedPercent": percent,
-            "downloadDir": str(download_dir)
+            "downloadDir": anonymize_path(str(download_dir))
         }
     except Exception as e:
         logger.error("Error reading disk usage: %s", e)
@@ -226,7 +240,7 @@ async def get_system_storage():
             "usedBytes": 300 * (1024**3),
             "freeBytes": 700 * (1024**3),
             "usedPercent": 30.0,
-            "downloadDir": str(download_dir)
+            "downloadDir": anonymize_path(str(download_dir))
         }
 
 @router.post("/api/watchdog/check")

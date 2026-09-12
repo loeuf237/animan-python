@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from animan.config import settings
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
 from animan.services.proxy_service import proxy_service
+from animan.security import is_safe_url
 
 logger = logging.getLogger("animan.voiranime")
 
@@ -39,7 +40,7 @@ class VoirAnimeScrapingService:
             proxy=proxy,
             timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
             follow_redirects=follow_redirects,
-            verify=False,
+            verify=settings.SSL_VERIFY,
         )
 
     def _get_async_client(self, follow_redirects: bool = True, referer: Optional[str] = None) -> httpx.AsyncClient:
@@ -50,7 +51,7 @@ class VoirAnimeScrapingService:
             proxy=proxy,
             timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
             follow_redirects=follow_redirects,
-            verify=False,
+            verify=settings.SSL_VERIFY,
         )
 
     async def get_latest_releases(self) -> List[AnimeResult]:
@@ -158,7 +159,7 @@ class VoirAnimeScrapingService:
             headers=headers,
             timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
             follow_redirects=True,
-            verify=False
+            verify=settings.SSL_VERIFY
         ) as client:
             async def fetch_asp(asid: int) -> str:
                 try:
@@ -350,6 +351,9 @@ class VoirAnimeScrapingService:
         return results
 
     async def get_anime_detail(self, anime_url: str) -> Optional[AnimeDetail]:
+        if not is_safe_url(anime_url):
+            logger.warning("[voir-anime] SSRF bloqué pour l'URL: %s", anime_url)
+            return None
         logger.info("[voir-anime] Détail anime: %s", anime_url)
         try:
             async with self._get_async_client() as client:
@@ -467,6 +471,9 @@ class VoirAnimeScrapingService:
 
     def get_episode_servers(self, episode_url: str) -> Dict[str, Any]:
         """Retourne rapidement la liste des serveurs disponibles pour un épisode sans résoudre les flux vidéo."""
+        if not is_safe_url(episode_url):
+            logger.warning("[voir-anime] SSRF bloqué pour l'URL épisode: %s", episode_url)
+            return {"servers": ["myTV"], "defaultServer": self.default_server}
         try:
             with self._get_client(follow_redirects=True, referer=self.base_url) as client:
                 resp = client.get(episode_url)
@@ -541,6 +548,15 @@ class VoirAnimeScrapingService:
         preferred_server: Optional[str] = None,
         preferred_quality: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if not is_safe_url(episode_url):
+            logger.warning("[voir-anime] SSRF bloqué pour l'URL épisode dans extract_download_info: %s", episode_url)
+            return {
+                "directUrl": "",
+                "subtitleUrl": "",
+                "formattedSize": "Taille inconnue",
+                "size": -1,
+                "serverType": "unknown",
+            }
         logger.info("[voir-anime] extract_download_info: %s (pref_server=%s, pref_quality=%s)",
                     episode_url, preferred_server, preferred_quality)
         result = {

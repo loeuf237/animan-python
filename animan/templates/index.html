@@ -6,6 +6,11 @@
 {{ nav.navbar() }}
 
 <main class="main-content">
+  {% if error %}
+  <div class="alert alert-danger" style="margin-bottom: 20px; padding: 14px 18px; border-radius: var(--radius); background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;">
+    {{ error }}
+  </div>
+  {% endif %}
   <section class="hero fade-in" id="search-panel">
     <div class="hero-panel">
       <h1 class="hero-title">Votre centre de téléchargement anime</h1>
