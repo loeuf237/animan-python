@@ -1,0 +1,251 @@
+{% import 'fragments/navbar.html' as nav %}
+<!DOCTYPE html>
+<html lang="fr">
+{{ nav.head('Accueil') }}
+<body>
+{{ nav.navbar() }}
+
+<main class="main-content">
+  <section class="hero fade-in" id="search-panel">
+    <div class="hero-panel">
+      <h1 class="hero-title">Votre centre de téléchargement anime</h1>
+      <p class="hero-subtitle">Recherchez, organisez, regardez et téléchargez vos épisodes depuis une seule interface fluide et intuitive.</p>
+
+      <form class="search-form" action="/search" method="get" id="hero-search-form">
+        <div class="search-input-wrap">
+          <input type="text" name="q" id="search-input" class="search-input"
+                 placeholder="Rechercher un anime... (ex: Naruto, Solo Leveling)" autocomplete="off" spellcheck="false"
+                 value="{{ query or '' }}"/>
+          <svg class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <div class="search-autocomplete-dropdown" id="hero-search-dropdown"></div>
+        </div>
+
+        <div class="source-tabs" role="radiogroup" aria-label="Source d'anime">
+          <label class="source-tab">
+            <input type="radio" name="source" value="french-manga"
+                   {% if not source or source == 'french-manga' %}checked{% endif %}/>
+            <span>french-manga.net</span>
+          </label>
+          <label class="source-tab">
+            <input type="radio" name="source" value="voir-anime"
+                   {% if source == 'voir-anime' %}checked{% endif %}/>
+            <span>voir-anime.to</span>
+          </label>
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:center;">
+          <button type="submit" class="btn btn-primary" style="flex:1;">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            Rechercher
+          </button>
+          <span class="kbd-badge" title="Raccourci clavier de recherche rapide" style="display:none;sm:inline-flex;">Ctrl + K</span>
+        </div>
+      </form>
+    </div>
+
+    <aside class="quick-panel">
+      <div class="quick-row">
+        <span>Favoris suivis</span>
+        <strong>{{ favorites|length if favorites else 0 }}</strong>
+      </div>
+      <div class="quick-row">
+        <span>Sources actives</span>
+        <strong style="color:var(--green);">2 / 2 (Opérationnelles)</strong>
+      </div>
+      <div class="quick-row">
+        <span>Téléchargements</span>
+        <a href="/downloads" class="btn btn-sm">Ouvrir le gestionnaire</a>
+      </div>
+    </aside>
+  </section>
+
+  {% if favorites and favorites|length > 0 %}
+  <section class="section fade-in">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <h2 class="section-title" style="margin:0;">
+        <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+        Bibliothèque rapide
+      </h2>
+      <a href="/library" class="btn btn-sm" style="color:var(--accent);">Tout afficher</a>
+    </div>
+    <div class="results-grid">
+      {% for fav in favorites %}
+      <article class="anime-card">
+        <a href="/anime?url={{ fav.url }}&source={{ fav.source or 'french-manga' }}" class="card-link">
+          <div class="card-poster">
+            {% if fav.imageUrl %}
+            <img src="{{ fav.imageUrl | proxy_img }}" alt="{{ fav.title }}" loading="lazy"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+            {% endif %}
+            <div class="card-poster-placeholder" style="{% if fav.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+            <div class="card-overlay">
+              <span class="fav-badge">Favori</span>
+              {% if fav.autoDownload %}
+              <span class="chip chip-auto">Auto-DL</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="card-info">
+            <h3 class="card-title">{{ fav.title }}</h3>
+            <span class="card-sub">{{ fav.source or 'french-manga' }}</span>
+          </div>
+        </a>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if results is none %}
+  <section class="section fade-in">
+    <div class="releases-tabs-header">
+      <h2 class="section-title">
+        <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+        Dernières sorties
+      </h2>
+      <div class="release-tabs">
+        <button class="tab-btn active" type="button" onclick="switchReleaseTab('french-manga', this)">french-manga.net</button>
+        <button class="tab-btn" type="button" onclick="switchReleaseTab('voir-anime', this)">voir-anime.to</button>
+      </div>
+    </div>
+
+    <div id="latest-french-manga" class="releases-content active">
+      {% if latestFrenchManga and latestFrenchManga|length > 0 %}
+      <div class="results-grid">
+        {% for anime in latestFrenchManga %}
+        <article class="anime-card">
+          <a href="/anime?url={{ anime.url }}&amp;source=french-manga" class="card-link">
+            <div class="card-poster">
+              {% if anime.imageUrl %}
+              <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
+                   onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+              {% endif %}
+              <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+              <div class="card-overlay">
+                {% if anime.version %}
+                <span class="version-badge">{{ anime.version }}</span>
+                {% endif %}
+                {% if anime.episodeInfo %}
+                <span class="ep-badge">{{ anime.episodeInfo }}</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="card-info">
+              <h3 class="card-title">{{ anime.title }}</h3>
+              <span class="card-type">{{ anime.type or 'Anime' }}</span>
+            </div>
+          </a>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <h3>Flux en cours de chargement</h3>
+        <p>Rechargez la page dans quelques instants.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <div id="latest-voir-anime" class="releases-content">
+      {% if latestVoirAnime and latestVoirAnime|length > 0 %}
+      <div class="results-grid">
+        {% for anime in latestVoirAnime %}
+        <article class="anime-card">
+          <a href="/anime?url={{ anime.url }}&amp;source=voir-anime" class="card-link">
+            <div class="card-poster">
+              {% if anime.imageUrl %}
+              <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
+                   onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+              {% endif %}
+              <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+              <div class="card-overlay">
+                {% if anime.version %}
+                <span class="version-badge">{{ anime.version }}</span>
+                {% endif %}
+                {% if anime.episodeInfo %}
+                <span class="ep-badge">{{ anime.episodeInfo }}</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="card-info">
+              <h3 class="card-title">{{ anime.title }}</h3>
+              <span class="card-type">{{ anime.type or 'Anime' }}</span>
+            </div>
+          </a>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">
+        <h3>Flux en cours de chargement</h3>
+        <p>Le chargement peut prendre un instant.</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+  {% else %}
+  <section class="section fade-in">
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">{{ results|length }} résultat(s)</h2>
+        <p class="page-sub">Recherche pour "<span>{{ query }}</span>"</p>
+      </div>
+      <a href="/" class="btn">Effacer</a>
+    </div>
+
+    {% if not results or results|length == 0 %}
+    <div class="empty-state">
+      <h3>Aucun résultat trouvé</h3>
+      <p>Essayez l'autre source ou une recherche plus générale.</p>
+    </div>
+    {% else %}
+    <div class="results-grid">
+      {% for anime in results %}
+      <article class="anime-card">
+        <a href="/anime?url={{ anime.url }}&amp;source={{ source or 'french-manga' }}" class="card-link">
+          <div class="card-poster">
+            {% if anime.imageUrl %}
+            <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+            {% endif %}
+            <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+            <div class="card-overlay">
+              {% if anime.version %}
+              <span class="version-badge">{{ anime.version }}</span>
+              {% endif %}
+              {% if anime.episodeInfo %}
+              <span class="ep-badge">{{ anime.episodeInfo }}</span>
+              {% endif %}
+            </div>
+          </div>
+          <div class="card-info">
+            <h3 class="card-title">{{ anime.title }}</h3>
+            <span class="card-type">{{ anime.type or 'Anime' }}</span>
+          </div>
+        </a>
+      </article>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+</main>
+
+<div class="toast-container" id="toast-container"></div>
+<script src="/js/app.js"></script>
+<script>
+function switchReleaseTab(source, btn) {
+  document.querySelectorAll('.release-tabs .tab-btn').forEach(item => item.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.releases-content').forEach(item => item.classList.remove('active'));
+  document.getElementById(source === 'french-manga' ? 'latest-french-manga' : 'latest-voir-anime')?.classList.add('active');
+
+  const radio = document.querySelector(`input[name="source"][value="${source}"]`);
+  if (radio && !radio.checked) {
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change'));
+  }
+}
+</script>
+</body>
+</html>

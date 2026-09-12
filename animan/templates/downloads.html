@@ -1,0 +1,396 @@
+{% import 'fragments/navbar.html' as nav %}
+<!DOCTYPE html>
+<html lang="fr">
+{{ nav.head('Téléchargements') }}
+<body>
+{{ nav.navbar() }}
+
+<main class="main-content">
+  <style>
+    .queue-row { cursor: grab; }
+    .queue-row:active { cursor: grabbing; }
+    .queue-row.dragging { opacity: 0.4; border: 1px dashed var(--accent); }
+    .badge-warn { background-color: rgba(255, 165, 0, 0.2); color: #ffa500; }
+    .dl-speed-limit-badge {
+      font-size: 0.75rem;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--muted);
+      margin-top: 0.25rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      width: fit-content;
+    }
+    .speed-limit-btn {
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--blue);
+      font-size: 0.75rem;
+      padding: 0;
+      text-decoration: underline;
+    }
+    .speed-limit-btn:hover { color: var(--accent); }
+    .dl-scheduled-info {
+      font-size: 0.8rem;
+      color: #ff9f43;
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+  </style>
+
+  <section class="dashboard-header fade-in">
+    <div>
+      <h1 class="page-title">Gestionnaire de téléchargements</h1>
+      <p class="page-sub">Gérez votre file d'attente, vos priorités et vos téléchargements actifs en temps réel.</p>
+    </div>
+
+    <div class="stats-grid" id="download-stats">
+      <div class="stat-card">
+        <strong id="stat-active">0</strong>
+        <span>Téléchargements en cours</span>
+      </div>
+      <div class="stat-card stat-blue">
+        <strong id="stat-queued">0</strong>
+        <span>En file d'attente</span>
+      </div>
+      <div class="stat-card stat-green">
+        <strong id="stat-speed">0 B/s</strong>
+        <span>Vitesse actuelle</span>
+        <i class="mini-spark"></i>
+      </div>
+    </div>
+  </section>
+
+  <section class="download-toolbar fade-in">
+    <div class="download-tabs">
+      <button class="tab-btn active" type="button" data-download-filter="queue" onclick="filterDownloadView(this)">File d'attente <span class="tab-badge" id="tab-badge-queue">0</span></button>
+      <button class="tab-btn" type="button" data-download-filter="done" onclick="filterDownloadView(this)">Terminés <span class="tab-badge" id="tab-badge-done">0</span></button>
+      <button class="tab-btn" type="button" data-download-filter="all" onclick="filterDownloadView(this)">Tous <span class="tab-badge" id="tab-badge-all">0</span></button>
+    </div>
+    <div class="download-actions">
+      <button class="btn" id="pause-all-btn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
+        Tout mettre en pause
+      </button>
+      <button class="btn btn-success" id="resume-all-btn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8Z"/></svg>
+        Tout reprendre
+      </button>
+      <button class="btn btn-danger-outline" id="cancel-all-btn" type="button" title="Annuler tous les téléchargements en cours et en attente">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+        Tout annuler
+      </button>
+      <button class="btn" id="toggle-settings-btn" type="button">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.8-1L14.4 3H9.6L9.2 6.1a7 7 0 0 0-1.8 1L5 6.1l-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.8 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></svg>
+        Paramètres
+      </button>
+      <button class="btn btn-danger" id="clean-btn" type="button">
+        <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
+        Nettoyer inactifs
+      </button>
+    </div>
+  </section>
+
+  <section class="settings-card fade-in" id="settings-panel">
+    <div class="settings-grid">
+      <div class="settings-group">
+        <label for="max-concurrent-input">DL simultanés</label>
+        <input type="number" id="max-concurrent-input" class="input-premium" min="1" max="20" value="3"/>
+      </div>
+      <div class="settings-group">
+        <label for="global-speed-input-settings">Vitesse max (KB/s)</label>
+        <input type="number" id="global-speed-input-settings" class="input-premium" placeholder="Illimitée" min="0"/>
+        <div class="speed-preset-chips">
+          <span class="speed-preset-chip" onclick="setSpeedLimitPreset(0)">Illimité</span>
+          <span class="speed-preset-chip" onclick="setSpeedLimitPreset(1024)">1 Mo/s</span>
+          <span class="speed-preset-chip" onclick="setSpeedLimitPreset(3072)">3 Mo/s</span>
+          <span class="speed-preset-chip" onclick="setSpeedLimitPreset(5120)">5 Mo/s</span>
+          <span class="speed-preset-chip" onclick="setSpeedLimitPreset(10240)">10 Mo/s</span>
+        </div>
+      </div>
+      <div class="settings-group">
+        <label for="user-agent-select">User-Agent</label>
+        <select id="user-agent-select" class="input-premium">
+          <option value="Random (Rotator)">Aléatoire (Rotator)</option>
+          <option value="Chrome">Google Chrome (Windows)</option>
+          <option value="Firefox">Mozilla Firefox (Windows)</option>
+          <option value="Safari">Apple Safari (macOS)</option>
+          <option value="Edge">Microsoft Edge (Windows)</option>
+          <option value="Custom">Saisie personnalisée</option>
+        </select>
+      </div>
+      <div class="settings-group" id="custom-ua-group" style="display:none">
+        <label for="custom-ua-input">User-Agent personnalisé</label>
+        <input type="text" id="custom-ua-input" class="input-premium" placeholder="Mozilla/5.0..."/>
+      </div>
+      <div class="settings-group">
+        <label class="auto-dl-label" for="plex-org-cb">
+          <input type="checkbox" id="plex-org-cb"/>
+          Organisation Plex/Jellyfin
+        </label>
+      </div>
+      <div class="settings-group">
+        <label for="voiranime-server-select">Serveur par défaut (VoirAnime)</label>
+        <select id="voiranime-server-select" class="input-premium">
+          <option value="auto">Automatique (Priorité recommandée)</option>
+          <option value="myTV">myTV (Multi-qualités HLS)</option>
+          <option value="stape">Streamtape (Direct MP4)</option>
+          <option value="voe">VOE (Lecteur rapide)</option>
+          <option value="fhd1">FHD1 (Mail.ru)</option>
+          <option value="moon">MOON (Byse)</option>
+        </select>
+      </div>
+      <div class="settings-group">
+        <label>Statut de FFmpeg</label>
+        <span id="ffmpeg-status-badge" class="status-badge" style="width: fit-content; margin-top: 0.5rem; display: inline-block;">Détection...</span>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="save-settings-btn" type="button">Enregistrer</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="fade-in" data-download-group="queue">
+    <h2 class="download-section-title">
+      <span class="section-marker"></span>
+      Téléchargements en cours
+    </h2>
+    <div id="download-list" class="dl-list">
+      {% for task in tasks %}
+      {% if task.status.value in ['DOWNLOADING', 'RETRYING', 'PAUSED', 'MUXING'] %}
+      <div id="task-{{ task.id }}"
+           class="dl-task-row"
+           data-id="{{ task.id }}"
+           data-category="active"
+           data-status="{{ task.status.value }}">
+        <div class="dl-main">
+          <div class="dl-cover">{{ task.animeName[:1] }}</div>
+          <div>
+            <span class="dl-task-name">{{ task.animeName }}</span>
+            <span class="dl-subtitle">Épisode {{ task.episodeNumber }} - {{ task.fileName }}</span>
+          </div>
+        </div>
+        <div class="dl-progress-wrap">
+          <div class="dl-progress-bar">
+            <div class="dl-progress-fill" style="width:{{ task.progress }}%"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="dl-size">{{ task.formattedDownloadedSize }} / {{ task.formattedTotalSize }}</span>
+            <span class="dl-eta" id="eta-{{ task.id }}"></span>
+          </div>
+        </div>
+        <span class="dl-progress-text">{{ "%.1f"|format(task.progress) }}%</span>
+        <div class="dl-speed-col">
+          <span class="dl-speed">{{ task.formattedSpeed }}</span>
+          <span class="dl-error">{{ task.error or '' }}</span>
+          <div class="dl-speed-limit-container" style="margin-top: 0.25rem;">
+            {% if task.maxSpeedLimit > 0 %}
+            <span class="dl-speed-limit-badge">
+              Max: <span>{{ (task.maxSpeedLimit // 1024) }} KB/s</span>
+              <button class="speed-limit-btn" onclick="changeTaskSpeedLimit('{{ task.id }}')">Modifier</button>
+            </span>
+            {% else %}
+            <span>
+              <button class="speed-limit-btn" onclick="changeTaskSpeedLimit('{{ task.id }}')">Limiter</button>
+            </span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="dl-task-actions" data-id="{{ task.id }}" data-status="{{ task.status.value }}" data-animename="{{ task.animeName }}" data-episodenumber="{{ task.episodeNumber }}"></div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="dl-empty-note" id="active-empty-note" style="display:none;">Aucun téléchargement actif en ce moment</div>
+  </section>
+
+  <section class="fade-in" data-download-group="queue">
+    <h2 class="download-section-title">
+      <span class="section-marker queue"></span>
+      En file d'attente
+    </h2>
+    <div class="dl-list" id="queue-list">
+      {% set count = namespace(value=0) %}
+      {% for task in tasks %}
+      {% if task.status.value in ['PENDING', 'SCHEDULED'] %}
+      {% set count.value = count.value + 1 %}
+      <div id="task-{{ task.id }}"
+           class="dl-task-row queue-row"
+           draggable="true"
+           data-id="{{ task.id }}"
+           data-category="queue"
+           data-status="{{ task.status.value }}">
+        <span class="queue-index">{{ count.value }}</span>
+        <span class="drag-dots">::</span>
+        <div class="dl-main">
+          <div class="dl-cover">{{ task.animeName[:1] }}</div>
+          <div>
+            <span class="dl-task-name">{{ task.animeName }}</span>
+            <span class="dl-subtitle">Épisode {{ task.episodeNumber }} - {{ task.fileName }}</span>
+          </div>
+        </div>
+        <span class="dl-size">
+          {% if task.status.value == 'SCHEDULED' and task.scheduledStartTime %}
+          <span class="dl-scheduled-info" data-time="{{ task.scheduledStartTime.isoformat() }}">Planifié : {{ task.scheduledStartTime }}</span>
+          {% else %}
+          <span>{{ task.formattedTotalSize }}</span>
+          {% endif %}
+        </span>
+        <div class="dl-task-actions" data-id="{{ task.id }}" data-status="{{ task.status.value }}" data-animename="{{ task.animeName }}" data-episodenumber="{{ task.episodeNumber }}"></div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="dl-empty-note" id="queue-empty-note" style="display:none;">File d'attente vide</div>
+  </section>
+
+  <section class="fade-in" data-download-group="done" style="display:none">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
+      <h2 class="download-section-title" style="margin-bottom:0;">
+        <span class="section-marker"></span>
+        Terminés et inactifs
+      </h2>
+      <button class="btn btn-sm" id="btn-verify-all-downloads" type="button" onclick="verifyAllCompletedTasks()" title="Vérifier l'intégrité de tous les fichiers terminés sur le disque">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;vertical-align:middle;margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+        Vérifier les fichiers
+      </button>
+    </div>
+    <div class="dl-list" id="completed-list">
+      {% for task in tasks %}
+      {% if task.status.value in ['COMPLETED', 'FAILED', 'CANCELLED'] %}
+      <div id="task-{{ task.id }}"
+           class="dl-task-row completed-row"
+           data-id="{{ task.id }}"
+           data-category="done"
+           data-status="{{ task.status.value }}"
+           data-verification="{{ task.verificationStatus or 'UNVERIFIED' }}">
+        <div class="dl-main">
+          <div class="dl-cover">{{ task.animeName[:1] }}</div>
+          <div>
+            <span class="dl-task-name">{{ task.animeName }}</span>
+            <span class="dl-subtitle">Épisode {{ task.episodeNumber }} - {{ task.fileName }}</span>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+          <span class="status-badge dl-task-status {% if task.status.value == 'COMPLETED' %}badge-ok{% elif task.status.value == 'FAILED' %}badge-err{% else %}badge-other{% endif %}">
+            {{ task.status.value }}
+          </span>
+          <span class="status-badge dl-verif-badge {% if task.verificationStatus == 'VALID' %}badge-ok{% elif task.verificationStatus in ['MISSING', 'CORRUPTED', 'EMPTY'] %}badge-err{% else %}badge-other{% endif %}"
+                style="font-size:10px; padding: 2px 6px;"
+                title="{{ task.verificationError or '' }}">
+            {% if task.verificationStatus == 'VALID' %}
+              ✓ Valide{% if task.videoDuration %} • {{ task.formattedDuration }}{% endif %}
+            {% elif task.verificationStatus == 'MISSING' %}
+              ⚠ Manquant
+            {% elif task.verificationStatus == 'CORRUPTED' %}
+              ✗ Corrompu
+            {% elif task.verificationStatus == 'EMPTY' %}
+              ✗ Vide
+            {% else %}
+              Non vérifié
+            {% endif %}
+          </span>
+        </div>
+        <span class="dl-size">{{ task.formattedTotalSize }}</span>
+        <span class="dl-progress-text">{{ "%.1f"|format(task.progress) }}%</span>
+        <div class="dl-task-actions" data-id="{{ task.id }}" data-status="{{ task.status.value }}" data-verification="{{ task.verificationStatus or 'UNVERIFIED' }}" data-animename="{{ task.animeName }}" data-episodenumber="{{ task.episodeNumber }}"></div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="dl-empty-note" id="done-empty-note" style="display:none;">Aucun téléchargement terminé</div>
+  </section>
+
+  <div class="empty-state" id="dl-empty" style="display:none;">
+    <div class="empty-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+    </div>
+    <h3>Aucun téléchargement</h3>
+    <p>Lancez des téléchargements depuis la fiche d'un anime.</p>
+    <a href="/" class="btn btn-primary">Rechercher un anime</a>
+  </div>
+
+  <p class="download-hint">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+    Les premiers épisodes de la file sont téléchargés en priorité. Vous pouvez réordonner par glisser-déposer.
+  </p>
+</main>
+
+<!-- Modal Lecteur Mode Cinéma pour lecture locale -->
+<div id="cinema-modal" class="cinema-modal">
+  <div class="cinema-container">
+    <div class="cinema-header">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <svg viewBox="0 0 24 24" style="width:20px;height:20px;color:var(--accent);flex-shrink:0;"><path d="M7 4v16l13-8Z"/></svg>
+        <h3 class="cinema-title" id="cinema-title">Lecture locale</h3>
+      </div>
+      <button class="btn btn-sm" type="button" onclick="closeCinemaPlayer()" title="Fermer (Échap)">
+        <svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Fermer
+      </button>
+    </div>
+    <div class="cinema-body">
+      <video id="cinema-player" controls crossorigin playsinline>
+        <source id="cinema-source" src="" type="video/mp4"/>
+      </video>
+    </div>
+    <div class="cinema-footer">
+      <span style="font-size:13px;color:var(--muted);" id="cinema-ep-info"></span>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+<link rel="stylesheet" href="/static/vendor/plyr/plyr.css"/>
+<script src="/static/vendor/plyr/plyr.polyfilled.js" defer></script>
+<script src="/js/app.js"></script>
+<script>
+document.getElementById('nav-downloads')?.classList.add('active');
+
+document.querySelectorAll('.dl-task-actions[data-id]').forEach(actEl => {
+  const id = actEl.dataset.id;
+  const status = actEl.dataset.status;
+  const animeName = actEl.dataset.animename;
+  const episodeNumber = actEl.dataset.episodenumber;
+  actEl.innerHTML = renderTaskActions({ id, status, animeName, episodeNumber });
+});
+
+document.getElementById('pause-all-btn')?.addEventListener('click', () =>
+  fetch('/api/download/pause-all', { method: 'POST' }).then(() => showToast('Téléchargements actifs mis en pause', 'info')));
+document.getElementById('resume-all-btn')?.addEventListener('click', () =>
+  fetch('/api/download/resume-all', { method: 'POST' }).then(() => showToast('Téléchargements repris', 'success')));
+document.getElementById('cancel-all-btn')?.addEventListener('click', async () => {
+  if (!confirm('Êtes-vous sûr de vouloir annuler tous les téléchargements actifs et en file d\'attente ?')) return;
+  try {
+    const res = await fetch('/api/download/cancel-all', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message || 'Tous les téléchargements ont été annulés', 'warning');
+      if (typeof refreshDownloadBadge === 'function') refreshDownloadBadge();
+      if (typeof refreshDownloadStats === 'function') refreshDownloadStats();
+      setTimeout(() => window.location.reload(), 500);
+    } else {
+      showToast('Erreur lors de l\'annulation des téléchargements', 'error');
+    }
+  } catch (err) {
+    showToast('Erreur de communication avec le serveur', 'error');
+  }
+});
+document.getElementById('clean-btn')?.addEventListener('click', () =>
+  fetch('/api/download/clean', { method: 'POST' }).then(() => setTimeout(() => window.location.reload(), 400)));
+
+function setSpeedLimitPreset(kb) {
+  const input = document.getElementById('global-speed-input-settings');
+  if (input) {
+    input.value = kb > 0 ? kb : '';
+  }
+}
+
+initDownloadSettingsPanel();
+</script>
+</body>
+</html>

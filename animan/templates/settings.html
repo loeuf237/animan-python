@@ -1,0 +1,235 @@
+{% import 'fragments/navbar.html' as nav %}
+<!DOCTYPE html>
+<html lang="fr">
+{{ nav.head('Paramètres') }}
+<body>
+{{ nav.navbar() }}
+
+<main class="main-content">
+  <div class="settings-page-layout fade-in">
+    <!-- Header de la page -->
+    <header class="page-header" style="margin-bottom: 24px;">
+      <div>
+        <h1 class="page-title">Paramètres de l'application</h1>
+        <p class="page-sub">Configurez les téléchargements, les serveurs d'hébergement, le stockage et les outils système.</p>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center;">
+        <button class="btn btn-primary" id="save-settings-btn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;vertical-align:middle;margin-right:6px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Enregistrer les paramètres
+        </button>
+      </div>
+    </header>
+
+    <!-- Section 1 : Téléchargements & Réseau -->
+    <section class="settings-card-pro">
+      <div class="settings-card-header-pro">
+        <div class="settings-card-icon-pro">
+          <svg width="20" height="20" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+        </div>
+        <div>
+          <h2 class="settings-card-title-pro">Téléchargements & Bande Passante</h2>
+          <p class="settings-card-sub-pro">Gestion des flux simultanés, de la vitesse de transfert et du nommage.</p>
+        </div>
+      </div>
+
+      <!-- Item : Téléchargements simultanés -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <label for="max-concurrent-input" class="setting-title-pro" style="display:block;cursor:pointer;">Téléchargements simultanés</label>
+          <div class="setting-desc-pro">Nombre maximal de fichiers téléchargés en parallèle. Les autres sont mis en file d'attente.</div>
+        </div>
+        <div class="setting-ctrl-pro">
+          <input type="number" id="max-concurrent-input" class="input-premium setting-input-sm" min="1" max="20" value="3"/>
+        </div>
+      </div>
+
+      <!-- Item : Limite de vitesse globale -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <label for="global-speed-input-settings" class="setting-title-pro" style="display:block;cursor:pointer;">Limite de vitesse globale</label>
+          <div class="setting-desc-pro">Plafonne la vitesse totale pour ne pas saturer votre connexion réseau (0 = Illimité).</div>
+        </div>
+        <div class="setting-ctrl-pro">
+          <div class="speed-ctrl-group">
+            <div class="speed-input-box">
+              <input type="number" id="global-speed-input-settings" class="input-premium setting-input-md" placeholder="Illimitée (0)" min="0"/>
+              <span class="speed-unit-tag">Ko/s</span>
+            </div>
+            <div class="speed-preset-chips">
+              <button type="button" class="speed-preset-chip" data-kb="0" onclick="setSpeedLimitPreset(0)">Illimité</button>
+              <button type="button" class="speed-preset-chip" data-kb="1024" onclick="setSpeedLimitPreset(1024)">1 Mo/s</button>
+              <button type="button" class="speed-preset-chip" data-kb="3072" onclick="setSpeedLimitPreset(3072)">3 Mo/s</button>
+              <button type="button" class="speed-preset-chip" data-kb="5120" onclick="setSpeedLimitPreset(5120)">5 Mo/s</button>
+              <button type="button" class="speed-preset-chip" data-kb="10240" onclick="setSpeedLimitPreset(10240)">10 Mo/s</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Item : Organisation Plex / Jellyfin -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <label for="plex-org-cb" class="setting-title-pro" style="display:block;cursor:pointer;">Organisation des dossiers Plex / Jellyfin</label>
+          <div class="setting-desc-pro">Structure automatiquement les dossiers en <code>Nom Anime/Season 01/Nom Anime - S01E01.mp4</code> pour une intégration directe dans votre médiathèque.</div>
+        </div>
+        <div class="setting-ctrl-pro">
+          <label class="toggle-switch">
+            <input type="checkbox" id="plex-org-cb"/>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 2 : Sources & Hébergeurs Vidéo -->
+    <section class="settings-card-pro">
+      <div class="settings-card-header-pro">
+        <div class="settings-card-icon-pro">
+          <svg width="20" height="20" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+        </div>
+        <div>
+          <h2 class="settings-card-title-pro">Sources & Hébergeurs Vidéo</h2>
+          <p class="settings-card-sub-pro">Priorité des lecteurs de streaming et identité de navigation.</p>
+        </div>
+      </div>
+
+      <!-- Item : Serveur par défaut VoirAnime -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <label for="voiranime-server-select" class="setting-title-pro" style="display:block;cursor:pointer;">Serveur par défaut (VoirAnime)</label>
+          <div class="setting-desc-pro">Hébergeur sélectionné en premier lors de la résolution d'épisodes. Si celui-ci est indisponible, Animan bascule automatiquement sur les serveurs de secours.</div>
+        </div>
+        <div class="setting-ctrl-pro">
+          <select id="voiranime-server-select" class="input-premium setting-select-pro">
+            <option value="auto">Automatique (Priorité recommandée)</option>
+            <option value="myTV">myTV (Multi-qualités HLS)</option>
+            <option value="stape">Streamtape (Direct MP4)</option>
+            <option value="voe">VOE (Lecteur rapide)</option>
+            <option value="fhd1">FHD1 (Mail.ru)</option>
+            <option value="moon">MOON (Byse)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Item : User-Agent -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <label for="user-agent-select" class="setting-title-pro" style="display:block;cursor:pointer;">User-Agent HTTP</label>
+          <div class="setting-desc-pro">Empreinte navigateur transmise lors des requêtes de téléchargement pour contourner les protections anti-bot.</div>
+        </div>
+        <div class="setting-ctrl-pro">
+          <select id="user-agent-select" class="input-premium setting-select-pro">
+            <option value="Random (Rotator)">Aléatoire (Rotator)</option>
+            <option value="Chrome">Google Chrome (Windows)</option>
+            <option value="Firefox">Mozilla Firefox (Windows)</option>
+            <option value="Safari">Apple Safari (macOS)</option>
+            <option value="Edge">Microsoft Edge (Windows)</option>
+            <option value="Custom">Personnalisé...</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Item conditionnel : Custom User-Agent -->
+      <div class="setting-row-pro" id="custom-ua-group" style="display:none;">
+        <div class="setting-meta-pro">
+          <label for="custom-ua-input" class="setting-title-pro" style="display:block;cursor:pointer;">User-Agent personnalisé</label>
+          <div class="setting-desc-pro">Saisissez une chaîne User-Agent brute valide.</div>
+        </div>
+        <div class="setting-ctrl-pro" style="flex:1;max-width:440px;">
+          <input type="text" id="custom-ua-input" class="input-premium" style="width:100%;" placeholder="Mozilla/5.0..."/>
+        </div>
+      </div>
+    </section>
+
+    <!-- Section 3 : Système & Stockage -->
+    <section class="settings-card-pro">
+      <div class="settings-card-header-pro">
+        <div class="settings-card-icon-pro">
+          <svg width="20" height="20" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+        </div>
+        <div>
+          <h2 class="settings-card-title-pro">Système & Stockage</h2>
+          <p class="settings-card-sub-pro">Outils de conversion multimédia et espace disque local.</p>
+        </div>
+      </div>
+
+      <!-- Item : FFmpeg -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <div class="setting-title-pro">Moteur FFmpeg</div>
+          <div class="setting-desc-pro">Utilisé pour le muxing HLS rapide, l'assemblage audio/vidéo et l'encapsulation MP4 sans ré-encodage.</div>
+        </div>
+        <div class="setting-ctrl-pro">
+          <span id="ffmpeg-status-badge" class="status-badge" style="display:inline-flex;align-items:center;padding:5px 12px;font-size:0.82rem;">Détection...</span>
+        </div>
+      </div>
+
+      <!-- Item : Répertoire de téléchargement -->
+      <div class="setting-row-pro">
+        <div class="setting-meta-pro">
+          <div class="setting-title-pro">Dossier de téléchargement</div>
+          <div class="setting-desc-pro">Chemin absolu configuré sur le serveur pour accueillir vos épisodes.</div>
+        </div>
+        <div class="setting-ctrl-pro" style="flex:1;max-width:380px;">
+          <input type="text" id="settings-download-dir" class="input-premium" readonly value="Chargement..." style="width:100%;opacity:0.85;font-family:monospace;font-size:0.82rem;cursor:default;" title="Chemin défini sur le serveur"/>
+        </div>
+      </div>
+
+      <!-- Item : Espace disque -->
+      <div class="setting-row-pro" style="flex-direction:column;align-items:stretch;gap:12px;">
+        <div class="setting-meta-pro">
+          <div class="setting-title-pro">Espace disque local</div>
+          <div class="setting-desc-pro">Capacité totale et espace disponible sur le volume du dossier de téléchargement.</div>
+        </div>
+        <div class="storage-card-box">
+          <div class="storage-bar-labels">
+            <span id="storage-used-text" class="storage-stat-highlight">Calcul en cours...</span>
+            <span id="storage-free-text" class="storage-stat-muted"></span>
+          </div>
+          <div class="storage-bar-track">
+            <div id="storage-progress-fill" class="storage-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bouton Enregistrer inférieur -->
+    <div style="display:flex;justify-content:flex-end;margin-top:4px;margin-bottom:24px;">
+      <button class="btn btn-primary" id="save-settings-btn-bottom" type="button" onclick="document.getElementById('save-settings-btn').click()">
+        <svg width="16" height="16" viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;vertical-align:middle;margin-right:6px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Enregistrer les paramètres
+      </button>
+    </div>
+  </div>
+</main>
+
+<div class="toast-container" id="toast-container"></div>
+<script src="/js/app.js?v=2.2"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    initDownloadSettingsPanel();
+    fetch('/api/system/storage')
+      .then(r => r.json())
+      .then(st => {
+        const dirEl = document.getElementById('settings-download-dir');
+        if (dirEl && st.downloadDir) dirEl.value = st.downloadDir;
+
+        const usedEl = document.getElementById('storage-used-text');
+        const freeEl = document.getElementById('storage-free-text');
+        const fillEl = document.getElementById('storage-progress-fill');
+
+        if (st.totalBytes > 0) {
+          const usedGb = (st.usedBytes / (1024**3)).toFixed(1);
+          const totalGb = (st.totalBytes / (1024**3)).toFixed(1);
+          const freeGb = (st.freeBytes / (1024**3)).toFixed(1);
+          if (usedEl) usedEl.textContent = `${usedGb} Go utilisés sur ${totalGb} Go (${st.usedPercent}%)`;
+          if (freeEl) freeEl.textContent = `${freeGb} Go libres`;
+          if (fillEl) fillEl.style.width = `${Math.min(100, Math.max(0, st.usedPercent))}%`;
+        }
+      })
+      .catch(() => {});
+  });
+</script>
+</body>
+</html>

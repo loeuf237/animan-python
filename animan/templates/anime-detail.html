@@ -1,0 +1,287 @@
+{% import 'fragments/navbar.html' as nav %}
+<!DOCTYPE html>
+<html lang="fr">
+{{ nav.head(anime.title) }}
+<body>
+{{ nav.navbar() }}
+
+<main class="main-content">
+  <a href="/" class="back-link">
+    <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+    Retour aux résultats
+  </a>
+
+  <section class="anime-hero fade-in">
+    <aside class="anime-poster">
+      {% if anime.imageUrl %}
+      <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+      {% endif %}
+      <div class="anime-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+    </aside>
+
+    <section class="anime-info">
+      <div class="page-header">
+        <div>
+          <h1 class="anime-title" id="anime-title">{{ anime.title }}</h1>
+          {% if anime.originalTitle %}
+          <p class="anime-original-title">{{ anime.originalTitle }}</p>
+          {% endif %}
+        </div>
+        <div class="anime-actions">
+          <button id="fav-btn" class="btn {% if isFavorite %}active{% endif %}"
+                  data-url="{{ anime.url }}"
+                  data-title="{{ anime.title }}"
+                  data-image="{{ anime.imageUrl }}"
+                  data-source="{{ source or 'french-manga' }}"
+                  onclick="toggleFavorite(this)">
+            <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+            <span>{% if isFavorite %}Dans la bibliothèque{% else %}Ajouter à la bibliothèque{% endif %}</span>
+          </button>
+
+          {% if isFavorite %}
+          <label class="auto-dl-label">
+            <input type="checkbox" id="auto-dl-toggle"
+                   data-url="{{ anime.url }}"
+                   onchange="toggleAutoDownload(this)"/>
+            Auto-DL
+          </label>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="anime-meta-chips">
+        {% if anime.version %}
+        <span class="chip">{{ anime.version }}</span>
+        {% endif %}
+        {% if anime.studio %}
+        <span class="chip">{{ anime.studio }}</span>
+        {% endif %}
+        {% for genre in anime.genres %}
+        <span class="chip">{{ genre }}</span>
+        {% endfor %}
+        <span class="chip chip-auto">{{ anime.episodes|length }} épisode(s)</span>
+        <span class="chip chip-source">{{ 'voir-anime.to' if source == 'voir-anime' else 'french-manga.net' }}</span>
+      </div>
+
+      <div class="anime-synopsis">
+        <h3 class="synopsis-label">Synopsis</h3>
+        {% if anime.synopsis %}
+        <p>{{ anime.synopsis }}</p>
+        {% else %}
+        <p>Synopsis non disponible.</p>
+        {% endif %}
+      </div>
+
+      {% if anime.episodes and anime.episodes|length > 0 %}
+      <section>
+        <div class="episode-section-header">
+          <h2 class="episode-section-title">
+            <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+            Épisodes disponibles
+          </h2>
+          <div class="version-filter" id="version-filter"></div>
+        </div>
+
+        <!-- Contrôles par tranches & filtre par numéro -->
+        <div class="episode-controls-bar">
+          <div class="episode-range-bar" id="episode-range-bar"></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="number" id="episode-search-input" class="episode-search-input"
+                   placeholder="N° d'épisode..." min="1" title="Filtrer un numéro d'épisode précis"/>
+          </div>
+        </div>
+
+        <!-- Barre de sélection par lot -->
+        <div class="select-bar">
+          <div class="batch-btn-group">
+            <label for="select-all-cb" style="cursor:pointer;font-weight:700;">
+              <input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)"/>
+              Tout
+            </label>
+            <button type="button" class="btn btn-sm" onclick="selectBatchFilter('not-downloaded')">Non téléchargés</button>
+            <button type="button" class="btn btn-sm" onclick="selectBatchFilter('not-watched')">Non vus</button>
+            <button type="button" class="btn btn-sm" onclick="selectBatchFilter('invert')">Inverser</button>
+          </div>
+          {% if source == 'voir-anime' %}
+          <div class="batch-server-quality-group" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:4px;">
+              <label for="batch-server-select" style="font-size:0.75rem;font-weight:600;color:var(--text-muted);">Serveur :</label>
+              <select id="batch-server-select" class="input-premium" style="padding:4px 8px;font-size:0.8rem;height:auto;" onchange="onBatchServerChange(this.value)">
+                <option value="auto">Auto (Défaut)</option>
+                <option value="myTV">myTV</option>
+                <option value="stape">Streamtape</option>
+                <option value="voe">VOE</option>
+                <option value="fhd1">FHD1</option>
+                <option value="moon">MOON</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <label for="batch-quality-select" style="font-size:0.75rem;font-weight:600;color:var(--text-muted);">Qualité :</label>
+              <select id="batch-quality-select" class="input-premium" style="padding:4px 8px;font-size:0.8rem;height:auto;" onchange="onBatchQualityChange(this.value)">
+                <option value="auto">Auto / Max</option>
+                <option value="1080p">1080p</option>
+                <option value="720p">720p</option>
+                <option value="480p">480p</option>
+                <option value="360p">360p</option>
+              </select>
+            </div>
+          </div>
+          {% endif %}
+          <span class="selected-info" id="selected-count-text">0 sélectionné(s)</span>
+          <div class="dl-controls-wrap">
+            <input type="datetime-local" id="schedule-input" class="input-premium" title="Planifier"/>
+            <button id="dl-selected-btn" class="btn btn-primary" type="button" onclick="downloadSelected()" disabled>
+              <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+              Télécharger la sélection
+            </button>
+          </div>
+        </div>
+
+        <div class="episode-list" id="episode-list">
+          {% for ep in anime.episodes %}
+          {% set ep_key = ep.number ~ '-' ~ ep.version %}
+          {% set is_dl = downloadedEpisodes and ep_key in downloadedEpisodes %}
+          {% set is_watched = watchedEpisodes and ep_key in watchedEpisodes %}
+          {% set ep_url = ep.downloadPageUrl if ep.downloadPageUrl else ep.playerUrl %}
+          <div id="ep-row-{{ ep.number }}-{{ ep.version }}"
+               class="episode-item {% if is_dl %}ep-downloaded{% endif %} {% if is_watched %}ep-watched{% endif %}"
+               data-url="{{ ep_url }}"
+               data-num="{{ ep.number }}"
+               data-title="{{ ep.title }}"
+               data-version="{{ ep.version }}"
+               data-subtitle="{{ ep.subtitleUrl or '' }}"
+               data-player="{{ ep.playerUrl }}">
+            <div class="ep-row-main">
+              <input type="checkbox" class="episode-check"
+                     id="ep-check-{{ ep.number }}-{{ ep.version }}"
+                     value="{{ ep.number }}" onchange="onEpisodeCheckChange()"/>
+
+              <span class="episode-num">Ep {{ ep.number }}</span>
+              <span class="episode-title">{{ ep.title }}</span>
+
+              {% if ep.version %}
+              <span class="episode-version-badge {% if 'vostfr' in ep.version|lower %}ver-vostfr{% else %}ver-vf{% endif %}">{{ ep.version }}</span>
+              {% endif %}
+
+              {% if is_dl %}
+              <span class="ep-done-badge">Téléchargé</span>
+              {% endif %}
+              {% if is_watched %}
+              <span class="ep-watched-badge">Vu</span>
+              {% endif %}
+            </div>
+
+            <div class="ep-row-meta">
+              <div class="ep-row-meta-left">
+                <span class="episode-size" data-url="{{ ep_url }}">-</span>
+                {% if source == 'voir-anime' %}
+                <select class="episode-quality-select input-premium"
+                        style="display:none;padding:2px 6px;font-size:0.75rem;height:auto;border-radius:6px;"
+                        title="Choisir la qualité de l'épisode"
+                        onchange="onEpisodeQualityChange(this)">
+                </select>
+                {% endif %}
+
+                <label class="subtitle-cb-label">
+                  <input type="checkbox" class="subtitle-check"/>
+                  Sous-titres
+                </label>
+              </div>
+
+              <div class="ep-row-actions">
+                <button class="btn btn-icon btn-play-ep"
+                        data-url="{{ ep_url }}"
+                        data-num="{{ ep.number }}"
+                        data-title="{{ ep.title }}"
+                        onclick="playEpisode(this)" title="Mode Cinéma (Lecture)">
+                  <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8Z"/></svg>
+                </button>
+
+                <button class="btn btn-icon btn-download-ep"
+                        data-url="{{ ep_url }}"
+                        data-num="{{ ep.number }}"
+                        data-title="{{ ep.title }}"
+                        data-subtitle="{{ ep.subtitleUrl or '' }}"
+                        onclick="downloadEpisode(this)" title="Télécharger">
+                  <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% else %}
+      <section class="empty-state">
+        <h3>Aucun épisode trouvé</h3>
+        <p>La source n'a retourné aucun épisode pour cet anime.</p>
+      </section>
+      {% endif %}
+    </section>
+  </section>
+</main>
+
+<!-- Modal Lecteur Mode Cinéma -->
+<div id="cinema-modal" class="cinema-modal">
+  <div class="cinema-container">
+    <div class="cinema-header">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <svg viewBox="0 0 24 24" style="width:20px;height:20px;color:var(--accent);flex-shrink:0;"><path d="M7 4v16l13-8Z"/></svg>
+        <h3 class="cinema-title" id="cinema-title">{{ anime.title }}</h3>
+      </div>
+      <button class="btn btn-sm" type="button" onclick="closeCinemaPlayer()" title="Fermer (Échap)">
+        <svg viewBox="0 0 24 24" style="width:16px;height:16px;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        Fermer
+      </button>
+    </div>
+    <div class="cinema-body">
+      <video id="cinema-player" controls crossorigin playsinline>
+        <source id="cinema-source" src="" type="video/mp4"/>
+      </video>
+    </div>
+    <div class="cinema-footer">
+      <div class="cinema-nav-btns">
+        <button class="btn btn-sm" id="btn-prev-ep" onclick="playAdjacentEpisode(-1)" type="button">
+          <svg viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>
+          Épisode précédent
+        </button>
+        <button class="btn btn-sm" id="btn-next-ep" onclick="playAdjacentEpisode(1)" type="button">
+          Épisode suivant
+          <svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+      <span style="font-size:13px;color:var(--muted);" id="cinema-ep-info"></span>
+    </div>
+  </div>
+</div>
+
+<div id="quality-modal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <h3>Choisir la qualité</h3>
+    <div id="quality-list" class="quality-list"></div>
+    <button class="btn btn-sm" type="button" onclick="document.getElementById('quality-modal').style.display='none'">Annuler</button>
+  </div>
+</div>
+
+<div id="subtitle-modal" class="modal" style="display:none;">
+  <div class="modal-content">
+    <h3>Choisir les sous-titres</h3>
+    <div id="subtitle-list" class="subtitle-list"></div>
+    <button class="btn btn-sm" type="button" onclick="document.getElementById('subtitle-modal').style.display='none'">Fermer</button>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+  const ANIME_NAME = {{ anime.title|tojson }};
+  const ANIME_URL = {{ anime.url|tojson }};
+  const SOURCE = {{ (source or 'french-manga')|tojson }};
+</script>
+<link rel="stylesheet" href="/static/vendor/plyr/plyr.css"/>
+<script src="/static/vendor/hls/hls.min.js"></script>
+<script src="/static/vendor/plyr/plyr.polyfilled.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

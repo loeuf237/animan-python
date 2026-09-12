@@ -1,0 +1,47 @@
+import os
+from pathlib import Path
+
+HOME_DIR = Path.home()
+DEFAULT_DOWNLOAD_DIR = str(HOME_DIR / "Downloads" / "Animan")
+DEFAULT_DB_DIR = HOME_DIR / ".animan" / "db"
+DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
+
+class Settings:
+    PORT: int = int(os.getenv("ANIMAN_PORT", "8080"))
+    HOST: str = os.getenv("ANIMAN_HOST", "0.0.0.0")
+
+    # Sources anime
+    BASE_URL: str = os.getenv("ANIMAN_BASE_URL", "https://w16.french-manga.net")
+    VOIR_ANIME_URL: str = os.getenv("ANIMAN_VOIR_ANIME_URL", "https://voir-anime.to")
+    DEFAULT_USER_AGENT: str = os.getenv(
+        "ANIMAN_USER_AGENT",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    )
+
+    # Téléchargement
+    DOWNLOAD_DIR: str = os.getenv("ANIMAN_DOWNLOAD_DIR", DEFAULT_DOWNLOAD_DIR)
+    MAX_CONCURRENT_DOWNLOADS: int = int(os.getenv("ANIMAN_MAX_CONCURRENT", "3"))
+    CONNECTION_TIMEOUT: float = float(os.getenv("ANIMAN_CONNECT_TIMEOUT", "15.0"))
+    READ_TIMEOUT: float = float(os.getenv("ANIMAN_READ_TIMEOUT", "30.0"))
+    VOIRANIME_DEFAULT_SERVER: str = os.getenv("ANIMAN_VOIRANIME_DEFAULT_SERVER", "auto")
+
+    # Watchdog
+    WATCHDOG_INTERVAL_SECONDS: int = int(os.getenv("ANIMAN_WATCHDOG_INTERVAL", "3600"))
+
+    # Database
+    DATABASE_PATH: str = os.getenv("ANIMAN_DB_PATH", DEFAULT_DB_PATH)
+    DATABASE_URL: str = f"sqlite:///{DATABASE_PATH}"
+
+    # Proxies
+    PROXIES_CONFIG: str = os.getenv("ANIMAN_PROXIES", "")
+
+    # Project directories
+    BASE_DIR: Path = Path(__file__).resolve().parent
+    TEMPLATES_DIR: Path = BASE_DIR / "templates"
+    STATIC_DIR: Path = BASE_DIR / "static"
+
+settings = Settings()
+
+# Ensure directories exist
+Path(settings.DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
+DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
