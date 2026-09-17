@@ -166,7 +166,10 @@
            class="dl-task-row"
            data-id="{{ task.id }}"
            data-category="active"
-           data-status="{{ task.status.value }}">
+           data-status="{{ task.status.value }}"
+           data-speed-bytes="{{ task.speed }}"
+           data-total-bytes="{{ task.totalBytes }}"
+           data-downloaded-bytes="{{ task.downloadedBytes }}">
         <div class="dl-main">
           <div class="dl-cover">{{ task.animeName[:1] }}</div>
           <div>

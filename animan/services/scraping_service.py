@@ -1,9 +1,10 @@
+import asyncio
 import json
 import logging
 import re
 import time
 from typing import List, Optional, Dict
-from urllib.parse import urljoin
+from urllib.parse import urljoin, parse_qs, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -19,6 +20,7 @@ logger = logging.getLogger("animan.scraping")
 NEWSID_PATTERN = re.compile(r"newsid=(\d+)")
 JS_ARRAY_PATTERN = re.compile(r"var\s+(defined_\w+)\s*=\s*\[([^\]]+)\]", re.IGNORECASE)
 VIDZY_URL_PATTERN = re.compile(r"(https?://(?:vidzy\.[a-z0-9]+|luluvdo\.[a-z0-9]+)[^\"'\s]+)", re.IGNORECASE)
+CLEAN_TITLE_PATTERN = re.compile(r"(?i)\s*\((VF|VOSTFR|VF\+VOSTFR|VF\s*/\s*VOSTFR|VOST|UNCUT)\)")
 
 class ScrapingService:
     def __init__(self):
@@ -27,7 +29,7 @@ class ScrapingService:
         self.last_cache_time: float = 0.0
         self.is_refreshing: bool = False
 
-    def _get_client(self, follow_redirects: bool = True) -> httpx.Client:
+    def _get_client(self, follow_redirects: bool = True, timeout: Optional[float] = None) -> httpx.Client:
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
             "Referer": self.base_url + "/",
@@ -35,15 +37,26 @@ class ScrapingService:
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
         }
         proxy = proxy_service.get_random_proxy()
-        return httpx.Client(
-            headers=headers,
-            proxy=proxy,
-            timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
-            follow_redirects=follow_redirects,
-            verify=settings.SSL_VERIFY,
-        )
+        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
+        try:
+            return httpx.Client(
+                headers=headers,
+                proxy=proxy,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+            )
+        except Exception as e:
+            logger.warning("[scraping] Erreur initialisation proxy client HTTP (%s): %s - bascule en direct sans proxy", proxy, e)
+            return httpx.Client(
+                headers=headers,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+                trust_env=False,
+            )
 
-    def _get_async_client(self, follow_redirects: bool = True) -> httpx.AsyncClient:
+    def _get_async_client(self, follow_redirects: bool = True, timeout: Optional[float] = None) -> httpx.AsyncClient:
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
             "Referer": self.base_url + "/",
@@ -51,13 +64,24 @@ class ScrapingService:
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
         }
         proxy = proxy_service.get_random_proxy()
-        return httpx.AsyncClient(
-            headers=headers,
-            proxy=proxy,
-            timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
-            follow_redirects=follow_redirects,
-            verify=settings.SSL_VERIFY,
-        )
+        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
+        try:
+            return httpx.AsyncClient(
+                headers=headers,
+                proxy=proxy,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+            )
+        except Exception as e:
+            logger.warning("[scraping] Erreur initialisation proxy client HTTP asynchrone (%s): %s - bascule en direct sans proxy", proxy, e)
+            return httpx.AsyncClient(
+                headers=headers,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+                trust_env=False,
+            )
 
     # -------------------------------------------------------------------------
     # Dernières sorties & Cache
@@ -159,7 +183,75 @@ class ScrapingService:
             except Exception as e:
                 logger.debug("Erreur parsing carte anime: %s", e)
 
-        return results
+        return self.unify_animes(results)
+
+    def unify_animes(self, results: List[AnimeResult]) -> List[AnimeResult]:
+        """
+        Regroupe et unifie les résultats de French-Manga qui partagent le même titre
+        (ex: fiches VF et VOSTFR séparées) en une seule entrée avec identifiants fusionnés.
+        """
+        if not results:
+            return []
+
+        groups: Dict[str, List[AnimeResult]] = {}
+        for item in results:
+            clean_key = CLEAN_TITLE_PATTERN.sub("", item.title).strip().lower()
+            if not clean_key:
+                clean_key = item.title.strip().lower()
+            groups.setdefault(clean_key, []).append(item)
+
+        unified: List[AnimeResult] = []
+        for clean_key, items in groups.items():
+            if len(items) == 1:
+                unified.append(items[0])
+                continue
+
+            primary = items[0]
+            base_title = CLEAN_TITLE_PATTERN.sub("", primary.title).strip()
+
+            all_versions: List[str] = []
+            for it in items:
+                v_match = CLEAN_TITLE_PATTERN.search(it.title)
+                if v_match:
+                    v_text = v_match.group(1).upper()
+                    for part in re.split(r"[+/]", v_text):
+                        p = part.strip()
+                        if p and p not in all_versions:
+                            all_versions.append(p)
+                elif it.version:
+                    v_text = it.version.upper()
+                    for part in re.split(r"[+/]", v_text):
+                        p = part.strip()
+                        if p and p not in all_versions:
+                            all_versions.append(p)
+
+            all_ids: List[str] = []
+            for it in items:
+                if it.id and it.id not in all_ids:
+                    all_ids.append(it.id)
+
+            merged_version = "+".join(all_versions) if all_versions else primary.version
+            display_title = f"{base_title} ({merged_version})" if merged_version else base_title
+
+            merged_url = primary.url
+            if len(all_ids) > 1:
+                sep = "&" if "?" in merged_url else "?"
+                merged_url = f"{merged_url}{sep}merged_ids={','.join(all_ids)}"
+
+            unified.append(
+                AnimeResult(
+                    id=",".join(all_ids) if all_ids else primary.id,
+                    title=display_title,
+                    imageUrl=primary.imageUrl,
+                    url=merged_url,
+                    version=merged_version,
+                    type=primary.type,
+                    episodeInfo=primary.episodeInfo,
+                    source=primary.source,
+                )
+            )
+
+        return unified
 
     def parse_anime_card(self, card) -> Optional[AnimeResult]:
         url, title, image_url, version, anime_type, episode_info, anime_id = "", "", "", "", "Anime", "", ""
@@ -235,6 +327,7 @@ class ScrapingService:
             version=version,
             type=anime_type,
             episodeInfo=episode_info,
+            source="french-manga",
         )
 
     # -------------------------------------------------------------------------
@@ -256,10 +349,13 @@ class ScrapingService:
                 title_el = soup.select_one("h1, .full-title, .movie-title, #news-title")
                 title = title_el.get_text().strip() if title_el else (soup.title.string.split("|")[0].strip() if soup.title else "")
 
-                poster_img = soup.select_one(".full-story img[src], .fstory img[src], .movie-poster img[src], .poster img[src], .short-img img[src]")
+                poster_img = soup.select_one(
+                    ".dvd-thumbnail, .fposter img, #dvdPosterImage, .fstory img, .full-story img, "
+                    ".movie-poster img, .poster img, .short-img img, img[src*='uploads/posts']"
+                )
                 image_url = ""
                 if poster_img:
-                    image_url = poster_img.get("src", "")
+                    image_url = poster_img.get("src", "") or poster_img.get("data-src", "")
                     if image_url and not image_url.startswith("http"):
                         image_url = urljoin(self.base_url, image_url)
 
@@ -289,20 +385,59 @@ class ScrapingService:
                 version_el = soup.select_one("a[href*=version-serie]")
                 version = version_el.get_text().strip() if version_el else ""
 
-                newsid = self.extract_news_id(anime_url, soup)
+                # Récupération des identifiants (simple ou fusionnés via merged_ids)
+                news_ids: List[str] = []
+                try:
+                    parsed_u = urlparse(anime_url)
+                    q_params = parse_qs(parsed_u.query)
+                    if "merged_ids" in q_params and q_params["merged_ids"]:
+                        raw_ids = q_params["merged_ids"][0]
+                        news_ids = [nid.strip() for nid in raw_ids.split(",") if nid.strip()]
+                except Exception as e:
+                    logger.debug("Erreur parsing merged_ids depuis l'URL: %s", e)
+
+                if not news_ids:
+                    nid = self.extract_news_id(anime_url, soup)
+                    if nid:
+                        news_ids = [nid]
+
                 episodes: List[Episode] = []
 
-                if newsid:
-                    api_url = f"{self.base_url}/engine/ajax/manga_episodes_api.php?id={newsid}"
-                    try:
-                        api_resp = await client.get(api_url, headers={"Referer": anime_url})
-                        if api_resp.status_code == 200:
-                            episodes = self.parse_episodes_from_json(api_resp.text)
-                    except Exception as e:
-                        logger.warning("API épisodes échouée, repli DOM: %s", e)
+                if news_ids:
+                    async def fetch_episodes_for_id(nid: str) -> List[Episode]:
+                        try:
+                            api_url = f"{self.base_url}/engine/ajax/manga_episodes_api.php?id={nid}"
+                            api_resp = await client.get(api_url, headers={"Referer": anime_url})
+                            if api_resp.status_code == 200:
+                                return self.parse_episodes_from_json(api_resp.text)
+                        except Exception as e:
+                            logger.warning("API épisodes échouée pour newsid=%s: %s", nid, e)
+                        return []
+
+                    api_results = await asyncio.gather(*[fetch_episodes_for_id(nid) for nid in news_ids])
+                    seen_ep_keys = set()
+                    for ep_list in api_results:
+                        for ep in ep_list:
+                            key = (ep.number, ep.version.upper())
+                            if key not in seen_ep_keys:
+                                seen_ep_keys.add(key)
+                                episodes.append(ep)
 
                 if not episodes:
                     episodes = self.parse_episodes_from_dom(soup)
+
+                # Tri des épisodes (par numéro croissant puis VOSTFR/VF)
+                episodes.sort(key=lambda x: (x.number, 0 if "VOSTFR" in x.version.upper() else 1))
+
+                # Détermination intelligente de la version globale
+                has_vf = any("VF" in ep.version.upper() for ep in episodes)
+                has_vostfr = any("VOSTFR" in ep.version.upper() for ep in episodes)
+                if has_vf and has_vostfr:
+                    version = "VF + VOSTFR"
+                elif has_vf:
+                    version = "VF"
+                elif has_vostfr:
+                    version = "VOSTFR"
 
                 return AnimeDetail(
                     title=title,
@@ -316,6 +451,7 @@ class ScrapingService:
                     directors=directors,
                     actors=actors,
                     episodes=episodes,
+                    source="french-manga",
                 )
         except Exception as e:
             logger.error("Erreur chargement anime french-manga: %s", e)
@@ -559,12 +695,7 @@ class ScrapingService:
 
         # 2. Extraction des sous-titres (optionnelle, isolée avec timeout court)
         try:
-            headers = {
-                "User-Agent": proxy_service.get_user_agent(),
-                "Referer": self.base_url + "/",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            }
-            with httpx.Client(headers=headers, timeout=5.0, follow_redirects=True, verify=settings.SSL_VERIFY) as sub_client:
+            with self._get_client(follow_redirects=True, timeout=5.0) as sub_client:
                 embed_resp = sub_client.get(embed_url)
                 if embed_resp.status_code == 200:
                     search_source = try_unpack(embed_resp.text)

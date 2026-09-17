@@ -77,3 +77,34 @@ def test_redownload_purges_corrupted_html(tmp_path):
     assert not target.exists()
     assert res.downloadedBytes == 0
     assert res.progress == 0.0
+
+def test_speed_tracker_smoothing_and_decay():
+    """Vérifie que SpeedTracker lisse les arrivées par paquets HLS et ne chute pas à 0 B/s."""
+    from animan.models.download_task import SpeedTracker
+
+    tracker = SpeedTracker(window_seconds=3.0)
+    t0 = 1000.0
+
+    # Échantillon initial
+    tracker.add_sample(0, now=t0)
+
+    # Chunk 1 de 2 Mo à t = 1.5s
+    sp1 = tracker.add_sample(2_000_000, now=t0 + 1.5)
+    assert sp1 > 1_000_000  # ~1.33 Mo/s
+
+    # Ligne de flush ffmpeg répétée à la même taille à t = 1.8s
+    sp2 = tracker.add_sample(2_000_000, now=t0 + 1.8)
+    assert sp2 > 1_000_000  # Ne chute PAS à 0 B/s !
+
+    # Consultation intermédiaire à t = 2.5s pendant que ffmpeg télécharge le chunk suivant
+    sp_mid = tracker.get_speed(now=t0 + 2.5)
+    assert sp_mid > 700_000  # Débit maintenu
+
+    # Chunk 2 de 2 Mo supplémentaire à t = 3.0s
+    sp3 = tracker.add_sample(4_000_000, now=t0 + 3.0)
+    assert sp3 > 1_000_000
+
+    # Arrêt prolongé du réseau à t = 8.0s (au-delà de window_seconds)
+    sp_stall = tracker.get_speed(now=t0 + 8.0)
+    assert sp_stall == 0  # Décroissance propre à 0 B/s si coupure avérée
+

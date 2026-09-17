@@ -37,7 +37,9 @@ class ProxyService:
         p_str = p_str.strip()
         if not p_str or p_str.startswith("#"):
             return
-        if not p_str.startswith("http://") and not p_str.startswith("https://"):
+        if p_str.startswith("socks://"):
+            p_str = "socks5://" + p_str[len("socks://"):]
+        elif not p_str.startswith(("http://", "https://", "socks5://", "socks5h://", "socks4://", "socks4a://")):
             p_str = f"http://{p_str}"
         if p_str not in self.proxies:
             self.proxies.append(p_str)

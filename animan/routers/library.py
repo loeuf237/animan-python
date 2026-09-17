@@ -2,10 +2,9 @@ import asyncio
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Request, Query, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
 
 from animan.config import settings
 from animan.services.download_manager import download_manager
@@ -13,10 +12,10 @@ from animan.services.library_service import library_service
 from animan.services.voiranime_service import voiranime_service
 from animan.services.watchdog_service import watchdog_service
 from animan.security import anonymize_path, is_safe_url
+from animan.templates_config import templates
 
 logger = logging.getLogger("animan.router.library")
 router = APIRouter()
-from animan.templates_config import templates
 
 # -------------------------------------------------------------------------
 # Pages HTML
@@ -30,6 +29,7 @@ async def library_page(request: Request):
         context={
             "favorites": library_service.get_all_favorites(),
             "history": library_service.get_history(),
+            "source": "all",
         }
     )
 
@@ -40,6 +40,7 @@ async def history_page(request: Request):
         name="history.html",
         context={
             "tasks": library_service.get_history(),
+            "source": "all",
         }
     )
 

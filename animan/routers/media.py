@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import re
 import urllib.parse
 from pathlib import Path
@@ -23,6 +22,13 @@ router = APIRouter()
 IMAGE_CACHE: Dict[str, tuple[bytes, str]] = {}
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 Mo max pour prévenir les attaques OOM
 
+def _get_media_async_client(timeout: float = 10.0) -> httpx.AsyncClient:
+    try:
+        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY)
+    except Exception as e:
+        logger.warning("[media] Erreur client HTTP proxy: %s - repli trust_env=False", e)
+        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY, trust_env=False)
+
 @router.get("/api/media/image-proxy")
 async def proxy_image(url: str):
     if not url or not url.startswith("http"):
@@ -33,18 +39,24 @@ async def proxy_image(url: str):
         logger.warning("SSRF bloqué sur image-proxy pour l'URL: %s", url)
         raise HTTPException(status_code=400, detail="URL d'image non autorisée ou non sécurisée")
 
+    # Cache mémoire simple (évite de retélécharger à chaque requête)
     if url in IMAGE_CACHE:
         content, ctype = IMAGE_CACHE[url]
         return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
 
     try:
-        referer = "https://voir-anime.to/" if any(d in url for d in ["voir-anime", "voembed", "vidmoly"]) else "https://french-manga.net/"
+        if "themoviedb.org" in url or "tmdb.org" in url:
+            referer = "https://www.themoviedb.org/"
+        elif any(d in url for d in ["voir-anime", "voembed", "vidmoly"]):
+            referer = "https://voir-anime.to/"
+        else:
+            referer = "https://french-manga.net/"
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
             "Referer": referer,
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
         }
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+        async with _get_media_async_client(timeout=10.0) as client:
             async with client.stream("GET", url, headers=headers) as resp:
                 if resp.status_code != 200:
                     raise HTTPException(status_code=resp.status_code, detail="Image inaccessible")
@@ -356,7 +368,7 @@ async def proxy_subtitle(url: str = Query(...)):
         "Referer": "https://voir-anime.to/" if "voir-anime" in url else "https://vidzy.org/",
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+        async with _get_media_async_client(timeout=10.0) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Sous-titres distants inaccessibles")

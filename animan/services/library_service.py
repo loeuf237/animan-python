@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 from typing import List, Optional, Set
-from sqlalchemy.orm import Session
 
 from animan.database import SessionLocal
 from animan.models.favorite import FavoriteAnime
@@ -44,6 +43,10 @@ class LibraryService:
     def is_favorite(self, url: str) -> bool:
         with SessionLocal() as db:
             return db.query(FavoriteAnime).filter(FavoriteAnime.url == url).first() is not None
+
+    def get_favorite(self, url: str) -> Optional[FavoriteAnime]:
+        with SessionLocal() as db:
+            return db.query(FavoriteAnime).filter(FavoriteAnime.url == url).first()
 
     def get_all_favorites(self) -> List[FavoriteAnime]:
         with SessionLocal() as db:
@@ -228,7 +231,8 @@ class LibraryService:
                     DownloadStatus.SCHEDULED.value,
                     DownloadStatus.DOWNLOADING.value,
                     DownloadStatus.RETRYING.value,
-                    DownloadStatus.PAUSED.value
+                    DownloadStatus.PAUSED.value,
+                    DownloadStatus.FAILED.value,
                 ])
             ).all()
 

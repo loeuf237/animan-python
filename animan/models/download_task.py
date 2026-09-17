@@ -1,9 +1,71 @@
+import collections
+import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Optional, Deque, Tuple
 from sqlalchemy import Column, Integer, BigInteger, Float, String, Boolean, DateTime
 from animan.database import Base
+
+class SpeedTracker:
+    """
+    Gestionnaire de lissage du débit réseau via fenêtre glissante (Rolling Window).
+    Élimine les à-coups, les faux 0 B/s et les disparitions d'ETA lors des téléchargements
+    par segments (HLS / ffmpeg / streaming direct).
+    """
+    def __init__(self, window_seconds: float = 3.5):
+        self.window_seconds = window_seconds
+        self.samples: Deque[Tuple[float, int]] = collections.deque()  # (timestamp, downloaded_bytes)
+        self.last_speed: int = 0
+
+    def reset(self):
+        self.samples.clear()
+        self.last_speed = 0
+
+    def add_sample(self, current_bytes: int, now: Optional[float] = None) -> int:
+        if now is None:
+            now = time.time()
+        self.samples.append((now, current_bytes))
+        self._prune(now)
+        return self._calc_speed(now)
+
+    def _prune(self, now: float):
+        cutoff = now - self.window_seconds
+        while len(self.samples) > 2 and self.samples[1][0] < cutoff:
+            self.samples.popleft()
+
+    def get_speed(self, now: Optional[float] = None) -> int:
+        if now is None:
+            now = time.time()
+        self._prune(now)
+        return self._calc_speed(now)
+
+    def _calc_speed(self, now: float) -> int:
+        if len(self.samples) < 2:
+            return self.last_speed
+
+        t_first, b_first = self.samples[0]
+        t_last, b_last = self.samples[-1]
+        dt = t_last - t_first
+
+        # Si aucun nouvel octet n'est reçu depuis plus de window_seconds, décroître à 0
+        if now - t_last > self.window_seconds:
+            self.last_speed = 0
+            return 0
+
+        if dt < 0.2:
+            return self.last_speed
+
+        db = b_last - b_first
+        if db <= 0:
+            if now - t_first >= 2.0:
+                self.last_speed = 0
+                return 0
+            return self.last_speed
+
+        calculated = int(db / dt)
+        self.last_speed = calculated
+        return calculated
 
 class DownloadStatus(str, Enum):
     PENDING = "PENDING"
@@ -177,6 +239,27 @@ class DownloadTask:
         self.supportsResume: bool = False
         self.throttleBytesWritten: int = 0
         self.throttleStartTimeMs: float = 0.0
+        self.speed_tracker: SpeedTracker = SpeedTracker(window_seconds=3.5)
+        self.last_broadcast_time: float = 0.0
+
+    def update_progress(self, downloaded_bytes: int, now: Optional[float] = None) -> int:
+        if now is None:
+            now = time.time()
+        self.downloadedBytes = downloaded_bytes
+        if self.totalBytes > 0:
+            self.progress = min(99.0, (downloaded_bytes / self.totalBytes) * 100.0)
+        self.speed = self.speed_tracker.add_sample(downloaded_bytes, now)
+        return self.speed
+
+    def refresh_speed(self, now: Optional[float] = None) -> int:
+        if now is None:
+            now = time.time()
+        self.speed = self.speed_tracker.get_speed(now)
+        return self.speed
+
+    def reset_speed(self):
+        self.speed = 0
+        self.speed_tracker.reset()
 
     @property
     def formattedTotalSize(self) -> str:

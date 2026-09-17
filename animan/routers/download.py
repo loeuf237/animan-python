@@ -2,19 +2,17 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Request, Query, HTTPException, Path as FPath
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from typing import Optional
+from fastapi import APIRouter, Request, Query
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from animan.config import settings
 from animan.models.download_task import DownloadStatus
 from animan.services.download_manager import download_manager
 from animan.services.voiranime_service import voiranime_service
+from animan.templates_config import templates
 
 logger = logging.getLogger("animan.router.download")
 router = APIRouter()
-from animan.templates_config import templates
 
 @router.get("/downloads", response_class=HTMLResponse)
 async def downloads_page(request: Request):
@@ -23,6 +21,7 @@ async def downloads_page(request: Request):
         name="downloads.html",
         context={
             "tasks": download_manager.get_all_tasks(),
+            "source": "all",
         }
     )
 
@@ -33,6 +32,7 @@ async def settings_page(request: Request):
         name="settings.html",
         context={
             "settings": download_manager.get_settings(),
+            "source": "all",
         }
     )
 
@@ -270,12 +270,22 @@ async def get_episode_size(
                     qualities_sizes_dict = json.loads(info.qualities_sizes_json)
                 except Exception:
                     pass
+            subtitles_list = []
+            if getattr(info, "subtitles_json", None):
+                try:
+                    subtitles_list = json.loads(info.subtitles_json)
+                except Exception:
+                    pass
+            if not subtitles_list and info.subtitle_url:
+                subtitles_list = [{"label": "Sous-titres", "srclang": "fr", "url": info.subtitle_url}]
+
             return {
                 "success": True,
                 "formattedSize": info.formatted_size,
                 "size": info.size,
                 "directUrl": info.direct_url,
                 "subtitleUrl": info.subtitle_url,
+                "subtitles": subtitles_list,
                 "serverType": info.server_type,
                 "availableServers": info.available_servers,
                 "qualities": list(qualities_dict.keys()),

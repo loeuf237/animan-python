@@ -93,5 +93,6 @@ if __name__ == "__main__":
         "run:app",
         host=settings.HOST,
         port=settings.PORT,
-        log_level="info"
+        log_level="info",
+        reload=True
     )

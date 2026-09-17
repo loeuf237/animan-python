@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import math
-import os
 import re
 import shutil
 import subprocess
@@ -11,7 +10,7 @@ import xml.sax.saxutils as saxutils
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -58,6 +57,32 @@ class DownloadManagerService:
         self._lock = asyncio.Lock()
         self._info_semaphore = asyncio.Semaphore(4)
 
+    def _create_async_client(
+        self,
+        headers: Optional[Dict[str, str]] = None,
+        proxy: Optional[str] = None,
+        timeout: Any = 10.0,
+        follow_redirects: bool = True,
+    ) -> httpx.AsyncClient:
+        proxy_val = proxy or proxy_service.get_random_proxy()
+        try:
+            return httpx.AsyncClient(
+                headers=headers,
+                proxy=proxy_val,
+                timeout=timeout,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+            )
+        except Exception as e:
+            logger.warning("[download_manager] Erreur initialisation proxy client HTTP (%s): %s - bascule en direct sans proxy", proxy_val, e)
+            return httpx.AsyncClient(
+                headers=headers,
+                timeout=timeout,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+                trust_env=False,
+            )
+
     def _trigger_process_queue(self):
         try:
             loop = asyncio.get_running_loop()
@@ -70,6 +95,30 @@ class DownloadManagerService:
             unfinished = library_service.get_unfinished_tasks()
             for entity in unfinished:
                 task = entity.to_task()
+                # Vérifier si le fichier final est en réalité déjà complet et valide sur disque
+                if task.savePath:
+                    out_path = Path(task.savePath)
+                    part_path = Path(task.savePath + ".part")
+                    if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
+                        verif = verification_service.verify_file(str(out_path), task.animeName, task.fileName)
+                        if verif.valid:
+                            task.status = DownloadStatus.COMPLETED
+                            task.progress = 100.0
+                            task.downloadedBytes = out_path.stat().st_size
+                            task.totalBytes = max(task.totalBytes, out_path.stat().st_size)
+                            task.verificationStatus = verif.status
+                            task.videoDuration = verif.duration
+                            task.error = None
+                            library_service.save_task(task)
+                            library_service.mark_as_downloaded(task.downloadPageUrl or "", task.animeName, task.episodeNumber, "")
+                            self.tasks[task.id] = task
+                            self.task_order.append(task.id)
+                            continue
+                    elif part_path.exists() and part_path.stat().st_size > 0:
+                        task.downloadedBytes = part_path.stat().st_size
+                        if task.totalBytes > 0:
+                            task.progress = min(99.9, (task.downloadedBytes / task.totalBytes) * 100.0)
+
                 if task.status in [DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING]:
                     task.status = DownloadStatus.PAUSED
                     task.speed = 0
@@ -177,7 +226,7 @@ class DownloadManagerService:
             headers["Referer"] = "https://vidzy.live/"
         else:
             try:
-                parsed = urllib.parse.urlparse(url)
+                parsed = urlparse(url)
                 if parsed.scheme and parsed.netloc:
                     headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
                 else:
@@ -200,13 +249,10 @@ class DownloadManagerService:
 
         try:
             req_headers = headers or self.get_headers_for_url(url, server_type)
-            proxy = proxy_service.get_random_proxy()
-            async with httpx.AsyncClient(
+            async with self._create_async_client(
                 headers=req_headers,
-                proxy=proxy,
                 timeout=8.0,
                 follow_redirects=True,
-                verify=settings.SSL_VERIFY,
             ) as client:
                 resp = await client.head(url)
                 cl = resp.headers.get("Content-Length")
@@ -237,15 +283,12 @@ class DownloadManagerService:
         if not m3u8_url:
             return -1
         req_headers = headers or self.get_headers_for_url(m3u8_url, server_type or "myTV")
-        proxy = proxy_service.get_random_proxy()
 
         try:
-            async with httpx.AsyncClient(
+            async with self._create_async_client(
                 headers=req_headers,
-                proxy=proxy,
                 timeout=8.0,
                 follow_redirects=True,
-                verify=settings.SSL_VERIFY,
             ) as client:
                 resp = await client.get(m3u8_url)
                 if resp.status_code != 200:
@@ -494,11 +537,19 @@ class DownloadManagerService:
 
             # Check duplicate
             existing = self.check_existing_file(anime_name, name, ep_num)
+            if existing and existing.exists() and existing.stat().st_size > 1024 * 1024:
+                verif = verification_service.verify_file(str(existing), anime_name, name)
+                if verif.valid:
+                    logger.info("Batch: %s Ep%d existe déjà et est valide (%s), ignoré",
+                                anime_name, ep_num, format_bytes(existing.stat().st_size))
+                    library_service.mark_as_downloaded(url, anime_name, ep_num, "")
+                    continue
+
             if existing:
                 cache_key = f"{url}::{sel_server or ''}::{sel_quality or ''}"
                 cached = self.resolved_info_cache.get(cache_key) or self.resolved_info_cache.get(url)
                 if cached and cached.size > 0 and existing.stat().st_size == cached.size:
-                    logger.info("Batch: %s Ep%d existe déjà, ignoré", anime_name, ep_num)
+                    logger.info("Batch: %s Ep%d existe déjà avec la même taille, ignoré", anime_name, ep_num)
                     continue
 
             sched_time = None
@@ -607,11 +658,27 @@ class DownloadManagerService:
             t.paused = False
             t.cancelled = False
             t.error = None
+            t.retryCount = 0
+            t.directDownloadUrl = None  # Forcer la re-résolution pour obtenir un token CDN frais
 
             # Détecter le fichier partiel existant (.part ou savePath) pour reprise
             if t.savePath:
                 part_path = Path(t.savePath + ".part")
                 out_path = Path(t.savePath)
+                if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
+                    verif = verification_service.verify_file(str(out_path), t.animeName, t.fileName)
+                    if verif.valid:
+                        t.status = DownloadStatus.COMPLETED
+                        t.progress = 100.0
+                        t.downloadedBytes = out_path.stat().st_size
+                        t.totalBytes = max(t.totalBytes, out_path.stat().st_size)
+                        t.verificationStatus = verif.status
+                        t.videoDuration = verif.duration
+                        self.broadcast_update(t)
+                        library_service.save_task(t)
+                        library_service.mark_as_downloaded(t.downloadPageUrl or "", t.animeName, t.episodeNumber, "")
+                        return True
+
                 if part_path.exists() and part_path.stat().st_size > 0:
                     if t.totalBytes > 0 and part_path.stat().st_size > t.totalBytes:
                         logger.warning("Fichier .part (%d octets) plus grand que totalBytes (%d) pour %s, suppression",
@@ -709,12 +776,50 @@ class DownloadManagerService:
         self._trigger_process_queue()
 
     def resume_all_downloads(self):
-        for t in self.tasks.values():
-            if t.status == DownloadStatus.PAUSED:
+        try:
+            for entity in library_service.get_unfinished_tasks():
+                if entity.id not in self.tasks:
+                    task = entity.to_task()
+                    self.tasks[task.id] = task
+                    if task.id not in self.task_order:
+                        self.task_order.append(task.id)
+        except Exception as e:
+            logger.warning("Erreur rechargement tâches DB pour reprise: %s", e)
+
+        for t in list(self.tasks.values()):
+            if t.status in [DownloadStatus.PAUSED, DownloadStatus.FAILED]:
                 t.paused = False
                 t.cancelled = False
-                t.status = DownloadStatus.PENDING
+                t.retryCount = 0
                 t.error = None
+                t.directDownloadUrl = None
+
+                if t.savePath:
+                    out_path = Path(t.savePath)
+                    part_path = Path(t.savePath + ".part")
+                    if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
+                        verif = verification_service.verify_file(str(out_path), t.animeName, t.fileName)
+                        if verif.valid:
+                            t.status = DownloadStatus.COMPLETED
+                            t.progress = 100.0
+                            t.downloadedBytes = out_path.stat().st_size
+                            t.totalBytes = max(t.totalBytes, out_path.stat().st_size)
+                            t.verificationStatus = verif.status
+                            t.videoDuration = verif.duration
+                            self.broadcast_update(t)
+                            library_service.save_task(t)
+                            library_service.mark_as_downloaded(t.downloadPageUrl or "", t.animeName, t.episodeNumber, "")
+                            continue
+                    elif part_path.exists() and part_path.stat().st_size > 0:
+                        if t.totalBytes > 0 and part_path.stat().st_size > t.totalBytes:
+                            part_path.unlink(missing_ok=True)
+                            t.downloadedBytes = 0
+                        else:
+                            t.downloadedBytes = part_path.stat().st_size
+                        if t.totalBytes > 0 and t.downloadedBytes > 0:
+                            t.progress = min(99.9, (t.downloadedBytes / t.totalBytes) * 100.0)
+
+                t.status = DownloadStatus.PENDING
                 self.broadcast_update(t)
                 library_service.save_task(t)
         self._trigger_process_queue()
@@ -983,7 +1088,7 @@ class DownloadManagerService:
 
     async def _execute_download(self, task: DownloadTask):
         try:
-            max_retries = 6  # Tolérance accrue face aux coupures réseau CDN
+            max_retries = 15  # Tolérance robuste face aux coupures réseau et expirations CDN
             task.retryCount = 0
             need_resolve = True
 
@@ -1045,7 +1150,7 @@ class DownloadManagerService:
                     else:
                         task.directDownloadUrl = direct_url
 
-                    need_resolve = False  # Les retries suivants réutiliseront l'URL
+                    need_resolve = False  # Les retries suivants réutiliseront l'URL sauf si déconnexion
 
                     if server_type == "myTV" and chunks_json != "[]":
                         chunks = json.loads(chunks_json)
@@ -1087,17 +1192,49 @@ class DownloadManagerService:
                     if task.retryCount < max_retries:
                         task.retryCount += 1
                         err_msg = str(e).lower()
-                        # Si URL expirée (401, 403, 404, 410, ou HTML reçu), forcer la re-résolution
-                        if "html" in err_msg or "403" in err_msg or "401" in err_msg or "404" in err_msg or "410" in err_msg:
+
+                        # Détection des coupures réseau, expirations de token CDN ou réponses invalides
+                        is_disconnect = (
+                            "peer closed connection" in err_msg
+                            or "remote protocol" in err_msg
+                            or "connection reset" in err_msg
+                            or "connection closed" in err_msg
+                            or "incompleteread" in err_msg
+                            or "broken pipe" in err_msg
+                            or "416" in err_msg
+                            or "403" in err_msg
+                            or "401" in err_msg
+                            or "404" in err_msg
+                            or "410" in err_msg
+                            or "502" in err_msg
+                            or "503" in err_msg
+                            or "html" in err_msg
+                        )
+                        if is_disconnect or task.retryCount >= 2:
                             need_resolve = True
                             task.directDownloadUrl = None
-                            logger.info("Lien direct expiré ou invalide (%s) pour %s, re-résolution au prochain essai", err_msg, task.fileName)
+                            logger.info("Lien direct expiré ou déconnexion (%s) pour %s, re-résolution au prochain essai", err_msg, task.fileName)
+
+                        # Détection des pannes DNS transitoires
+                        is_dns = (
+                            "name resolution" in err_msg
+                            or "gaierror" in err_msg
+                            or "temporary failure" in err_msg
+                            or "nodename nor servname" in err_msg
+                        )
+                        if is_dns:
+                            logger.warning("Panne DNS transitoire (%s) pour %s, temporisation 5s", err_msg, task.fileName)
+                            await asyncio.sleep(5.0)
+                            if task.retryCount > 0:
+                                task.retryCount -= 1
 
                         task.status = DownloadStatus.RETRYING
                         task.error = f"Erreur réseau: {str(e)}. Reprise ({task.retryCount}/{max_retries})"
                         self.broadcast_update(task)
                         library_service.save_task(task)
-                        await asyncio.sleep(min(8.0, math.pow(1.5, task.retryCount)))
+
+                        backoff = min(15.0, 2.0 + math.pow(1.3, min(task.retryCount, 10)))
+                        await asyncio.sleep(backoff)
                     else:
                         task.status = DownloadStatus.FAILED
                         task.error = str(e)
@@ -1189,7 +1326,7 @@ class DownloadManagerService:
         proxy = proxy_service.get_random_proxy()
 
         timeout = httpx.Timeout(connect=settings.CONNECTION_TIMEOUT, read=120.0, write=30.0, pool=None)
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+        async with self._create_async_client(headers=headers, proxy=proxy, timeout=timeout) as client:
             req_headers = dict(headers)
             is_resume = existing_len > 0
             if is_resume:
@@ -1199,7 +1336,7 @@ class DownloadManagerService:
             while True:
                 async with client.stream("GET", direct_url, headers=req_headers) as stream_resp:
                     # Gestion du code 416 Range Not Satisfiable
-                    if stream_resp.status_code == 416 and is_resume:
+                    if stream_resp.status_code == 416:
                         logger.warning("HTTP 416 (Range Not Satisfiable) pour %s avec existing_len=%s",
                                        task.fileName, format_bytes(existing_len))
                         if part_path.exists():
@@ -1222,8 +1359,9 @@ class DownloadManagerService:
 
                         existing_len = 0
                         is_resume = False
+                        task.downloadedBytes = 0
                         req_headers.pop("Range", None)
-                        continue
+                        raise ConnectionError("HTTP 416 (Range Not Satisfiable): Plage invalide, re-résolution requise")
 
                     if stream_resp.status_code not in [200, 206]:
                         raise ConnectionError(f"HTTP {stream_resp.status_code}")
@@ -1313,8 +1451,10 @@ class DownloadManagerService:
                     # Toujours écrire dans le fichier .part, jamais le fichier final
                     mode = "ab" if is_resume else "wb"
                     downloaded = existing_len
+                    task.reset_speed()
+                    if downloaded > 0:
+                        task.speed_tracker.add_sample(downloaded)
                     last_time = time.time()
-                    last_bytes = downloaded
                     first_chunk = True
 
                     if task.status != DownloadStatus.DOWNLOADING:
@@ -1333,7 +1473,7 @@ class DownloadManagerService:
 
                             if task.cancelled:
                                 task.status = DownloadStatus.CANCELLED
-                                task.speed = 0
+                                task.reset_speed()
                                 task.downloadedBytes = downloaded
                                 self.broadcast_update(task)
                                 library_service.save_task(task)
@@ -1342,7 +1482,7 @@ class DownloadManagerService:
                                 return
                             if task.paused:
                                 task.status = DownloadStatus.PAUSED
-                                task.speed = 0
+                                task.reset_speed()
                                 task.downloadedBytes = downloaded
                                 self.broadcast_update(task)
                                 library_service.save_task(task)
@@ -1352,18 +1492,17 @@ class DownloadManagerService:
 
                             f.write(chunk)
                             downloaded += len(chunk)
-                            task.downloadedBytes = downloaded
-                            if total_bytes > 0:
-                                task.progress = min(100.0, (downloaded / total_bytes) * 100.0)
 
                             # Throttling
                             await self._apply_throttle(task, len(chunk))
 
                             now = time.time()
+                            task.update_progress(downloaded, now)
+                            if total_bytes > 0:
+                                task.progress = min(100.0, (downloaded / total_bytes) * 100.0)
+
                             if now - last_time >= 0.5:
-                                task.speed = int((downloaded - last_bytes) / (now - last_time))
                                 last_time = now
-                                last_bytes = downloaded
                                 self.broadcast_update(task)
 
                     if total_bytes > 0 and downloaded < total_bytes:
@@ -1407,7 +1546,7 @@ class DownloadManagerService:
         headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://vidzy.live/"}
         proxy = proxy_service.get_random_proxy()
 
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+        async with self._create_async_client(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT) as client:
             for idx, curl in enumerate(chunks):
                 if task.cancelled:
                     task.status = DownloadStatus.CANCELLED
@@ -1433,27 +1572,28 @@ class DownloadManagerService:
                         async for chunk in resp.aiter_bytes(chunk_size=16384):
                             if task.cancelled:
                                 task.status = DownloadStatus.CANCELLED
+                                task.reset_speed()
                                 self.broadcast_update(task)
                                 return
                             if task.paused:
                                 task.status = DownloadStatus.PAUSED
+                                task.reset_speed()
                                 self.broadcast_update(task)
                                 return
 
                             f.write(chunk)
                             chunk_downloaded += len(chunk)
                             cur_glob = downloaded_total + chunk_downloaded
-                            task.downloadedBytes = cur_glob
-                            if total_all_chunks > 0:
-                                task.progress = (cur_glob / total_all_chunks) * 100.0
 
                             await self._apply_throttle(task, len(chunk))
 
                             now = time.time()
+                            task.update_progress(cur_glob, now)
+                            if total_all_chunks > 0:
+                                task.progress = (cur_glob / total_all_chunks) * 100.0
+
                             if now - last_time >= 0.5:
-                                task.speed = int((cur_glob - last_bytes) / (now - last_time))
                                 last_time = now
-                                last_bytes = cur_glob
                                 self.broadcast_update(task)
 
                     downloaded_total += chunk_downloaded
@@ -1509,9 +1649,25 @@ class DownloadManagerService:
                 stderr=asyncio.subprocess.DEVNULL
             )
             task.activeProcess = proc
+            task.reset_speed()
+            if task.downloadedBytes > 0:
+                task.speed_tracker.add_sample(task.downloadedBytes)
 
-            last_time = time.time()
-            last_bytes = 0
+            last_broadcast = time.time()
+
+            async def _ffmpeg_ticker():
+                try:
+                    while task.status == DownloadStatus.DOWNLOADING and not task.cancelled and not task.paused:
+                        await asyncio.sleep(1.0)
+                        if task.status != DownloadStatus.DOWNLOADING:
+                            break
+                        now = time.time()
+                        task.refresh_speed(now)
+                        self.broadcast_update(task)
+                except asyncio.CancelledError:
+                    pass
+
+            ticker_task = asyncio.create_task(_ffmpeg_ticker())
 
             try:
                 while True:
@@ -1523,7 +1679,7 @@ class DownloadManagerService:
                             pass
                         temp_output.unlink(missing_ok=True)
                         task.status = DownloadStatus.CANCELLED
-                        task.speed = 0
+                        task.reset_speed()
                         self.broadcast_update(task)
                         return
 
@@ -1534,7 +1690,7 @@ class DownloadManagerService:
                         except Exception:
                             pass
                         task.status = DownloadStatus.PAUSED
-                        task.speed = 0
+                        task.reset_speed()
                         self.broadcast_update(task)
                         return
 
@@ -1547,14 +1703,10 @@ class DownloadManagerService:
                         try:
                             downloaded = int(text.split("=")[1])
                             if downloaded > 0:
-                                task.downloadedBytes = downloaded
-                                if task.totalBytes > 0:
-                                    task.progress = min(99.0, (downloaded / task.totalBytes) * 100.0)
                                 now = time.time()
-                                if now - last_time >= 0.5:
-                                    task.speed = int((downloaded - last_bytes) / (now - last_time))
-                                    last_time = now
-                                    last_bytes = downloaded
+                                task.update_progress(downloaded, now)
+                                if now - last_broadcast >= 0.5:
+                                    last_broadcast = now
                                     self.broadcast_update(task)
                         except (ValueError, IndexError):
                             pass
@@ -1568,7 +1720,7 @@ class DownloadManagerService:
                 task.downloadedBytes = final_size
                 task.totalBytes = final_size
                 task.progress = 100.0
-                task.speed = 0
+                task.reset_speed()
 
                 if task.downloadSubtitles:
                     await self._download_subtitles(task)
@@ -1577,6 +1729,7 @@ class DownloadManagerService:
                 return
 
             finally:
+                ticker_task.cancel()
                 task.activeProcess = None
                 if temp_output.exists() and not output_path.exists():
                     temp_output.unlink(missing_ok=True)
@@ -1597,7 +1750,7 @@ class DownloadManagerService:
         }
         proxy = proxy_service.get_random_proxy()
 
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+        async with self._create_async_client(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT) as client:
             resp = await client.get(m3u8_url)
             if resp.status_code != 200:
                 raise ConnectionError(f"HTTP {resp.status_code} sur playlist m3u8")
@@ -1627,8 +1780,8 @@ class DownloadManagerService:
 
             total_segments = len(segments)
             downloaded = 0
+            task.reset_speed()
             last_time = time.time()
-            last_bytes = 0
 
             with open(temp_output, "wb") as outfile:
                 for idx, seg_url in enumerate(segments):
@@ -1636,12 +1789,12 @@ class DownloadManagerService:
                         outfile.close()
                         temp_output.unlink(missing_ok=True)
                         task.status = DownloadStatus.CANCELLED
-                        task.speed = 0
+                        task.reset_speed()
                         self.broadcast_update(task)
                         return
                     if task.paused:
                         task.status = DownloadStatus.PAUSED
-                        task.speed = 0
+                        task.reset_speed()
                         self.broadcast_update(task)
                         return
 
@@ -1652,23 +1805,22 @@ class DownloadManagerService:
                     chunk_data = seg_resp.content
                     outfile.write(chunk_data)
                     downloaded += len(chunk_data)
-                    task.downloadedBytes = downloaded
-                    task.progress = ((idx + 1) / total_segments) * 100.0
 
                     await self._apply_throttle(task, len(chunk_data))
 
                     now = time.time()
+                    task.update_progress(downloaded, now)
+                    task.progress = ((idx + 1) / total_segments) * 100.0
+
                     if now - last_time >= 0.5:
-                        task.speed = int((downloaded - last_bytes) / (now - last_time))
                         last_time = now
-                        last_bytes = downloaded
                         self.broadcast_update(task)
 
             shutil.move(str(temp_output), str(output_path))
             task.downloadedBytes = downloaded
             task.totalBytes = downloaded
             task.progress = 100.0
-            task.speed = 0
+            task.reset_speed()
 
             if task.downloadSubtitles:
                 await self._download_subtitles(task)
@@ -1772,7 +1924,7 @@ class DownloadManagerService:
         headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://vidzy.live/"}
         proxy = proxy_service.get_random_proxy()
 
-        async with httpx.AsyncClient(headers=headers, proxy=proxy, timeout=15.0, follow_redirects=True, verify=settings.SSL_VERIFY) as client:
+        async with self._create_async_client(headers=headers, proxy=proxy, timeout=15.0) as client:
             for sub in subs:
                 url = sub.get("url", "")
                 label = sub.get("label", "Sous-titres")
@@ -1871,9 +2023,7 @@ class DownloadManagerService:
 
                 # Favoris ou recherche pour métadonnées
                 fav = next((f for f in library_service.get_all_favorites() if f.title.lower() == task.animeName.lower()), None)
-                detail = None
                 if fav:
-                    # Sync detail lookup
                     pass
 
                 content = (

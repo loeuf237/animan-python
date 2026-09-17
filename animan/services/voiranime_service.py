@@ -1,10 +1,11 @@
 import asyncio
+import base64
 import json
 import logging
 import re
 import time
 import urllib.parse
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 from urllib.parse import urljoin
 
 import httpx
@@ -33,27 +34,49 @@ class VoirAnimeScrapingService:
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
         }
 
-    def _get_client(self, follow_redirects: bool = True, referer: Optional[str] = None) -> httpx.Client:
+    def _get_client(self, follow_redirects: bool = True, referer: Optional[str] = None, timeout: Optional[float] = None) -> httpx.Client:
         headers = self._get_headers(referer)
         proxy = proxy_service.get_random_proxy()
-        return httpx.Client(
-            headers=headers,
-            proxy=proxy,
-            timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
-            follow_redirects=follow_redirects,
-            verify=settings.SSL_VERIFY,
-        )
+        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
+        try:
+            return httpx.Client(
+                headers=headers,
+                proxy=proxy,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+            )
+        except Exception as e:
+            logger.warning("[voir-anime] Erreur initialisation proxy client HTTP (%s): %s - bascule en direct sans proxy", proxy, e)
+            return httpx.Client(
+                headers=headers,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+                trust_env=False,
+            )
 
-    def _get_async_client(self, follow_redirects: bool = True, referer: Optional[str] = None) -> httpx.AsyncClient:
+    def _get_async_client(self, follow_redirects: bool = True, referer: Optional[str] = None, timeout: Optional[float] = None) -> httpx.AsyncClient:
         headers = self._get_headers(referer)
         proxy = proxy_service.get_random_proxy()
-        return httpx.AsyncClient(
-            headers=headers,
-            proxy=proxy,
-            timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
-            follow_redirects=follow_redirects,
-            verify=settings.SSL_VERIFY,
-        )
+        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
+        try:
+            return httpx.AsyncClient(
+                headers=headers,
+                proxy=proxy,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+            )
+        except Exception as e:
+            logger.warning("[voir-anime] Erreur initialisation proxy client HTTP asynchrone (%s): %s - bascule en direct sans proxy", proxy, e)
+            return httpx.AsyncClient(
+                headers=headers,
+                timeout=t,
+                follow_redirects=follow_redirects,
+                verify=settings.SSL_VERIFY,
+                trust_env=False,
+            )
 
     async def get_latest_releases(self) -> List[AnimeResult]:
         now = time.time()
@@ -124,6 +147,7 @@ class VoirAnimeScrapingService:
                     version=version,
                     type="Anime",
                     episodeInfo="",
+                    source="voir-anime",
                 )
                 setattr(anime_res, "_asp_rank", rank)
                 results.append(anime_res)
@@ -149,19 +173,13 @@ class VoirAnimeScrapingService:
         ])
 
         asp_endpoint = f"{self.base_url}/wp-admin/admin-ajax.php"
-        headers = {
-            "User-Agent": proxy_service.get_user_agent(),
-            "Referer": f"{self.base_url}/",
+        extra_headers = {
             "X-Requested-With": "XMLHttpRequest",
             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         }
 
-        async with httpx.AsyncClient(
-            headers=headers,
-            timeout=httpx.Timeout(settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT),
-            follow_redirects=True,
-            verify=settings.SSL_VERIFY
-        ) as client:
+        async with self._get_async_client() as client:
+            client.headers.update(extra_headers)
             async def fetch_asp(asid: int) -> str:
                 try:
                     data = {
@@ -344,6 +362,7 @@ class VoirAnimeScrapingService:
                         version=version,
                         type="Anime",
                         episodeInfo=ep_info,
+                        source="voir-anime",
                     )
                 )
             except Exception as e:
@@ -369,10 +388,19 @@ class VoirAnimeScrapingService:
                 if not title and soup.title:
                     title = soup.title.string.split("|")[0].split("-")[0].strip()
 
-                img = soup.select_one(".summary_image img, .film-poster img, img.img-responsive")
+                # Sélectionner l'image de couverture principale en évitant le logo header (.vato.png)
+                img = soup.select_one(".summary_image img, .thumb img, .c-image-hover img, .film-poster img, .tab-summary img")
+                if not img:
+                    for cand in soup.select("img.img-responsive, img[src*='uploads']"):
+                        src_chk = (cand.get("src", "") or cand.get("data-src", "")).lower()
+                        alt_chk = cand.get("alt", "").lower()
+                        if "vato" not in src_chk and "logo" not in src_chk and "voiranime" not in alt_chk:
+                            img = cand
+                            break
+
                 image_url = ""
                 if img:
-                    image_url = img.get("src", "") or img.get("data-src", "")
+                    image_url = img.get("data-src", "") or img.get("src", "") or img.get("data-lazy-src", "")
                     if not image_url and img.get("srcset"):
                         image_url = img["srcset"].split()[0]
                     if image_url and not image_url.startswith("http"):
@@ -395,6 +423,7 @@ class VoirAnimeScrapingService:
                     url=anime_url,
                     version=version,
                     episodes=episodes,
+                    source="voir-anime",
                 )
         except Exception as e:
             logger.error("[voir-anime] Erreur détail anime: %s", e)
@@ -490,8 +519,55 @@ class VoirAnimeScrapingService:
             logger.debug("[voir-anime] get_episode_servers error: %s", e)
             return {"servers": ["myTV"], "defaultServer": self.default_server}
 
+    def _decode_base64_mirror(self, value: str) -> Optional[str]:
+        """Décode une valeur Base64 issue d'une balise option d'un sélecteur miroir (voiranime.io / voiranime.homes)."""
+        if not value or not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 8 or not re.match(r"^[A-Za-z0-9+/=_-]+$", cleaned):
+            return None
+        try:
+            std_b64 = cleaned.replace("-", "+").replace("_", "/")
+            pad_len = len(std_b64) % 4
+            if pad_len:
+                std_b64 += "=" * (4 - pad_len)
+            decoded_bytes = base64.b64decode(std_b64)
+            decoded_str = decoded_bytes.decode("utf-8", errors="ignore")
+
+            # Extraction de la source iframe
+            src_m = re.search(r"""<iframe[^>]*\ssrc=["']([^"']+)["']""", decoded_str, re.IGNORECASE)
+            if src_m:
+                iframe_url = src_m.group(1).replace(r"\/", "/")
+                if iframe_url.startswith("//"):
+                    iframe_url = "https:" + iframe_url
+                return iframe_url
+
+            # Si le texte décodé est directement une URL
+            if decoded_str.strip().startswith("http://") or decoded_str.strip().startswith("https://") or decoded_str.strip().startswith("//"):
+                direct_u = decoded_str.strip()
+                if direct_u.startswith("//"):
+                    direct_u = "https:" + direct_u
+                return direct_u
+        except Exception as e:
+            logger.debug("[voir-anime] Échec décodage Base64 miroir: %s", e)
+        return None
+
+    def _normalize_server_name(self, label: str, url: str) -> str:
+        s_lower = (label + " " + url).lower()
+        if any(h in s_lower for h in ["mytv", "voembed", "vidmoly"]):
+            return "myTV"
+        elif any(h in s_lower for h in ["streamtape", "stape"]):
+            return "stape"
+        elif "voe" in s_lower:
+            return "voe"
+        elif any(h in s_lower for h in ["mail.ru", "fhd"]):
+            return "fhd1"
+        elif any(h in s_lower for h in ["gn1r5n", "byse", "moon"]):
+            return "moon"
+        return label or "server"
+
     def _parse_episode_sources(self, html: str) -> Dict[str, str]:
-        """Extrait la cartographie {nom_serveur: embed_url} depuis les scripts ou iframes de la page."""
+        """Extrait la cartographie {nom_serveur: embed_url} depuis les scripts, sélecteurs miroirs ou iframes de la page."""
         sources: Dict[str, str] = {}
         m = re.search(r"var\s+thisChapterSources\s*=\s*(\{.+?\});", html, re.DOTALL)
         if m:
@@ -508,19 +584,30 @@ class VoirAnimeScrapingService:
                         if not raw_src.startswith("http"):
                             raw_src = urljoin(self.base_url, raw_src)
                         norm_k = k.replace("LECTEUR", "").strip()
-                        key = "myTV" if "mytv" in norm_k.lower() else (
-                            "stape" if any(s in norm_k.lower() for s in ["stape", "streamtape"]) else (
-                                "voe" if "voe" in norm_k.lower() else (
-                                    "fhd1" if "fhd" in norm_k.lower() else (
-                                        "moon" if "moon" in norm_k.lower() else norm_k
-                                    )
-                                )
-                            )
-                        )
+                        key = self._normalize_server_name(norm_k, raw_src)
                         sources[key] = raw_src
             except Exception as e:
                 logger.debug("[voir-anime] Erreur parsing thisChapterSources: %s", e)
 
+        # 2. Parsing des sélecteurs miroirs en Base64 (clones voiranime.io / voiranime.homes)
+        if not sources:
+            soup = BeautifulSoup(html, "html.parser")
+            mirror_options = soup.select("select.mirror option, select#select-mirror option, option[data-index], .mirror option")
+            for idx, opt in enumerate(mirror_options):
+                val = opt.get("value", "").strip()
+                label = opt.get_text().strip() or opt.get("data-name", "").strip() or f"Lecteur {idx + 1}"
+                if val:
+                    iframe_url = self._decode_base64_mirror(val)
+                    if not iframe_url and (val.startswith("http") or val.startswith("//")):
+                        iframe_url = "https:" + val if val.startswith("//") else val
+
+                    if iframe_url:
+                        if not iframe_url.startswith("http"):
+                            iframe_url = urljoin(self.base_url, iframe_url)
+                        key = self._normalize_server_name(label, iframe_url)
+                        sources[key] = iframe_url
+
+        # 3. Fallback direct sur les balises iframes
         if not sources:
             soup = BeautifulSoup(html, "html.parser")
             for ifr in soup.select("iframe"):
@@ -528,19 +615,8 @@ class VoirAnimeScrapingService:
                 if src and not src.startswith("about:"):
                     if not src.startswith("http"):
                         src = urljoin(self.base_url, src)
-                    s_lower = src.lower()
-                    if any(h in s_lower for h in ["voembed", "vidmoly"]):
-                        sources["myTV"] = src
-                    elif any(h in s_lower for h in ["streamtape", "stape"]):
-                        sources["stape"] = src
-                    elif "voe" in s_lower:
-                        sources["voe"] = src
-                    elif "mail.ru" in s_lower:
-                        sources["fhd1"] = src
-                    elif "gn1r5n" in s_lower or "byse" in s_lower:
-                        sources["moon"] = src
-                    else:
-                        sources[f"server_{len(sources)+1}"] = src
+                    key = self._normalize_server_name(f"server_{len(sources)+1}", src)
+                    sources[key] = src
         return sources
 
     def extract_download_info(
@@ -565,6 +641,7 @@ class VoirAnimeScrapingService:
             "videoChunks": "[]",
             "videoQualities": "{}",
             "subtitleUrl": "",
+            "subtitles": "[]",
             "serverType": "unknown",
             "availableServers": "[]",
             "selectedQuality": "",
@@ -745,6 +822,7 @@ class VoirAnimeScrapingService:
                 result["videoQualities"] = json.dumps(qualities)
                 result["videoChunks"] = json.dumps([best_url] if best_url else [])
                 result["subtitleUrl"] = subtitle_url
+                result["subtitles"] = json.dumps([{"label": "Sous-titres FR", "srclang": "fr", "url": subtitle_url}]) if subtitle_url else "[]"
                 result["serverType"] = resolved_server
                 result["selectedQuality"] = selected_q_label
                 result["size"] = detected_size

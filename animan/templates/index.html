@@ -204,33 +204,118 @@
       <p>Essayez l'autre source ou une recherche plus générale.</p>
     </div>
     {% else %}
-    <div class="results-grid">
-      {% for anime in results %}
-      <article class="anime-card">
-        <a href="/anime?url={{ anime.url }}&amp;source={{ source or 'french-manga' }}" class="card-link">
-          <div class="card-poster">
-            {% if anime.imageUrl %}
-            <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
-                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
-            {% endif %}
-            <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
-            <div class="card-overlay">
-              {% if anime.version %}
-              <span class="version-badge">{{ anime.version }}</span>
-              {% endif %}
-              {% if anime.episodeInfo %}
-              <span class="ep-badge">{{ anime.episodeInfo }}</span>
-              {% endif %}
-            </div>
+      {% if source == 'all' %}
+        {% set fm_results = [] %}
+        {% set va_results = [] %}
+        {% for a in results %}
+          {% if a.source == 'voir-anime' %}
+            {% set _ = va_results.append(a) %}
+          {% else %}
+            {% set _ = fm_results.append(a) %}
+          {% endif %}
+        {% endfor %}
+
+        {% if fm_results|length > 0 %}
+        <div class="source-group-block" style="margin-bottom: 32px;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);">
+            <span class="chip chip-source" style="background:#2563eb;color:#fff;font-weight:700;font-size:0.85rem;padding:5px 12px;border-radius:20px;">French-Manga</span>
+            <span style="color:var(--muted);font-size:0.85rem;">{{ fm_results|length }} résultat(s) trouvé(s)</span>
           </div>
-          <div class="card-info">
-            <h3 class="card-title">{{ anime.title }}</h3>
-            <span class="card-type">{{ anime.type or 'Anime' }}</span>
+          <div class="results-grid">
+            {% for anime in fm_results %}
+            <article class="anime-card">
+              <a href="/anime?url={{ anime.url }}&amp;source=french-manga" class="card-link">
+                <div class="card-poster">
+                  {% if anime.imageUrl %}
+                  <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
+                       onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+                  {% endif %}
+                  <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+                  <div class="card-overlay">
+                    {% if anime.version %}
+                    <span class="version-badge">{{ anime.version }}</span>
+                    {% endif %}
+                    {% if anime.episodeInfo %}
+                    <span class="ep-badge">{{ anime.episodeInfo }}</span>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="card-info">
+                  <h3 class="card-title">{{ anime.title }}</h3>
+                  <span class="card-type">{{ anime.type or 'Anime' }}</span>
+                </div>
+              </a>
+            </article>
+            {% endfor %}
           </div>
-        </a>
-      </article>
-      {% endfor %}
-    </div>
+        </div>
+        {% endif %}
+
+        {% if va_results|length > 0 %}
+        <div class="source-group-block" style="margin-bottom: 32px;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);">
+            <span class="chip chip-source" style="background:#7c3aed;color:#fff;font-weight:700;font-size:0.85rem;padding:5px 12px;border-radius:20px;">VoirAnime</span>
+            <span style="color:var(--muted);font-size:0.85rem;">{{ va_results|length }} résultat(s) trouvé(s)</span>
+          </div>
+          <div class="results-grid">
+            {% for anime in va_results %}
+            <article class="anime-card">
+              <a href="/anime?url={{ anime.url }}&amp;source=voir-anime" class="card-link">
+                <div class="card-poster">
+                  {% if anime.imageUrl %}
+                  <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
+                       onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+                  {% endif %}
+                  <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+                  <div class="card-overlay">
+                    {% if anime.version %}
+                    <span class="version-badge">{{ anime.version }}</span>
+                    {% endif %}
+                    {% if anime.episodeInfo %}
+                    <span class="ep-badge">{{ anime.episodeInfo }}</span>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="card-info">
+                  <h3 class="card-title">{{ anime.title }}</h3>
+                  <span class="card-type">{{ anime.type or 'Anime' }}</span>
+                </div>
+              </a>
+            </article>
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
+
+      {% else %}
+        <div class="results-grid">
+          {% for anime in results %}
+          <article class="anime-card">
+            <a href="/anime?url={{ anime.url }}&amp;source={{ anime.source or source or 'french-manga' }}" class="card-link">
+              <div class="card-poster">
+                {% if anime.imageUrl %}
+                <img src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}" loading="lazy"
+                     onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+                {% endif %}
+                <div class="card-poster-placeholder" style="{% if anime.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
+                <div class="card-overlay">
+                  {% if anime.version %}
+                  <span class="version-badge">{{ anime.version }}</span>
+                  {% endif %}
+                  {% if anime.episodeInfo %}
+                  <span class="ep-badge">{{ anime.episodeInfo }}</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="card-info">
+                <h3 class="card-title">{{ anime.title }}</h3>
+                <span class="card-type">{{ anime.type or 'Anime' }}</span>
+              </div>
+            </a>
+          </article>
+          {% endfor %}
+        </div>
+      {% endif %}
     {% endif %}
   </section>
   {% endif %}

@@ -3,7 +3,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{{ title }} - Animan</title>
-  <link rel="stylesheet" href="/css/style.css?v=2.2"/>
+  <link rel="stylesheet" href="/css/style.css?v=2.6"/>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='44' fill='%238b5cf6'/%3E%3Cpath d='M61 18a33 33 0 1 0 18 51 24 24 0 1 1-18-51Z' fill='%230b1020'/%3E%3C/svg%3E"/>
 </head>
 {% endmacro %}
@@ -54,7 +54,7 @@
   <header class="app-topbar">
     <div class="top-search search-input-wrap">
       <form action="/search" method="get" id="topbar-search-form" style="display:flex;width:100%;position:relative;">
-        <input type="hidden" name="source" value="{{ source or 'french-manga' }}" id="topbar-search-source"/>
+        <input type="hidden" name="source" value="{{ source or 'all' }}" id="topbar-search-source"/>
         <svg viewBox="0 0 24 24" class="search-icon"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
         <input type="text" name="q" id="topbar-search-input" placeholder="Rechercher un anime... (Ctrl + K)" autocomplete="off" spellcheck="false"/>
       </form>

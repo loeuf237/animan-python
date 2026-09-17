@@ -1,4 +1,3 @@
-from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, UniqueConstraint
 from animan.database import Base
 

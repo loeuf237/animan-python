@@ -10,6 +10,7 @@ class Episode(BaseModel):
     subtitleUrl: Optional[str] = None
     version: str = "VOSTFR"
     synopsis: Optional[str] = None
+    thumbnailUrl: Optional[str] = None
 
 class AnimeResult(BaseModel):
     id: str
@@ -19,12 +20,14 @@ class AnimeResult(BaseModel):
     version: str = ""
     type: str = "Anime"
     episodeInfo: str = ""
+    source: str = ""
 
 class AnimeDetail(BaseModel):
     title: str
     originalTitle: Optional[str] = None
     synopsis: Optional[str] = None
     imageUrl: str = ""
+    bannerUrl: Optional[str] = None
     version: str = ""
     studio: Optional[str] = None
     url: str
@@ -32,3 +35,6 @@ class AnimeDetail(BaseModel):
     directors: List[str] = Field(default_factory=list)
     actors: List[str] = Field(default_factory=list)
     episodes: List[Episode] = Field(default_factory=list)
+    source: str = ""
+    tmdbId: Optional[int] = None
+    releaseDate: Optional[str] = None

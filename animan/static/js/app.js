@@ -228,12 +228,20 @@ function applySizeData(span, data) {
   if (data && data.success && data.subtitleUrl && row) {
     const sub = row.querySelector('.subtitle-cb-label');
     if (sub) sub.classList.add('is-available');
+    if (!row.dataset.subtitle) row.dataset.subtitle = data.subtitleUrl;
   }
   if (row && data && data.success) {
     if (data.currentServer) row.dataset.server = data.currentServer;
     if (data.currentQuality) row.dataset.quality = data.currentQuality;
     if (data.qualitiesSizes) {
       row.dataset.qualitiesSizes = JSON.stringify(data.qualitiesSizes);
+    }
+    if (data.subtitles && data.subtitles.length > 0) {
+      row.dataset.subtitles = JSON.stringify(data.subtitles);
+      const subBtn = row.querySelector('.btn-sub-tracks');
+      if (subBtn && data.subtitles.length > 1) {
+        subBtn.style.display = 'inline-flex';
+      }
     }
 
     const qSelect = row.querySelector('.episode-quality-select');
@@ -540,6 +548,54 @@ function showQualityModal(qualities, animeName, epNum, fileName, subtitleUrl, do
   }
 
   modal.style.display = 'flex';
+}
+
+function showSubtitleChoiceModal(btn) {
+  const row = btn.closest('.episode-item');
+  if (!row) return;
+  const modal = document.getElementById('subtitle-modal');
+  const list = document.getElementById('subtitle-list');
+  if (!modal || !list) return;
+
+  list.innerHTML = '';
+  let subtitles = [];
+  try {
+    subtitles = JSON.parse(row.dataset.subtitles || '[]');
+  } catch (e) {}
+
+  if (subtitles.length === 0 && row.dataset.subtitle) {
+    subtitles = [{ label: 'Piste par défaut', url: row.dataset.subtitle, srclang: 'fr' }];
+  }
+
+  if (subtitles.length === 0) {
+    list.innerHTML = '<p style="color:var(--muted);padding:14px;text-align:center;">Aucune piste alternative de sous-titres trouvée.</p>';
+  } else {
+    subtitles.forEach((sub, idx) => {
+      const btnItem = document.createElement('button');
+      btnItem.type = 'button';
+      btnItem.className = 'quality-item';
+      const isSelected = row.dataset.subtitle === sub.url || (idx === 0 && !row.dataset.subtitle);
+      btnItem.innerHTML = `<span class="quality-label">${escapeHtml(sub.label || sub.srclang || ('Piste ' + (idx + 1)))}</span><span class="quality-download">${isSelected ? '✓ Actif' : 'Sélectionner'}</span>`;
+      btnItem.onclick = () => {
+        row.dataset.subtitle = sub.url;
+        const cb = row.querySelector('.subtitle-check');
+        if (cb) cb.checked = true;
+        modal.style.display = 'none';
+        showToast(`Sous-titre sélectionné : ${sub.label || sub.srclang || 'Piste'}`, 'success');
+      };
+      list.appendChild(btnItem);
+    });
+  }
+
+  modal.style.display = 'flex';
+}
+
+function toggleBatchSubtitles(checked) {
+  document.querySelectorAll('.episode-item').forEach(row => {
+    if (row.style.display === 'none') return;
+    const cb = row.querySelector('.subtitle-check');
+    if (cb) cb.checked = checked;
+  });
 }
 
 async function startDownloadRequest(animeName, episodeNumber, url, fileName, subtitleUrl, scheduledTime, speedLimit, downloadSubtitles, selectedServer, selectedQuality) {
@@ -1115,6 +1171,9 @@ function createTaskRow(task) {
   row.dataset.id = task.id;
   row.dataset.category = cat;
   row.dataset.status = task.status;
+  row.dataset.speedBytes = task.speedBytes || 0;
+  row.dataset.totalBytes = task.totalBytes || 0;
+  row.dataset.downloadedBytes = task.downloadedBytes || 0;
   if (cat === 'queue') row.setAttribute('draggable', 'true');
   row.innerHTML = renderTaskRowInner(task);
   return row;
@@ -1144,6 +1203,9 @@ function updateTaskRow(task) {
   if (oldCat !== newCat) {
     row.dataset.category = newCat;
     row.dataset.status = task.status;
+    row.dataset.speedBytes = task.speedBytes || 0;
+    row.dataset.totalBytes = task.totalBytes || 0;
+    row.dataset.downloadedBytes = task.downloadedBytes || 0;
     row.className = 'dl-task-row' + (newCat === 'queue' ? ' queue-row' : (newCat === 'done' ? ' completed-row' : ''));
     if (newCat === 'queue') {
       row.setAttribute('draggable', 'true');
@@ -1166,6 +1228,10 @@ function updateTaskRow(task) {
   // In-place micro updates when category is unchanged
   row.dataset.status = task.status;
   if (newCat === 'active') {
+    row.dataset.speedBytes = task.speedBytes || 0;
+    row.dataset.totalBytes = task.totalBytes || 0;
+    row.dataset.downloadedBytes = task.downloadedBytes || 0;
+
     const fill = row.querySelector('.dl-progress-fill');
     if (fill) fill.style.width = (task.progress || 0) + '%';
 
@@ -1179,7 +1245,7 @@ function updateTaskRow(task) {
     if (task.status === 'DOWNLOADING') {
       const total = task.totalBytes || 0;
       const dl = task.downloadedBytes || 0;
-      const sp = task.speedBytes || parseSpeedToBytes(task.speed);
+      const sp = (task.speedBytes !== undefined && task.speedBytes !== null) ? Number(task.speedBytes) : parseSpeedToBytes(task.speed);
       if (etaEl) {
         if (total > dl && sp > 0) {
           etaEl.textContent = '• ' + formatEta(Math.round((total - dl) / sp));
@@ -1398,8 +1464,15 @@ function refreshDownloadStats() {
   // Aggregate speed across active rows
   let totalSpeedBytes = 0;
   activeRows.forEach(row => {
-    const sp = row.querySelector('.dl-speed')?.textContent.trim();
-    if (sp) totalSpeedBytes += parseSpeedToBytes(sp);
+    if (row.dataset.status === 'DOWNLOADING') {
+      const spB = Number(row.dataset.speedBytes);
+      if (!isNaN(spB) && spB > 0) {
+        totalSpeedBytes += spB;
+      } else {
+        const sp = row.querySelector('.dl-speed')?.textContent.trim();
+        if (sp) totalSpeedBytes += parseSpeedToBytes(sp);
+      }
+    }
   });
 
   setText('stat-active', activeCount);
@@ -1618,6 +1691,11 @@ function initScheduledTicker() {
     document.querySelectorAll('.dl-scheduled-info[data-time]').forEach(el => {
       el.textContent = formatScheduledTime(el.dataset.time);
     });
+
+    const activeRows = document.querySelectorAll('#download-list .dl-task-row');
+    if (activeRows.length > 0) {
+      refreshDownloadStats();
+    }
   }, 1000);
 }
 
@@ -1874,7 +1952,8 @@ function initSearchAutocomplete() {
             dropdown.classList.add('open');
             return;
           }
-          dropdown.innerHTML = results.slice(0, 6).map(item => {
+          const renderItemHtml = (item, srvSource) => {
+            const actualSource = item.source || srvSource || (item.url && item.url.includes('voir-anime') ? 'voir-anime' : 'french-manga');
             const imgUrl = formatProxyImage(item.imageUrl);
             const posterHtml = imgUrl ? `
               <img class="autocomplete-poster" src="${imgUrl}" alt="" loading="lazy"
@@ -1889,7 +1968,7 @@ function initSearchAutocomplete() {
             ` : '';
 
             return `
-              <a href="/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(source)}" class="autocomplete-item">
+              <a href="/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(actualSource)}" class="autocomplete-item">
                 ${posterHtml}
                 <div class="autocomplete-info">
                   <div class="autocomplete-title">${escapeHtml(item.title)}</div>
@@ -1901,7 +1980,26 @@ function initSearchAutocomplete() {
                 </div>
               </a>
             `;
-          }).join('');
+          };
+
+          if (source === 'all') {
+            // Groupement par ordre alphabétique des sources actives: French-Manga puis VoirAnime
+            const fmList = results.filter(i => (i.source === 'french-manga' || (!i.source && !i.url.includes('voir-anime'))));
+            const vaList = results.filter(i => (i.source === 'voir-anime' || (!i.source && i.url.includes('voir-anime'))));
+
+            let groupedHtml = '';
+            if (fmList.length > 0) {
+              groupedHtml += `<div class="autocomplete-group-header source-french-manga"><span>French-Manga</span> <small>(${fmList.length})</small></div>`;
+              groupedHtml += fmList.slice(0, 4).map(i => renderItemHtml(i, 'french-manga')).join('');
+            }
+            if (vaList.length > 0) {
+              groupedHtml += `<div class="autocomplete-group-header source-voir-anime"><span>VoirAnime</span> <small>(${vaList.length})</small></div>`;
+              groupedHtml += vaList.slice(0, 4).map(i => renderItemHtml(i, 'voir-anime')).join('');
+            }
+            dropdown.innerHTML = groupedHtml || '<div style="padding:16px;color:var(--muted);font-size:13px;text-align:center;">Aucun résultat</div>';
+          } else {
+            dropdown.innerHTML = results.slice(0, 6).map(item => renderItemHtml(item, source)).join('');
+          }
           dropdown.classList.add('open');
         } catch (e) {}
       }, 220);
@@ -1936,7 +2034,7 @@ function initSearchAutocomplete() {
   };
 
   bindInput('topbar-search-input', 'topbar-search-dropdown', () => {
-    return document.getElementById('topbar-search-source')?.value || 'french-manga';
+    return document.getElementById('topbar-search-source')?.value || 'all';
   });
 
   bindInput('search-input', 'hero-search-dropdown', () => {
@@ -2247,4 +2345,288 @@ async function redownloadTask(taskId) {
     showToast('Erreur : ' + e.message, 'error');
   }
 }
+
+/* ==========================================================================
+   Tachiyomi Page Controllers & Interactivity
+   ========================================================================== */
+
+function toggleSynopsis() {
+  const box = document.getElementById('tachiyomi-synopsis');
+  if (box) {
+    box.classList.toggle('expanded');
+  }
+}
+
+function toggleMassiveDownloadMenu(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('tachiyomi-download-menu');
+  const overflow = document.getElementById('tachiyomi-overflow-menu');
+  if (overflow) {
+    overflow.classList.remove('show');
+    overflow.style.display = 'none';
+  }
+  if (menu) {
+    const isShowing = menu.classList.toggle('show');
+    menu.style.display = isShowing ? 'flex' : 'none';
+  }
+}
+
+function toggleTachiyomiOverflowMenu(event) {
+  if (event) event.stopPropagation();
+  const menu = document.getElementById('tachiyomi-overflow-menu');
+  const dlMenu = document.getElementById('tachiyomi-download-menu');
+  if (dlMenu) {
+    dlMenu.classList.remove('show');
+    dlMenu.style.display = 'none';
+  }
+  if (menu) {
+    const isShowing = menu.classList.toggle('show');
+    menu.style.display = isShowing ? 'flex' : 'none';
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const dlMenu = document.getElementById('tachiyomi-download-menu');
+  if (dlMenu && !dlMenu.contains(e.target) && !e.target.closest('#tach-dl-menu-btn')) {
+    dlMenu.classList.remove('show');
+    dlMenu.style.display = 'none';
+  }
+  const overflow = document.getElementById('tachiyomi-overflow-menu');
+  if (overflow && !overflow.contains(e.target) && !e.target.closest('#tach-overflow-btn')) {
+    overflow.classList.remove('show');
+    overflow.style.display = 'none';
+  }
+});
+
+function toggleTachiyomiFilterModal(event) {
+  if (event) event.stopPropagation();
+  const sheet = document.getElementById('tachiyomi-filter-sheet');
+  if (sheet) sheet.classList.toggle('show');
+}
+
+function closeTachiyomiFilterModal() {
+  const sheet = document.getElementById('tachiyomi-filter-sheet');
+  if (sheet) sheet.classList.remove('show');
+}
+
+function onFilterOverlayClick(e) {
+  if (e.target.id === 'tachiyomi-filter-sheet') {
+    closeTachiyomiFilterModal();
+  }
+}
+
+function switchTachiyomiTab(tabName) {
+  document.querySelectorAll('.tachiyomi-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+  document.querySelectorAll('.tachiyomi-tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === `tach-tab-${tabName}`);
+  });
+}
+
+async function toggleTachiyomiAutoDl(btn) {
+  const animeUrl = typeof ANIME_URL !== 'undefined' ? ANIME_URL : '';
+  if (!animeUrl) return;
+
+  const isActive = btn.classList.contains('active');
+  const newAutoDl = !isActive;
+
+  try {
+    const resp = await fetch('/api/library/toggle-auto-download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: animeUrl, autoDownload: newAutoDl })
+    });
+    const data = await resp.json();
+    if (data.success) {
+      btn.classList.toggle('active', newAutoDl);
+      showToast(newAutoDl ? 'Surveillance Watchdog (Auto-DL) activée !' : 'Auto-DL désactivé', 'info');
+    } else {
+      showToast(data.error || 'Erreur lors du changement d\'Auto-DL', 'error');
+    }
+  } catch (err) {
+    showToast('Erreur : ' + err.message, 'error');
+  }
+}
+
+// Téléchargement massif style Tachiyomi
+function triggerTachiyomiBatch(type) {
+  const menu = document.getElementById('tachiyomi-download-menu');
+  if (menu) menu.classList.remove('show');
+
+  const rows = Array.from(document.querySelectorAll('.episode-item, .tachiyomi-episode-item'));
+  if (!rows.length) return;
+
+  // Décocher tout d'abord
+  document.querySelectorAll('.episode-check').forEach(cb => cb.checked = false);
+
+  let targetRows = [];
+  if (type === 'next-1') {
+    const nextUnwatched = rows.find(r => !r.classList.contains('ep-watched') && r.dataset.downloaded !== 'true');
+    targetRows = nextUnwatched ? [nextUnwatched] : (rows.find(r => r.dataset.downloaded !== 'true') ? [rows.find(r => r.dataset.downloaded !== 'true')] : []);
+  } else if (type === 'next-5') {
+    targetRows = rows.filter(r => !r.classList.contains('ep-watched') && r.dataset.downloaded !== 'true').slice(0, 5);
+    if (targetRows.length === 0) targetRows = rows.filter(r => r.dataset.downloaded !== 'true').slice(0, 5);
+  } else if (type === 'next-10') {
+    targetRows = rows.filter(r => !r.classList.contains('ep-watched') && r.dataset.downloaded !== 'true').slice(0, 10);
+    if (targetRows.length === 0) targetRows = rows.filter(r => r.dataset.downloaded !== 'true').slice(0, 10);
+  } else if (type === 'next-25') {
+    targetRows = rows.filter(r => !r.classList.contains('ep-watched') && r.dataset.downloaded !== 'true').slice(0, 25);
+    if (targetRows.length === 0) targetRows = rows.filter(r => r.dataset.downloaded !== 'true').slice(0, 25);
+  } else if (type === 'unwatched') {
+    targetRows = rows.filter(r => !r.classList.contains('ep-watched') && r.dataset.downloaded !== 'true');
+  } else if (type === 'not-downloaded') {
+    targetRows = rows.filter(r => r.dataset.downloaded !== 'true');
+  } else if (type === 'all') {
+    targetRows = rows;
+  }
+
+  if (targetRows.length === 0) {
+    showToast('Aucun épisode correspondant à télécharger.', 'info');
+    return;
+  }
+
+  targetRows.forEach(row => {
+    const cb = row.querySelector('.episode-check');
+    if (cb) cb.checked = true;
+  });
+
+  showToast(`Lancement du téléchargement pour ${targetRows.length} épisode(s)...`, 'info');
+  downloadSelected();
+}
+
+// Filtres et Tri Tachiyomi
+let tachSortCriteria = 'number';
+let tachSortAsc = false;
+
+function applyTachiyomiFilters() {
+  const filterDl = document.getElementById('tach-filter-downloaded')?.checked || false;
+  const filterUnwatched = document.getElementById('tach-filter-unwatched')?.checked || false;
+  const filterVf = document.getElementById('tach-filter-vf')?.checked || false;
+  const filterVostfr = document.getElementById('tach-filter-vostfr')?.checked || false;
+
+  const rows = Array.from(document.querySelectorAll('.episode-item, .tachiyomi-episode-item'));
+  let visibleCount = 0;
+
+  rows.forEach(row => {
+    const isDl = row.dataset.downloaded === 'true' || row.classList.contains('ep-downloaded');
+    const isWatched = row.classList.contains('ep-watched');
+    const ver = (row.dataset.version || '').toUpperCase();
+
+    let visible = true;
+    if (filterDl && !isDl) visible = false;
+    if (filterUnwatched && isWatched) visible = false;
+    if (filterVf && !filterVostfr && !ver.includes('VF')) visible = false;
+    if (filterVostfr && !filterVf && !ver.includes('VOSTFR')) visible = false;
+
+    row.style.display = visible ? 'flex' : 'none';
+    if (visible) visibleCount++;
+  });
+
+  const countEl = document.getElementById('tachiyomi-ep-count');
+  if (countEl) countEl.textContent = visibleCount;
+
+  sortTachiyomiEpisodes();
+  updateTachiyomiFab();
+}
+
+function toggleTachSortDir() {
+  tachSortAsc = !tachSortAsc;
+  const btn = document.getElementById('tach-sort-dir-btn');
+  const label = document.getElementById('tach-sort-dir-label');
+  if (btn) btn.classList.toggle('asc', tachSortAsc);
+  if (label) label.textContent = tachSortAsc ? 'Croissant' : 'Décroissant';
+  sortTachiyomiEpisodes();
+}
+
+function selectTachSort(criteria) {
+  tachSortCriteria = criteria;
+  document.querySelectorAll('.tachiyomi-sort-option').forEach(opt => {
+    opt.classList.toggle('active', opt.dataset.sort === criteria);
+  });
+  sortTachiyomiEpisodes();
+}
+
+function sortTachiyomiEpisodes() {
+  const container = document.getElementById('episode-list');
+  if (!container) return;
+
+  const rows = Array.from(container.querySelectorAll('.episode-item, .tachiyomi-episode-item'));
+  rows.sort((a, b) => {
+    let valA = 0, valB = 0;
+    if (tachSortCriteria === 'number') {
+      valA = parseFloat(a.dataset.num) || 0;
+      valB = parseFloat(b.dataset.num) || 0;
+    } else if (tachSortCriteria === 'unwatched') {
+      valA = a.classList.contains('ep-watched') ? 1 : 0;
+      valB = b.classList.contains('ep-watched') ? 1 : 0;
+    } else if (tachSortCriteria === 'alpha') {
+      const tA = (a.dataset.title || '').toLowerCase();
+      const tB = (b.dataset.title || '').toLowerCase();
+      return tachSortAsc ? tA.localeCompare(tB) : tB.localeCompare(tA);
+    }
+    return tachSortAsc ? (valA - valB) : (valB - valA);
+  });
+
+  rows.forEach(r => container.appendChild(r));
+}
+
+// Floating Action Button
+function updateTachiyomiFab() {
+  const fab = document.getElementById('tachiyomi-fab');
+  const fabText = document.getElementById('tachiyomi-fab-text');
+  if (!fab || !fabText) return;
+
+  const rows = Array.from(document.querySelectorAll('.episode-item, .tachiyomi-episode-item')).filter(r => r.style.display !== 'none');
+  if (!rows.length) {
+    fab.style.display = 'none';
+    return;
+  }
+  fab.style.display = 'inline-flex';
+
+  // Trouver le premier épisode non vu
+  const firstUnwatched = rows.find(r => !r.classList.contains('ep-watched'));
+  if (firstUnwatched) {
+    const num = firstUnwatched.dataset.num;
+    fabText.textContent = (num === '1' || rows.length === 1) ? 'Commencer' : `Reprendre (Ep. ${num})`;
+    fab.dataset.targetNum = num;
+  } else {
+    fabText.textContent = 'Revoir (Ep. 1)';
+    fab.dataset.targetNum = rows[0].dataset.num;
+  }
+}
+
+function onTachiyomiFabClick() {
+  const fab = document.getElementById('tachiyomi-fab');
+  const targetNum = fab?.dataset.targetNum;
+  if (!targetNum) return;
+
+  const row = document.querySelector(`.episode-item[data-num="${targetNum}"], .tachiyomi-episode-item[data-num="${targetNum}"]`);
+  if (row) {
+    const playBtn = row.querySelector('.btn-play-ep') || row;
+    playEpisode(playBtn);
+  }
+}
+
+async function markAllEpisodes(watched) {
+  const rows = Array.from(document.querySelectorAll('.episode-item, .tachiyomi-episode-item'));
+  const animeUrl = typeof ANIME_URL !== 'undefined' ? ANIME_URL : '';
+  const animeName = typeof ANIME_NAME !== 'undefined' ? ANIME_NAME : '';
+
+  rows.forEach(row => {
+    row.classList.toggle('ep-watched', watched);
+  });
+
+  updateTachiyomiFab();
+  showToast(watched ? 'Tous les épisodes ont été marqués comme vus' : 'Tous les épisodes ont été marqués comme non vus', 'info');
+
+  const overflow = document.getElementById('tachiyomi-overflow-menu');
+  if (overflow) overflow.classList.remove('show');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  if (document.getElementById('tachiyomi-fab')) {
+    updateTachiyomiFab();
+  }
+});
 

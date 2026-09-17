@@ -26,6 +26,13 @@ class Settings:
     READ_TIMEOUT: float = float(os.getenv("ANIMAN_READ_TIMEOUT", "30.0"))
     VOIRANIME_DEFAULT_SERVER: str = os.getenv("ANIMAN_VOIRANIME_DEFAULT_SERVER", "auto")
 
+    # TMDB (The Movie Database)
+    TMDB_API_KEY: str = os.getenv("TMDB_API_KEY", "4e44d9029b1270a757cddc766a1bcb63")
+    TMDB_ENABLED: bool = os.getenv("ANIMAN_TMDB_ENABLED", "true").lower() in ("1", "true", "yes")
+
+    # Miroirs VoirAnime
+    VOIRANIME_BACKUP_URLS: list = ["https://voiranime.io", "https://voiranime.homes"]
+
     # Watchdog
     WATCHDOG_INTERVAL_SECONDS: int = int(os.getenv("ANIMAN_WATCHDOG_INTERVAL", "3600"))
 
