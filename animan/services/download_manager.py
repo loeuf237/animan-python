@@ -4,6 +4,7 @@ import logging
 import math
 import re
 import shutil
+import socket
 import subprocess
 import time
 import xml.sax.saxutils as saxutils
@@ -89,6 +90,41 @@ class DownloadManagerService:
             loop.create_task(self.process_queue())
         except RuntimeError:
             pass
+
+    async def is_client_online(self) -> bool:
+        """
+        Vérifie si la machine locale dispose d'un accès actif au réseau Internet.
+        Permet de distinguer formellement une coupure locale (perte Wi-Fi / 4G / câble débranché)
+        d'une indisponibilité spécifique du serveur d'hébergement distant.
+        """
+        loop = asyncio.get_running_loop()
+
+        def _socket_probe() -> bool:
+            for host, port in [("1.1.1.1", 53), ("8.8.8.8", 53), ("9.9.9.9", 53)]:
+                try:
+                    s = socket.create_connection((host, port), timeout=2.0)
+                    s.close()
+                    return True
+                except Exception:
+                    continue
+            return False
+
+        try:
+            if await loop.run_in_executor(None, _socket_probe):
+                return True
+        except Exception:
+            pass
+
+        # Fallback HTTP au cas où les ports DNS UDP/TCP 53 soient bloqués
+        try:
+            async with httpx.AsyncClient(timeout=3.0, trust_env=False) as client:
+                r = await client.head("http://connectivitycheck.gstatic.com/generate_204")
+                if r.status_code in (200, 204):
+                    return True
+        except Exception:
+            pass
+
+        return False
 
     def init_from_db(self):
         try:
@@ -912,6 +948,13 @@ class DownloadManagerService:
                     proc.terminate()
                 except Exception:
                     pass
+            if t.savePath:
+                out_p = Path(t.savePath)
+                Path(t.savePath + ".part").unlink(missing_ok=True)
+                out_p.with_suffix(".tmp.mp4").unlink(missing_ok=True)
+                seg_d = out_p.parent / f".{out_p.stem}_segments"
+                if seg_d.exists():
+                    shutil.rmtree(seg_d, ignore_errors=True)
         deleted_from_db = library_service.delete_task_entity(task_id)
         self._trigger_process_queue()
         return (t is not None) or deleted_from_db
@@ -1279,14 +1322,18 @@ class DownloadManagerService:
                         va_settings = source_settings_service.get_source_settings("voir-anime")
                         va_strategy = va_settings.get("quality_strategy", "highest")
                         pref_srv = task.selectedServer or self.voiranime_default_server
-                        # Si échec répété, déconnexion/stalle réseau ou erreur HTML, repli sur les serveurs alternatifs
+                        # Si échec répété du serveur distant (client confirmé en ligne) ou erreur HTML, repli sur serveurs alternatifs
                         consec_errs = getattr(task, "consecutiveServerErrors", 0)
-                        if consec_errs >= 1 or task.retryCount >= 2 or (task.retryCount >= 1 and "html" in (task.error or "").lower()):
-                            logger.info("[download_manager] Repli sur les serveurs alternatifs pour %s après échec sur %s", task.fileName, pref_srv)
+                        client_offline = getattr(task, "clientOffline", False)
+                        if not client_offline and (consec_errs >= 2 or (task.retryCount >= 2 and not client_offline) or (task.retryCount >= 1 and "html" in (task.error or "").lower())):
+                            logger.info("[download_manager] Repli sur les serveurs alternatifs pour %s après échecs confirmés sur %s", task.fileName, pref_srv)
                             if pref_srv:
                                 part_clean = Path(task.savePath + ".part")
                                 if part_clean.exists():
                                     part_clean.unlink(missing_ok=True)
+                                segments_clean = Path(task.savePath).parent / f".{Path(task.savePath).stem}_segments"
+                                if segments_clean.exists():
+                                    shutil.rmtree(segments_clean, ignore_errors=True)
                                 task.downloadedBytes = 0
                                 task.progress = 0.0
                             pref_srv = None
@@ -1389,11 +1436,43 @@ class DownloadManagerService:
                                     format_bytes(bytes_gained), task.fileName)
                         task.retryCount = max(0, task.retryCount - 1)
 
+                    err_msg = str(e).lower()
+
+                    # 1. Tester d'abord si la machine locale est déconnectée d'Internet
+                    client_online = await self.is_client_online()
+                    if not client_online:
+                        task.clientOffline = True
+                        logger.warning(
+                            "[download_manager] Coupure Internet locale détectée pour %s (erreur: %s). "
+                            "Conservation de l'hébergeur %s et des données partielles. En attente du rétablissement réseau...",
+                            task.fileName, err_msg, task.selectedServer
+                        )
+                        task.status = DownloadStatus.RETRYING
+                        task.error = "Connexion Internet locale interrompue. En attente du rétablissement réseau..."
+                        task.speed = 0
+                        self.broadcast_update(task)
+                        library_service.save_task(task)
+
+                        # Attente active du retour de la connexion sans consommer les retries serveur ni changer d'hôte
+                        while not task.cancelled and not task.paused:
+                            await asyncio.sleep(5.0)
+                            if await self.is_client_online():
+                                logger.info(
+                                    "[download_manager] Connexion Internet rétablie pour %s ! Reprise du téléchargement sur l'hébergeur %s.",
+                                    task.fileName, task.selectedServer
+                                )
+                                task.clientOffline = False
+                                need_resolve = True  # Re-résoudre sur le même serveur en cas de token/lien direct expiré
+                                task.directDownloadUrl = None
+                                break
+                        continue
+
+                    task.clientOffline = False
+
                     if task.retryCount < max_retries:
                         task.retryCount += 1
-                        err_msg = str(e).lower()
 
-                        # Détection des coupures réseau, timeouts, expirations CDN ou réponses invalides
+                        # Détection des coupures réseau distantes, timeouts, expirations CDN ou réponses invalides de l'hébergeur
                         is_disconnect = (
                             "peer closed connection" in err_msg
                             or "remote protocol" in err_msg
@@ -1417,7 +1496,7 @@ class DownloadManagerService:
                             task.consecutiveServerErrors = getattr(task, "consecutiveServerErrors", 0) + 1
                             need_resolve = True
                             task.directDownloadUrl = None
-                            logger.info("Lien direct expiré ou déconnexion (%s) pour %s, re-résolution au prochain essai (échecs serveur: %d)",
+                            logger.info("Lien direct expiré ou déconnexion serveur (%s) pour %s, re-résolution au prochain essai (échecs serveur: %d)",
                                         err_msg, task.fileName, task.consecutiveServerErrors)
                         elif task.retryCount >= 2:
                             need_resolve = True
@@ -1437,7 +1516,7 @@ class DownloadManagerService:
                                 task.retryCount -= 1
 
                         task.status = DownloadStatus.RETRYING
-                        task.error = f"Erreur réseau: {str(e)}. Reprise ({task.retryCount}/{max_retries})"
+                        task.error = f"Erreur serveur hébergeur: {str(e)}. Reprise ({task.retryCount}/{max_retries})"
                         self.broadcast_update(task)
                         library_service.save_task(task)
 
@@ -1833,6 +1912,15 @@ class DownloadManagerService:
         logger.info("Téléchargement HLS pour %s depuis %s", task.fileName, m3u8_url)
         output_path = Path(task.savePath)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        segments_dir = output_path.parent / f".{output_path.stem}_segments"
+
+        # Si un cache de segments HLS existe déjà (suite à une coupure prolongée ou interruption),
+        # privilégier le téléchargeur par segments pour reprendre sans perdre les données existantes !
+        if segments_dir.exists() and any(segments_dir.glob("seg_*.ts")):
+            logger.info("Segments HLS partiels préexistants détectés pour %s, reprise par segments", task.fileName)
+            await self._download_hls_segments_native(task, m3u8_url)
+            return
+
         temp_output = output_path.with_suffix(".tmp.mp4")
         if temp_output.exists():
             temp_output.unlink(missing_ok=True)
@@ -1973,12 +2061,11 @@ class DownloadManagerService:
             await self._download_hls_segments_native(task, m3u8_url)
 
     async def _download_hls_segments_native(self, task: DownloadTask, m3u8_url: str):
-        logger.info("Téléchargement HLS natif (fallback) pour %s", task.fileName)
+        logger.info("Téléchargement HLS par segments (avec reprise) pour %s", task.fileName)
         output_path = Path(task.savePath)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_output = output_path.with_suffix(".tmp.mp4")
-        if temp_output.exists():
-            temp_output.unlink(missing_ok=True)
+        segments_dir = output_path.parent / f".{output_path.stem}_segments"
+        segments_dir.mkdir(parents=True, exist_ok=True)
 
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
@@ -1993,17 +2080,19 @@ class DownloadManagerService:
 
             playlist_text = resp.text
             sub_url = m3u8_url
-            for line in playlist_text.splitlines():
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    sub_url = urljoin(m3u8_url, line)
-                    break
+            # Si le m3u8 ne contient pas directement de tags #EXTINF, c'est une master playlist
+            if "#EXTINF" not in playlist_text:
+                for line in playlist_text.splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        sub_url = urljoin(m3u8_url, line)
+                        break
 
-            if sub_url != m3u8_url:
-                sub_resp = await client.get(sub_url)
-                if sub_resp.status_code != 200:
-                    raise ConnectionError(f"HTTP {sub_resp.status_code} sur sous-playlist HLS")
-                playlist_text = sub_resp.text
+                if sub_url != m3u8_url:
+                    sub_resp = await client.get(sub_url)
+                    if sub_resp.status_code != 200:
+                        raise ConnectionError(f"HTTP {sub_resp.status_code} sur sous-playlist HLS")
+                    playlist_text = sub_resp.text
 
             segments = [
                 urljoin(sub_url, line.strip())
@@ -2015,72 +2104,132 @@ class DownloadManagerService:
                 raise ValueError("Aucun segment trouvé dans la playlist HLS")
 
             total_segments = len(segments)
-            downloaded = 0
+
+            # Analyser les segments déjà complétés sur le disque pour reprise instantanée sans perte
+            existing_bytes = 0
+            completed_indices = set()
+            for idx in range(total_segments):
+                sf = segments_dir / f"seg_{idx:05d}.ts"
+                if sf.exists() and sf.stat().st_size > 0:
+                    existing_bytes += sf.stat().st_size
+                    completed_indices.add(idx)
+
+            downloaded = existing_bytes
+            if existing_bytes > 0:
+                logger.info("Reprise HLS pour %s : %d/%d segments déjà présents (%s)",
+                            task.fileName, len(completed_indices), total_segments, format_bytes(existing_bytes))
+                task.downloadedBytes = downloaded
+                if total_segments > 0:
+                    task.progress = min(99.0, (len(completed_indices) / total_segments) * 100.0)
+                self.broadcast_update(task)
+
             task.reset_speed()
+            if task.downloadedBytes > 0:
+                task.speed_tracker.add_sample(task.downloadedBytes)
             last_time = time.time()
 
-            with open(temp_output, "wb") as outfile:
-                for idx, seg_url in enumerate(segments):
-                    if task.cancelled:
-                        outfile.close()
-                        temp_output.unlink(missing_ok=True)
-                        task.status = DownloadStatus.CANCELLED
-                        task.reset_speed()
-                        self.broadcast_update(task)
-                        return
-                    if task.paused:
-                        task.status = DownloadStatus.PAUSED
-                        task.reset_speed()
-                        self.broadcast_update(task)
-                        return
+            for idx, seg_url in enumerate(segments):
+                if task.cancelled:
+                    shutil.rmtree(segments_dir, ignore_errors=True)
+                    task.status = DownloadStatus.CANCELLED
+                    task.reset_speed()
+                    self.broadcast_update(task)
+                    return
+                if task.paused:
+                    # En pause, on conserve le cache des segments pour la reprise future
+                    task.status = DownloadStatus.PAUSED
+                    task.reset_speed()
+                    self.broadcast_update(task)
+                    return
 
+                seg_file = segments_dir / f"seg_{idx:05d}.ts"
+                if idx in completed_indices and seg_file.exists() and seg_file.stat().st_size > 0:
+                    continue
+
+                seg_tmp = segments_dir / f"seg_{idx:05d}.tmp"
+                try:
                     seg_resp = await client.get(seg_url)
                     if seg_resp.status_code != 200:
-                        continue
-
+                        raise ConnectionError(f"HTTP {seg_resp.status_code} sur segment {idx}")
                     chunk_data = seg_resp.content
-                    outfile.write(chunk_data)
-                    downloaded += len(chunk_data)
+                    with open(seg_tmp, "wb") as f_seg:
+                        f_seg.write(chunk_data)
+                    seg_tmp.replace(seg_file)
+                except Exception as e:
+                    if seg_tmp.exists():
+                        seg_tmp.unlink(missing_ok=True)
+                    raise e
 
-                    await self._apply_throttle(task, len(chunk_data))
+                chunk_len = len(chunk_data)
+                downloaded += chunk_len
+                completed_indices.add(idx)
 
-                    now = time.time()
-                    task.update_progress(downloaded, now)
-                    task.progress = ((idx + 1) / total_segments) * 100.0
+                await self._apply_throttle(task, chunk_len)
 
-                    if now - last_time >= 0.5:
-                        last_time = now
-                        self.broadcast_update(task)
+                now = time.time()
+                task.update_progress(downloaded, now)
+                task.progress = min(99.0, (len(completed_indices) / total_segments) * 100.0)
 
-            if self.is_ffmpeg_available() and task.fileName.endswith(".mp4"):
-                remux_cmd = [
-                    "ffmpeg", "-y",
-                    "-i", str(temp_output),
-                    "-c", "copy",
-                    "-bsf:a", "aac_adtstoasc",
-                    str(output_path)
-                ]
-                r_proc = await asyncio.create_subprocess_exec(
-                    *remux_cmd,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL
-                )
-                r_rc = await r_proc.wait()
-                if r_rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
-                    temp_output.unlink(missing_ok=True)
-                else:
-                    shutil.move(str(temp_output), str(output_path))
-            else:
+                if now - last_time >= 0.5:
+                    last_time = now
+                    self.broadcast_update(task)
+
+        # Assemblage final sans perte des segments HLS
+        logger.info("Assemblage de %d segments HLS vers %s", total_segments, task.fileName)
+        temp_output = output_path.with_suffix(".tmp.mp4")
+        if temp_output.exists():
+            temp_output.unlink(missing_ok=True)
+
+        concat_file = segments_dir / "concat_list.txt"
+        with open(concat_file, "w", encoding="utf-8") as f_concat:
+            for idx in range(total_segments):
+                sf = segments_dir / f"seg_{idx:05d}.ts"
+                f_concat.write(f"file '{sf.name}'\n")
+
+        merged = False
+        if self.is_ffmpeg_available() and task.fileName.endswith(".mp4"):
+            remux_cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", "concat_list.txt",
+                "-c", "copy",
+                "-bsf:a", "aac_adtstoasc",
+                str(temp_output)
+            ]
+            r_proc = await asyncio.create_subprocess_exec(
+                *remux_cmd,
+                cwd=str(segments_dir),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            r_rc = await r_proc.wait()
+            if r_rc == 0 and temp_output.exists() and temp_output.stat().st_size > 0:
                 shutil.move(str(temp_output), str(output_path))
-            task.downloadedBytes = downloaded
-            task.totalBytes = downloaded
-            task.progress = 100.0
-            task.reset_speed()
+                merged = True
 
-            if task.downloadSubtitles:
-                await self._download_subtitles(task)
+        if not merged:
+            # Fallback concaténation binaire directe
+            with open(output_path, "wb") as outfile:
+                for idx in range(total_segments):
+                    sf = segments_dir / f"seg_{idx:05d}.ts"
+                    if sf.exists():
+                        with open(sf, "rb") as infile:
+                            shutil.copyfileobj(infile, outfile, length=65536)
 
-            await self._finalize_task(task)
+        # Nettoyage sécurisé du dossier temporaire de segments une fois l'assemblage validé
+        shutil.rmtree(segments_dir, ignore_errors=True)
+
+        final_size = output_path.stat().st_size if output_path.exists() else downloaded
+        task.downloadedBytes = final_size
+        task.totalBytes = final_size
+        task.progress = 100.0
+        task.reset_speed()
+
+        if task.downloadSubtitles:
+            await self._download_subtitles(task)
+
+        await self._finalize_task(task)
 
     async def _apply_throttle(self, task: DownloadTask, bytes_read: int):
         speed_limit = task.maxSpeedLimit if task.maxSpeedLimit > 0 else self.global_speed_limit
