@@ -14,6 +14,19 @@ class Settings:
     # Sources anime
     BASE_URL: str = os.getenv("ANIMAN_BASE_URL", "https://w16.french-manga.net")
     VOIR_ANIME_URL: str = os.getenv("ANIMAN_VOIR_ANIME_URL", "https://voir-anime.to")
+    ANIMEPAHE_URL: str = os.getenv("ANIMAN_ANIMEPAHE_URL", "https://animepahe.pw")
+    ANIMEPAHE_BACKUP_URLS: list = [
+        "https://animepahe.pw",
+        "https://animepahe.com",
+        "https://animepahe.org",
+        "https://animepahe.ru",
+        "https://animepahe.si",
+    ]
+    ANIMEPAHE_COOKIE: str = os.getenv("ANIMAN_ANIMEPAHE_COOKIE", "")
+    ANIMEPAHE_USER_AGENT: str = os.getenv(
+        "ANIMAN_ANIMEPAHE_USER_AGENT",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0"
+    )
     DEFAULT_USER_AGENT: str = os.getenv(
         "ANIMAN_USER_AGENT",
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"

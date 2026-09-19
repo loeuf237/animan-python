@@ -25,20 +25,31 @@ def unpack(p: str, a: int, c: int, k: List[str]) -> str:
 
     return re.sub(r"\b[0-9a-zA-Z_]+\b", replace_word, p)
 
-def try_unpack(html: str) -> str:
-    pattern = re.compile(
-        r"eval\s*\(\s*function\s*\(p,\s*a,\s*c,\s*k,\s*e,\s*d\s*\).*?\}\s*\(\s*['\"]"
-        r"(.*?)['\"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['\"]([^'\"]*)['\"]\.split\s*\(\s*['\"]\|['\"]\s*\)\s*\)\s*\)",
-        re.DOTALL
-    )
-    match = pattern.search(html)
-    if match:
+PACKER_PATTERN = re.compile(
+    r"eval\s*\(\s*function\s*\(p,\s*a,\s*c,\s*k,\s*e,\s*d\s*\).*?\}\s*\(\s*['\"]"
+    r"(.*?)"
+    r"['\"]\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*['\"]([^'\"]*)['\"]\.split\s*\(\s*['\"]\|['\"]\s*\).*?\)\s*\)",
+    re.DOTALL
+)
+
+def unpack_all(html: str) -> List[str]:
+    """Extrait et dépaquette tous les blocs de JavaScript obfusqués via Dean Edwards packer."""
+    results = []
+    for match in PACKER_PATTERN.finditer(html):
         try:
             p = match.group(1)
             a = int(match.group(2))
             c = int(match.group(3))
             k = match.group(4).split("|")
-            return unpack(p, a, c, k)
+            unpacked_text = unpack(p, a, c, k)
+            results.append(unpacked_text)
         except Exception:
-            return html
+            continue
+    return results
+
+def try_unpack(html: str) -> str:
+    """Tente de dépaqueter tous les scripts Dean Edwards packer trouvés dans le code HTML."""
+    unpacked_blocks = unpack_all(html)
+    if unpacked_blocks:
+        return "\n".join(unpacked_blocks)
     return html

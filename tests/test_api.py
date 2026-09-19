@@ -213,19 +213,29 @@ def test_search_api_contextual_and_grouping(client, monkeypatch):
             AnimeResult(id="va1", title="VA Anime 1", url="https://voir-anime.to/anime/1", source="voir-anime")
         ]
 
+    async def mock_ap_search(q):
+        return [
+            AnimeResult(id="ap1", title="AP Anime 1", url="https://animepahe.ru/anime/1", source="animepahe")
+        ]
+
     from animan.services.scraping_service import scraping_service
     from animan.services.voiranime_service import voiranime_service
+    from animan.services.animepahe_service import animepahe_service
+    from animan.services.extension_service import extension_service
     monkeypatch.setattr(scraping_service, "search_anime", mock_fm_search)
     monkeypatch.setattr(voiranime_service, "search_anime", mock_va_search)
+    monkeypatch.setattr(animepahe_service, "search_anime", mock_ap_search)
+    monkeypatch.setattr(extension_service, "get_enabled_container_sources", lambda: [])
 
-    # 1. source=all -> Multi-sources grouped in alphabetical order: French-Manga first, then VoirAnime
+    # 1. source=all -> Multi-sources grouped: French-Manga, VoirAnime, AnimePahe
     resp = client.get("/api/search?q=test&source=all")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 3
+    assert len(data) == 4
     assert data[0]["source"] == "french-manga"
     assert data[1]["source"] == "french-manga"
     assert data[2]["source"] == "voir-anime"
+    assert data[3]["source"] == "animepahe"
 
     # 2. source=french-manga -> Only French-Manga results, no fallback
     resp = client.get("/api/search?q=test&source=french-manga")

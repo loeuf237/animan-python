@@ -212,6 +212,8 @@ class DownloadManagerService:
 
         if "tapecontent.net" in u_lower or "streamtape.com" in u_lower or s_lower in ["stape", "streamtape"]:
             headers["Referer"] = "https://streamtape.com/"
+        elif any(h in u_lower for h in ["kwik", "animepahe", "pahe"]) or s_lower == "kwik":
+            headers["Referer"] = "https://kwik.cx/"
         elif any(h in u_lower for h in ["voembed", "vidmoly", "vmeas.cloud", "vmpx.online"]) or s_lower in ["mytv", "vidmoly", "voembed"]:
             headers["Referer"] = "https://voembed.net/"
         elif "mail.ru" in u_lower or s_lower in ["fhd1", "mailru"]:
@@ -387,6 +389,7 @@ class DownloadManagerService:
             try:
                 info = ResolvedVideoInfo()
                 is_voir_anime = "voir-anime" in download_page_url
+                is_animepahe = any(k in download_page_url for k in ["animepahe", "kwik.", "pahe."])
 
                 if is_voir_anime:
                     eff_server = preferred_server or self.voiranime_default_server
@@ -414,9 +417,121 @@ class DownloadManagerService:
                     # Si extract_download_info a déjà extrait une taille positive
                     if dl_info.get("size") and int(dl_info.get("size", -1)) > 0:
                         info.size = int(dl_info["size"])
+                elif is_animepahe:
+                    from animan.services.animepahe_service import animepahe_service
+                    info.server_type = "kwik"
+                    info.available_servers = ["kwik"]
+
+                    if ("kwik." in download_page_url or "pahe." in download_page_url) and ("/e/" in download_page_url or "/d/" in download_page_url):
+                        direct_url = await animepahe_service.extract_kwik_stream(download_page_url)
+                        dl_info = {
+                            "videoUrl": direct_url or "",
+                            "serverType": "kwik",
+                            "selectedQuality": preferred_quality or "HD",
+                            "videoQualities": json.dumps({preferred_quality or "HD": download_page_url}),
+                        }
+                    elif preferred_server and ("kwik." in preferred_server or "pahe." in preferred_server):
+                        direct_url = await animepahe_service.extract_kwik_stream(preferred_server)
+                        dl_info = {
+                            "videoUrl": direct_url or "",
+                            "serverType": "kwik",
+                            "selectedQuality": preferred_quality or "HD",
+                        }
+                    else:
+                        sources = await animepahe_service.get_episode_sources(download_page_url)
+                        qualities = {}
+                        qualities_sizes = {}
+                        target = None
+                        for s in sources:
+                            q_name = s.get("name") or f"{s.get('quality', 'HD')} ({s.get('audio', 'sub')})"
+                            raw_q = (s.get("quality") or "").lower()
+                            qualities[q_name] = s.get("url", "")
+
+                            # Estimation de la taille selon la résolution sans appeler Kwik pour éviter le code 429
+                            if "360" in raw_q or "360" in q_name:
+                                est_bytes = 95 * 1024 * 1024
+                            elif "1080" in raw_q or "1080" in q_name:
+                                est_bytes = 420 * 1024 * 1024
+                            else:
+                                est_bytes = 220 * 1024 * 1024
+                            qualities_sizes[q_name] = format_bytes(est_bytes)
+
+                            if preferred_quality and (preferred_quality.lower() in q_name.lower() or preferred_quality.lower() in raw_q):
+                                if not target:
+                                    target = s
+                        if not target and sources:
+                            target = sources[0]
+
+                        sel_q = preferred_quality or "HD"
+                        target_url = ""
+                        target_size = 220 * 1024 * 1024
+                        if target:
+                            sel_q = target.get("name") or target.get("quality", "HD")
+                            target_url = target.get("url", "")
+                            raw_tq = (target.get("quality") or "").lower()
+                            if "360" in raw_tq or "360" in sel_q:
+                                target_size = 95 * 1024 * 1024
+                            elif "1080" in raw_tq or "1080" in sel_q:
+                                target_size = 420 * 1024 * 1024
+                            else:
+                                target_size = 220 * 1024 * 1024
+
+                        dl_info = {
+                            "videoUrl": target_url,
+                            "serverType": "kwik",
+                            "selectedQuality": sel_q,
+                            "videoQualities": json.dumps(qualities),
+                            "qualitiesSizes": json.dumps(qualities_sizes),
+                            "size": target_size,
+                        }
+                    info.video_qualities_json = dl_info.get("videoQualities", "{}")
+                    info.qualities_sizes_json = dl_info.get("qualitiesSizes", "{}")
+                    info.selected_server = "kwik"
+                    info.selected_quality = dl_info.get("selectedQuality", "")
+                    if dl_info.get("size"):
+                        info.size = dl_info["size"]
                 else:
-                    dl_info = await asyncio.to_thread(scraping_service.extract_download_info, download_page_url)
-                    info.server_type = "vidzy"
+                    # Vérifier si l'URL correspond à une extension Aniyomi active
+                    matched_container = None
+                    try:
+                        from animan.services.extension_service import extension_service
+                        parsed_u = urlparse(download_page_url)
+                        u_host = (parsed_u.hostname or "").lower()
+                        if u_host:
+                            for cs in extension_service.get_enabled_container_sources():
+                                if cs.base_url and u_host in cs.base_url.lower():
+                                    matched_container = cs
+                                    break
+                    except Exception:
+                        pass
+
+                    if matched_container:
+                        video_sources = await matched_container.get_episode_sources(download_page_url)
+                        qualities = {}
+                        target = None
+                        for s in video_sources:
+                            q_name = s.quality or s.server
+                            qualities[q_name] = s.url
+                            if preferred_quality and (preferred_quality.lower() in q_name.lower()):
+                                if not target:
+                                    target = s
+                        if not target and video_sources:
+                            target = video_sources[0]
+
+                        dl_info = {
+                            "videoUrl": target.url if target else "",
+                            "serverType": target.server if target else "aniyomi",
+                            "selectedQuality": target.quality if target else "HD",
+                            "videoQualities": json.dumps(qualities),
+                        }
+                        info.server_type = dl_info["serverType"]
+                        info.available_servers = [s.server for s in video_sources]
+                        info.video_qualities_json = dl_info["videoQualities"]
+                        info.selected_server = info.server_type
+                        info.selected_quality = dl_info["selectedQuality"]
+                    else:
+                        dl_info = await asyncio.to_thread(scraping_service.extract_download_info, download_page_url)
+                        info.server_type = "vidzy"
 
                 info.direct_url = dl_info.get("videoUrl", "")
                 info.subtitle_url = dl_info.get("subtitleUrl", "")
@@ -462,7 +577,9 @@ class DownloadManagerService:
         selected_quality: Optional[str] = None,
     ) -> DownloadTask:
         cache_key = f"{download_page_url}::{selected_server or ''}::{selected_quality or ''}"
-        cached = self.resolved_info_cache.get(cache_key) or self.resolved_info_cache.get(download_page_url)
+        cached = self.resolved_info_cache.get(cache_key)
+        if not cached and not (selected_server or selected_quality):
+            cached = self.resolved_info_cache.get(download_page_url)
         initial_total_bytes = cached.size if cached and cached.size > 0 else 0
         resolved_subs = cached.subtitles_json if cached else "[]"
 
@@ -547,7 +664,9 @@ class DownloadManagerService:
 
             if existing:
                 cache_key = f"{url}::{sel_server or ''}::{sel_quality or ''}"
-                cached = self.resolved_info_cache.get(cache_key) or self.resolved_info_cache.get(url)
+                cached = self.resolved_info_cache.get(cache_key)
+                if not cached and not (sel_server or sel_quality):
+                    cached = self.resolved_info_cache.get(url)
                 if cached and cached.size > 0 and existing.stat().st_size == cached.size:
                     logger.info("Batch: %s Ep%d existe déjà avec la même taille, ignoré", anime_name, ep_num)
                     continue
@@ -567,7 +686,9 @@ class DownloadManagerService:
                     pass
 
             cache_key = f"{url}::{sel_server or ''}::{sel_quality or ''}"
-            cached = self.resolved_info_cache.get(cache_key) or self.resolved_info_cache.get(url)
+            cached = self.resolved_info_cache.get(cache_key)
+            if not cached and not (sel_server or sel_quality):
+                cached = self.resolved_info_cache.get(url)
             initial_total_bytes = cached.size if cached and cached.size > 0 else 0
             resolved_subs = cached.subtitles_json if cached else "[]"
 
@@ -712,14 +833,39 @@ class DownloadManagerService:
 
     def cancel_download(self, task_id: str) -> bool:
         t = self.tasks.get(task_id)
-        if t and t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED]:
+        cancellable_statuses = [
+            DownloadStatus.DOWNLOADING,
+            DownloadStatus.PENDING,
+            DownloadStatus.RETRYING,
+            DownloadStatus.SCHEDULED,
+            DownloadStatus.PAUSED,
+            DownloadStatus.MUXING,
+        ]
+        if t and t.status in cancellable_statuses:
             t.cancelled = True
+            t.paused = False
             t.status = DownloadStatus.CANCELLED
             t.speed = 0
+            proc = getattr(t, "activeProcess", None)
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
             self.broadcast_update(t)
             library_service.save_task(t)
             self._trigger_process_queue()
             return True
+        elif not t:
+            entity = library_service.get_task_entity(task_id)
+            if entity and entity.status in [s.value for s in cancellable_statuses]:
+                task = entity.to_task()
+                task.cancelled = True
+                task.paused = False
+                task.status = DownloadStatus.CANCELLED
+                task.speed = 0
+                library_service.save_task(task)
+                return True
         return False
 
     def cancel_all_downloads(self) -> int:
@@ -756,14 +902,19 @@ class DownloadManagerService:
 
     def remove_task(self, task_id: str) -> bool:
         t = self.tasks.pop(task_id, None)
+        if task_id in self.task_order:
+            self.task_order.remove(task_id)
         if t:
-            if task_id in self.task_order:
-                self.task_order.remove(task_id)
-            if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING]:
-                t.cancelled = True
-            self._trigger_process_queue()
-            return True
-        return False
+            t.cancelled = True
+            proc = getattr(t, "activeProcess", None)
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        deleted_from_db = library_service.delete_task_entity(task_id)
+        self._trigger_process_queue()
+        return (t is not None) or deleted_from_db
 
     def pause_all_downloads(self):
         for t in self.tasks.values():
@@ -1108,6 +1259,7 @@ class DownloadManagerService:
                 try:
                     direct_url = task.fileUrl
                     is_voir_anime = ("voir-anime" in (direct_url or "").lower()) or ("voiranime" in (direct_url or "").lower())
+                    is_animepahe = any(k in (direct_url or "").lower() for k in ["animepahe", "kwik.", "pahe."])
                     server_type = "vidzy"
                     chunks_json = "[]"
 
@@ -1123,11 +1275,30 @@ class DownloadManagerService:
                         direct_url = task.directDownloadUrl
                         logger.info("Réutilisation de l'URL directe en cache pour %s", task.fileName)
                     elif is_voir_anime:
+                        from animan.services.source_settings_service import source_settings_service
+                        va_settings = source_settings_service.get_source_settings("voir-anime")
+                        va_strategy = va_settings.get("quality_strategy", "highest")
+                        pref_srv = task.selectedServer or self.voiranime_default_server
+                        # Si échec répété, déconnexion/stalle réseau ou erreur HTML, repli sur les serveurs alternatifs
+                        consec_errs = getattr(task, "consecutiveServerErrors", 0)
+                        if consec_errs >= 1 or task.retryCount >= 2 or (task.retryCount >= 1 and "html" in (task.error or "").lower()):
+                            logger.info("[download_manager] Repli sur les serveurs alternatifs pour %s après échec sur %s", task.fileName, pref_srv)
+                            if pref_srv:
+                                part_clean = Path(task.savePath + ".part")
+                                if part_clean.exists():
+                                    part_clean.unlink(missing_ok=True)
+                                task.downloadedBytes = 0
+                                task.progress = 0.0
+                            pref_srv = None
+                            task.selectedServer = None
+                            task.selectedQuality = None
+
                         info = await asyncio.to_thread(
                             voiranime_service.extract_download_info,
                             direct_url,
-                            preferred_server=task.selectedServer or self.voiranime_default_server,
+                            preferred_server=pref_srv,
                             preferred_quality=task.selectedQuality,
+                            quality_strategy=va_strategy,
                         )
                         direct_url = info.get("videoUrl", "")
                         if not direct_url:
@@ -1137,6 +1308,37 @@ class DownloadManagerService:
                         task.directDownloadUrl = direct_url
                         if not task.subtitleUrl and info.get("subtitleUrl"):
                             task.subtitleUrl = info["subtitleUrl"]
+                    elif is_animepahe:
+                        from animan.services.animepahe_service import animepahe_service
+                        server_type = "kwik"
+                        if ("kwik." in direct_url or "pahe." in direct_url) and ("/e/" in direct_url or "/d/" in direct_url):
+                            extracted = await animepahe_service.extract_kwik_stream(direct_url)
+                            if not extracted:
+                                raise ValueError(f"Impossible de résoudre le flux Kwik pour {task.fileName}")
+                            direct_url = extracted
+                        elif task.selectedServer and ("kwik." in task.selectedServer or "pahe." in task.selectedServer):
+                            extracted = await animepahe_service.extract_kwik_stream(task.selectedServer)
+                            if not extracted:
+                                raise ValueError(f"Impossible de résoudre le flux Kwik sélectionné pour {task.fileName}")
+                            direct_url = extracted
+                        else:
+                            sources = await animepahe_service.get_episode_sources(direct_url)
+                            target = None
+                            if task.selectedQuality and task.selectedQuality != "auto":
+                                for s in sources:
+                                    q_name = s.get("name") or s.get("quality", "")
+                                    if task.selectedQuality.lower() in q_name.lower() or task.selectedQuality.lower() in s.get("quality", "").lower():
+                                        target = s
+                                        break
+                            if not target and sources:
+                                target = sources[0]
+                            if not target or not target.get("url"):
+                                raise ValueError(f"Aucune source Kwik trouvée pour {task.fileName}")
+                            extracted = await animepahe_service.extract_kwik_stream(target["url"])
+                            if not extracted:
+                                raise ValueError(f"Échec d'extraction du flux vidéo Kwik pour {task.fileName}")
+                            direct_url = extracted
+                        task.directDownloadUrl = direct_url
                     elif direct_url and self._needs_scraping_resolution(direct_url):
                         info = await asyncio.to_thread(scraping_service.extract_download_info, direct_url)
                         direct_url = info.get("videoUrl", "")
@@ -1181,19 +1383,17 @@ class DownloadManagerService:
                         library_service.save_task(task)
                         return
 
-                    # Si des octets ont été reçus pendant cette tentative (le téléchargement avance),
-                    # on réinitialise le compteur d'échecs consécutifs !
                     bytes_gained = task.downloadedBytes - bytes_before if 'bytes_before' in locals() else 0
-                    if bytes_gained > 0:
-                        logger.info("Progrès de %s octets pour %s malgré coupure réseau, réinitialisation du compteur d'essais",
+                    if bytes_gained > 10 * 1024 * 1024:
+                        logger.info("Progrès de %s octets pour %s malgré coupure réseau, réduction du compteur d'essais",
                                     format_bytes(bytes_gained), task.fileName)
-                        task.retryCount = 0
+                        task.retryCount = max(0, task.retryCount - 1)
 
                     if task.retryCount < max_retries:
                         task.retryCount += 1
                         err_msg = str(e).lower()
 
-                        # Détection des coupures réseau, expirations de token CDN ou réponses invalides
+                        # Détection des coupures réseau, timeouts, expirations CDN ou réponses invalides
                         is_disconnect = (
                             "peer closed connection" in err_msg
                             or "remote protocol" in err_msg
@@ -1201,6 +1401,9 @@ class DownloadManagerService:
                             or "connection closed" in err_msg
                             or "incompleteread" in err_msg
                             or "broken pipe" in err_msg
+                            or "readtimeout" in err_msg
+                            or "connecttimeout" in err_msg
+                            or "timeout" in err_msg
                             or "416" in err_msg
                             or "403" in err_msg
                             or "401" in err_msg
@@ -1210,10 +1413,15 @@ class DownloadManagerService:
                             or "503" in err_msg
                             or "html" in err_msg
                         )
-                        if is_disconnect or task.retryCount >= 2:
+                        if is_disconnect:
+                            task.consecutiveServerErrors = getattr(task, "consecutiveServerErrors", 0) + 1
                             need_resolve = True
                             task.directDownloadUrl = None
-                            logger.info("Lien direct expiré ou déconnexion (%s) pour %s, re-résolution au prochain essai", err_msg, task.fileName)
+                            logger.info("Lien direct expiré ou déconnexion (%s) pour %s, re-résolution au prochain essai (échecs serveur: %d)",
+                                        err_msg, task.fileName, task.consecutiveServerErrors)
+                        elif task.retryCount >= 2:
+                            need_resolve = True
+                            task.directDownloadUrl = None
 
                         # Détection des pannes DNS transitoires
                         is_dns = (
@@ -1318,14 +1526,23 @@ class DownloadManagerService:
             if part_path.exists():
                 existing_len = part_path.stat().st_size
 
-        referer = "https://vidzy.org/" if "vidzy" in direct_url else ("https://voir-anime.to/" if "voir" in direct_url else "https://french-manga.net/")
+        if any(k in direct_url for k in ["kwik", "animepahe", "pahe"]):
+            referer = "https://kwik.cx/"
+        elif any(k in direct_url for k in ["streamtape", "tapecontent"]):
+            referer = "https://streamtape.com/"
+        elif "vidzy" in direct_url:
+            referer = "https://vidzy.org/"
+        elif "voir" in direct_url:
+            referer = "https://voir-anime.to/"
+        else:
+            referer = "https://french-manga.net/"
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
             "Referer": referer,
         }
         proxy = proxy_service.get_random_proxy()
 
-        timeout = httpx.Timeout(connect=settings.CONNECTION_TIMEOUT, read=120.0, write=30.0, pool=None)
+        timeout = httpx.Timeout(connect=settings.CONNECTION_TIMEOUT, read=settings.READ_TIMEOUT, write=30.0, pool=None)
         async with self._create_async_client(headers=headers, proxy=proxy, timeout=timeout) as client:
             req_headers = dict(headers)
             is_resume = existing_len > 0
@@ -1620,6 +1837,14 @@ class DownloadManagerService:
         if temp_output.exists():
             temp_output.unlink(missing_ok=True)
 
+        # Si le flux provient de Kwik / Owocdn HLS, le router via le proxy HLS local
+        # pour bénéficier du contournement Cloudflare TLS et du déchiffrement transparent AES-128
+        is_kwik_owocdn = any(d in m3u8_url for d in ["owocdn.top", "kwik.cx", "kwik."])
+        if is_kwik_owocdn and "/api/media/hls-proxy" not in m3u8_url:
+            from urllib.parse import quote
+            m3u8_url = f"http://127.0.0.1:{settings.PORT}/api/media/hls-proxy/playlist.m3u8?url={quote(m3u8_url)}"
+            logger.info("Routage HLS AnimePahe via proxy local: %s", task.fileName)
+
         if task.totalBytes <= 0:
             try:
                 est_sz = await self.estimate_hls_size(m3u8_url)
@@ -1636,6 +1861,12 @@ class DownloadManagerService:
             headers_arg = f"User-Agent: {ua}\r\nReferer: {referer}\r\n"
             cmd = [
                 "ffmpeg", "-y",
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_on_network_error", "1",
+                "-reconnect_delay_max", "5",
+                "-reconnect_max_retries", "10",
+                "-allowed_segment_extensions", "ALL",
                 "-headers", headers_arg,
                 "-i", m3u8_url,
                 "-c", "copy",
@@ -1713,7 +1944,12 @@ class DownloadManagerService:
 
                 rc = await proc.wait()
                 if rc != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
-                    raise ConnectionError(f"FFmpeg HLS failed with exit code {rc}")
+                    logger.warning("FFmpeg HLS a échoué (code %s) pour %s, bascule vers le téléchargement HLS natif", rc, task.fileName)
+                    ticker_task.cancel()
+                    task.activeProcess = None
+                    temp_output.unlink(missing_ok=True)
+                    await self._download_hls_segments_native(task, m3u8_url)
+                    return
 
                 final_size = temp_output.stat().st_size
                 shutil.move(str(temp_output), str(output_path))
@@ -1816,7 +2052,26 @@ class DownloadManagerService:
                         last_time = now
                         self.broadcast_update(task)
 
-            shutil.move(str(temp_output), str(output_path))
+            if self.is_ffmpeg_available() and task.fileName.endswith(".mp4"):
+                remux_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", str(temp_output),
+                    "-c", "copy",
+                    "-bsf:a", "aac_adtstoasc",
+                    str(output_path)
+                ]
+                r_proc = await asyncio.create_subprocess_exec(
+                    *remux_cmd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                r_rc = await r_proc.wait()
+                if r_rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
+                    temp_output.unlink(missing_ok=True)
+                else:
+                    shutil.move(str(temp_output), str(output_path))
+            else:
+                shutil.move(str(temp_output), str(output_path))
             task.downloadedBytes = downloaded
             task.totalBytes = downloaded
             task.progress = 100.0
@@ -1881,6 +2136,9 @@ class DownloadManagerService:
         if verif.valid:
             task.status = DownloadStatus.COMPLETED
             task.completedAt = datetime.now(timezone.utc)
+            part_path = Path(task.savePath + ".part")
+            if part_path.exists():
+                part_path.unlink(missing_ok=True)
             self.broadcast_update(task)
             library_service.save_task(task)
 

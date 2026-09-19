@@ -46,13 +46,16 @@ def test_redownload_preserves_healthy_part(tmp_path):
     )
     download_manager.tasks[task.id] = task
     
-    # Relancer la tâche
-    res = download_manager.redownload_task(task.id, force=False)
-    
-    # Le fichier .part doit être conservé intact !
-    assert part.exists()
-    assert part.stat().st_size == 50012
-    assert res.downloadedBytes == 50012
+    try:
+        # Relancer la tâche
+        res = download_manager.redownload_task(task.id, force=False)
+        
+        # Le fichier .part doit être conservé intact !
+        assert part.exists()
+        assert part.stat().st_size == 50012
+        assert res.downloadedBytes == 50012
+    finally:
+        download_manager.remove_task(task.id)
 
 def test_redownload_purges_corrupted_html(tmp_path):
     """Vérifie que redownload_task purge un fichier HTML corrompu."""
@@ -71,12 +74,15 @@ def test_redownload_purges_corrupted_html(tmp_path):
     )
     download_manager.tasks[task.id] = task
     
-    res = download_manager.redownload_task(task.id, force=False)
-    
-    # Le fichier HTML corrompu doit être purgé
-    assert not target.exists()
-    assert res.downloadedBytes == 0
-    assert res.progress == 0.0
+    try:
+        res = download_manager.redownload_task(task.id, force=False)
+        
+        # Le fichier HTML corrompu doit être purgé
+        assert not target.exists()
+        assert res.downloadedBytes == 0
+        assert res.progress == 0.0
+    finally:
+        download_manager.remove_task(task.id)
 
 def test_speed_tracker_smoothing_and_decay():
     """Vérifie que SpeedTracker lisse les arrivées par paquets HLS et ne chute pas à 0 B/s."""

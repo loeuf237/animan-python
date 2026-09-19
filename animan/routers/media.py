@@ -15,6 +15,8 @@ from animan.services.proxy_service import proxy_service
 from animan.services.library_service import library_service
 from animan.services.voiranime_service import voiranime_service
 from animan.services.scraping_service import scraping_service
+from animan.services.animepahe_service import animepahe_service
+from animan.services.extension_service import extension_service
 
 logger = logging.getLogger("animan.router.media")
 router = APIRouter()
@@ -45,12 +47,31 @@ async def proxy_image(url: str):
         return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
 
     try:
+        is_animepahe = any(d in url for d in ["animepahe", "kwik", "pahe"])
         if "themoviedb.org" in url or "tmdb.org" in url:
             referer = "https://www.themoviedb.org/"
+        elif is_animepahe:
+            referer = f"{settings.ANIMEPAHE_URL}/"
         elif any(d in url for d in ["voir-anime", "voembed", "vidmoly"]):
             referer = "https://voir-anime.to/"
         else:
             referer = "https://french-manga.net/"
+            for cs in extension_service.get_enabled_container_sources():
+                if cs.base_url and urllib.parse.urlparse(cs.base_url).hostname in url:
+                    referer = cs.base_url.rstrip("/") + "/"
+                    break
+
+        if is_animepahe:
+            media_data = await animepahe_service.fetch_media_bytes(url, referer=referer)
+            if media_data:
+                final_bytes, ctype = media_data
+                if len(final_bytes) > MAX_IMAGE_SIZE:
+                    raise HTTPException(status_code=413, detail="Image trop volumineuse (max 10 Mo)")
+                if len(IMAGE_CACHE) > 100:
+                    IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
+                IMAGE_CACHE[url] = (final_bytes, ctype)
+                return Response(content=final_bytes, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
             "Referer": referer,
@@ -155,7 +176,28 @@ async def resolve_stream(
     qualities_dict: Dict[str, str] = {}
     tracks: List[Dict[str, Any]] = []
 
-    if source == "voir-anime":
+    container_source = extension_service.get_container_source_by_id(source)
+    if not container_source:
+        try:
+            parsed_ep = urllib.parse.urlparse(episodeUrl)
+            ep_host = (parsed_ep.hostname or "").lower()
+            if ep_host:
+                for src in extension_service.get_enabled_container_sources():
+                    if src.base_url and ep_host in src.base_url.lower():
+                        container_source = src
+                        break
+        except Exception:
+            pass
+
+    if container_source:
+        container_sources = await container_source.get_episode_sources(episodeUrl)
+        if container_sources:
+            for vs in container_sources:
+                qualities_dict[vs.quality or vs.server] = vs.url
+            video_url = container_sources[0].url
+            server_type = container_sources[0].server
+            selected_quality = container_sources[0].quality
+    elif source == "voir-anime":
         pref_srv = server if (server and server != "auto") else None
         pref_q = quality if (quality and quality != "auto") else None
         info = voiranime_service.extract_download_info(
@@ -184,6 +226,42 @@ async def resolve_stream(
                 "src": f"/api/media/subtitle-proxy?url={urllib.parse.quote(sub_url)}",
                 "default": True,
             })
+    elif source == "animepahe" or "animepahe" in episodeUrl or "kwik." in episodeUrl or "pahe." in episodeUrl:
+        # AnimePahe
+        server_type = "kwik"
+        pref_srv = server if (server and server != "auto") else None
+        pref_q = quality if (quality and quality != "auto") else None
+
+        if ("kwik." in episodeUrl or "pahe." in episodeUrl) and ("/e/" in episodeUrl or "/d/" in episodeUrl):
+            extracted = await animepahe_service.extract_kwik_stream(episodeUrl)
+            if extracted:
+                video_url = extracted
+                selected_quality = pref_q or "HD"
+        elif pref_srv and ("kwik." in pref_srv or "pahe." in pref_srv):
+            extracted = await animepahe_service.extract_kwik_stream(pref_srv)
+            if extracted:
+                video_url = extracted
+                selected_quality = pref_q or "HD"
+        else:
+            sources = await animepahe_service.get_episode_sources(episodeUrl)
+            if sources:
+                target_src = None
+                for s in sources:
+                    q_label = s.get("name") or f"{s.get('quality', 'HD')} ({s.get('audio', 'sub')})"
+                    kwik_link = s.get("url", "")
+                    qualities_dict[q_label] = kwik_link
+                    if pref_q and (pref_q.lower() in q_label.lower() or pref_q.lower() in s.get("quality", "").lower()):
+                        if not target_src:
+                            target_src = s
+
+                if not target_src and sources:
+                    target_src = sources[0]
+
+                if target_src:
+                    selected_quality = target_src.get("name") or target_src.get("quality", "HD")
+                    target_kwik_url = target_src.get("url", "")
+                    if target_kwik_url:
+                        video_url = await animepahe_service.extract_kwik_stream(target_kwik_url) or ""
     else:
         # french-manga
         info = scraping_service.extract_download_info(episodeUrl)
@@ -211,6 +289,10 @@ async def resolve_stream(
                 "serverType": server_type,
             }
         )
+
+    # Si le flux provient de Kwik / Owocdn HLS, le router via le proxy HLS local
+    if video_url and (".m3u8" in video_url.lower()) and any(d in video_url for d in ["owocdn.top", "kwik"]):
+        video_url = f"/api/media/hls-proxy/playlist.m3u8?url={urllib.parse.quote(video_url)}"
 
     return {
         "success": True,
@@ -388,4 +470,168 @@ async def proxy_subtitle(url: str = Query(...)):
     except Exception as e:
         logger.debug("Erreur subtitle-proxy: %s", e)
         raise HTTPException(status_code=502, detail="Erreur lors de la récupération des sous-titres")
+
+
+HLS_KEY_CACHE: Dict[str, bytes] = {}
+
+@router.api_route("/api/media/hls-proxy/playlist.m3u8", methods=["GET", "HEAD"])
+async def hls_proxy_playlist(request: Request, url: str = Query(...)):
+    """
+    Proxy M3U8 pour Kwik / Owocdn :
+    - Récupère la playlist avec impersonation TLS Chrome
+    - Extrait et met en cache la clé AES-128
+    - Retire la directive #EXT-X-KEY (le déchiffrement sera fait par segment.ts)
+    - Réécrit les segments vers /api/media/hls-proxy/segment.ts
+    """
+    if request.method == "HEAD":
+        return Response(content=b"", media_type="application/vnd.apple.mpegurl", headers={"Access-Control-Allow-Origin": "*"})
+
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL HLS invalide")
+    if not is_safe_url(url):
+        logger.warning("SSRF bloqué sur hls-proxy/playlist: %s", url)
+        raise HTTPException(status_code=400, detail="URL non autorisée")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://kwik.cx/",
+    }
+    from curl_cffi.requests import AsyncSession
+
+    try:
+        async with AsyncSession(impersonate="chrome124") as session:
+            resp = await session.get(url, headers=headers, timeout=20.0)
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Échec récupération playlist HLS")
+
+            m3u8_text = resp.text
+            key_url = ""
+            m_key = re.search(r'#EXT-X-KEY:METHOD=AES-128,URI="([^"]+)"', m3u8_text)
+            if m_key:
+                key_url = urllib.parse.urljoin(url, m_key.group(1))
+                if key_url not in HLS_KEY_CACHE:
+                    r_k = await session.get(key_url, headers=headers, timeout=15.0)
+                    if r_k.status_code == 200 and len(r_k.content) == 16:
+                        HLS_KEY_CACHE[key_url] = r_k.content
+
+            lines = []
+            seq = 1
+            for line in m3u8_text.splitlines():
+                s = line.strip()
+                if not s:
+                    continue
+                if s.startswith("#EXT-X-MEDIA-SEQUENCE"):
+                    try:
+                        seq = int(s.split(":")[-1])
+                    except Exception:
+                        pass
+                    lines.append(line)
+                elif s.startswith("#EXT-X-KEY"):
+                    # Omission : déchiffrement transparent assuré par le proxy
+                    continue
+                elif not s.startswith("#"):
+                    seg_abs = urllib.parse.urljoin(url, s)
+                    key_param = f"&key={urllib.parse.quote(key_url)}" if key_url else ""
+                    seg_proxy = f"/api/media/hls-proxy/segment.ts?url={urllib.parse.quote(seg_abs)}{key_param}&seq={seq}"
+                    lines.append(seg_proxy)
+                    seq += 1
+                else:
+                    lines.append(line)
+
+            data = "\n".join(lines).encode("utf-8")
+            return Response(
+                content=data,
+                media_type="application/vnd.apple.mpegurl",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Cache-Control": "no-cache",
+                    "Content-Length": str(len(data)),
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Erreur hls_proxy_playlist: %s", e)
+        raise HTTPException(status_code=502, detail="Erreur proxying playlist HLS")
+
+
+@router.api_route("/api/media/hls-proxy/segment.ts", methods=["GET", "HEAD"])
+async def hls_proxy_segment(
+    request: Request,
+    url: str = Query(...),
+    key: Optional[str] = Query(None),
+    seq: int = Query(1),
+):
+    """
+    Proxy pour les segments vidéo :
+    - Télécharge les chunks .jpg chiffrés via curl_cffi Chrome
+    - Déchiffre en AES-128-CBC
+    - Retourne les octets propres MPEG-TS (video/MP2T)
+    """
+    if request.method == "HEAD":
+        return Response(
+            content=b"",
+            media_type="video/MP2T",
+            headers={
+                "Content-Length": "550000",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            }
+        )
+
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL de segment invalide")
+    if not is_safe_url(url):
+        logger.warning("SSRF bloqué sur hls-proxy/segment: %s", url)
+        raise HTTPException(status_code=400, detail="URL non autorisée")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Referer": "https://kwik.cx/",
+    }
+    from curl_cffi.requests import AsyncSession
+
+    try:
+        # Session rapide sans surcoût d'impersonation (téléchargement 2x plus rapide sur les CDN)
+        async with AsyncSession() as session:
+            resp = await session.get(url, headers=headers, timeout=120.0)
+            if resp.status_code == 403:
+                async with AsyncSession(impersonate="chrome124") as session_cf:
+                    resp = await session_cf.get(url, headers=headers, timeout=120.0)
+
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Échec récupération segment")
+
+            seg_bytes = resp.content
+
+            if key:
+                key_bytes = HLS_KEY_CACHE.get(key)
+                if not key_bytes:
+                    r_k = await session.get(key, headers=headers, timeout=15.0)
+                    if r_k.status_code == 200 and len(r_k.content) == 16:
+                        key_bytes = r_k.content
+                        HLS_KEY_CACHE[key] = key_bytes
+
+                if key_bytes and len(key_bytes) == 16:
+                    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                    iv = seq.to_bytes(16, "big")
+                    cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv))
+                    decryptor = cipher.decryptor()
+                    seg_bytes = decryptor.update(seg_bytes) + decryptor.finalize()
+
+            return Response(
+                content=seg_bytes,
+                media_type="video/MP2T",
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Content-Length": str(len(seg_bytes)),
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Erreur hls_proxy_segment: %s", e)
+        raise HTTPException(status_code=502, detail="Erreur proxying segment")
 

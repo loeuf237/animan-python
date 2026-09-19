@@ -28,7 +28,34 @@ ALLOWED_SCRAPING_DOMAINS = {
     "my.mail.ru",
     "cloud.mail.ru",
     "gn1r5n.org",
+    # AnimePahe et miroirs
+    "animepahe.com",
+    "animepahe.org",
+    "animepahe.pw",
+    "animepahe.ru",
+    "animepahe.si",
+    "animepahe.su",
+    "i.animepahe.ru",
+    "i.animepahe.com",
+    # Hébergeurs et lecteurs Kwik / Pahe
+    "kwik.cx",
+    "kwik.si",
+    "kwik.link",
+    "kwik.top",
+    "pahe.win",
+    "owocdn.top",
+    "kwikcdn.com",
 }
+
+def get_all_allowed_domains() -> set:
+    """Retourne la liste complète des domaines autorisés incluant les extensions dynamiques actives."""
+    domains = set(ALLOWED_SCRAPING_DOMAINS)
+    try:
+        from animan.services.extension_service import extension_service
+        domains.update(extension_service.get_allowed_domains())
+    except Exception:
+        pass
+    return domains
 
 def is_ip_blocked(ip_obj: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
     """

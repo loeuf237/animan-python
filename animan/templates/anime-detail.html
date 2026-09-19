@@ -105,7 +105,7 @@
         </div>
         <div class="tachiyomi-meta-line">
           <span class="tachiyomi-meta-icon">🕒</span>
-          <span>En cours • {{ 'voir-anime.to' if source == 'voir-anime' else 'french-manga.net' }}</span>
+          <span>En cours • {{ 'animepahe.ru' if source == 'animepahe' else ('voir-anime.to' if source == 'voir-anime' else 'french-manga.net') }}</span>
         </div>
       </div>
     </section>
@@ -228,6 +228,14 @@
             <option value="moon">MOON</option>
           </select>
         </div>
+        {% elif source == 'animepahe' %}
+        <div style="display:flex;align-items:center;gap:6px;">
+          <label for="batch-server-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">Serveur :</label>
+          <select id="batch-server-select" class="input-premium" style="padding:4px 8px;font-size:0.8rem;height:auto;" onchange="onBatchServerChange(this.value)">
+            <option value="auto">Kwik (Défaut)</option>
+            <option value="kwik">Kwik FastCDN</option>
+          </select>
+        </div>
         {% endif %}
 
         <div style="display:flex;align-items:center;gap:6px;">
@@ -321,7 +329,7 @@
 
               <span class="episode-size" data-url="{{ ep_url }}">-</span>
 
-              {% if source == 'voir-anime' %}
+              {% if source == 'voir-anime' or source == 'animepahe' %}
               <select class="episode-quality-select input-premium"
                       style="display:none;padding:2px 6px;font-size:0.75rem;height:24px;border-radius:6px;"
                       title="Choisir la qualité de l'épisode"

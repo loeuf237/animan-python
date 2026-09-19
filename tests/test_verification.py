@@ -122,12 +122,14 @@ def test_api_verify_endpoints(sample_valid_mp4):
     assert data["status"] == "VALID"
 
     # Verify all
-    resp_all = client.post("/api/download/verify-all")
-    assert resp_all.status_code == 200
-    all_data = resp_all.json()
-    assert all_data["success"] is True
-    assert all_data["total"] >= 1
-    assert all_data["valid"] >= 1
+    from unittest.mock import patch
+    with patch("animan.services.download_manager.library_service.get_history", return_value=[]):
+        resp_all = client.post("/api/download/verify-all")
+        assert resp_all.status_code == 200
+        all_data = resp_all.json()
+        assert all_data["success"] is True
+        assert all_data["total"] >= 1
+        assert all_data["valid"] >= 1
 
 def test_api_redownload_task(sample_corrupted_file):
     task = DownloadTask(

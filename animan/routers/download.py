@@ -127,11 +127,22 @@ async def start_batch_download(request: Request):
     }
 
 @router.delete("/api/download/{task_id}")
-async def cancel_download(task_id: str):
+async def cancel_download(task_id: str, remove: bool = False):
+    if remove:
+        removed = download_manager.remove_task(task_id)
+        if removed:
+            return {"success": True, "message": "Téléchargement supprimé"}
+        return JSONResponse(status_code=404, content={"error": "Tâche introuvable"})
+
     cancelled = download_manager.cancel_download(task_id)
     if cancelled:
         return {"success": True, "message": "Téléchargement annulé"}
-    return JSONResponse(status_code=400, content={"error": "Impossible d'annuler ce téléchargement"})
+
+    removed = download_manager.remove_task(task_id)
+    if removed:
+        return {"success": True, "message": "Tâche supprimée"}
+
+    return JSONResponse(status_code=400, content={"error": "Impossible d'annuler ou supprimer ce téléchargement"})
 
 @router.post("/api/download/{task_id}/pause")
 async def pause_download(task_id: str):
@@ -152,7 +163,7 @@ async def remove_task(task_id: str):
     removed = download_manager.remove_task(task_id)
     if removed:
         return {"success": True, "message": "Tâche supprimée"}
-    return JSONResponse(status_code=400, content={"error": "Tâche introuvable"})
+    return JSONResponse(status_code=404, content={"error": "Tâche introuvable"})
 
 @router.get("/api/download/stream")
 async def stream_download_updates(request: Request):

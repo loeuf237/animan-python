@@ -13,8 +13,9 @@ from animan.database import init_db
 from animan.services.download_manager import download_manager
 from animan.services.scraping_service import scraping_service
 from animan.services.voiranime_service import voiranime_service
+from animan.services.animepahe_service import animepahe_service
 from animan.services.watchdog_service import watchdog_service
-from animan.routers import anime_router, download_router, library_router, media_router
+from animan.routers import anime_router, download_router, library_router, media_router, extensions_router, sources_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
     # 4. Pré-charger les flux de sorties
     asyncio.create_task(scraping_service.refresh_cache())
     asyncio.create_task(voiranime_service.refresh_cache())
+    asyncio.create_task(animepahe_service.refresh_cache())
 
     logger.info("Application prête sur http://%s:%d", settings.HOST, settings.PORT)
     yield
@@ -87,6 +89,8 @@ app.include_router(anime_router)
 app.include_router(download_router)
 app.include_router(library_router)
 app.include_router(media_router)
+app.include_router(extensions_router)
+app.include_router(sources_router)
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -94,5 +98,6 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         log_level="info",
-        reload=True
+        reload=True,
+        reload_dirs=["animan"]
     )

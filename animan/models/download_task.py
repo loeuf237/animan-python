@@ -13,7 +13,7 @@ class SpeedTracker:
     Élimine les à-coups, les faux 0 B/s et les disparitions d'ETA lors des téléchargements
     par segments (HLS / ffmpeg / streaming direct).
     """
-    def __init__(self, window_seconds: float = 3.5):
+    def __init__(self, window_seconds: float = 15.0):
         self.window_seconds = window_seconds
         self.samples: Deque[Tuple[float, int]] = collections.deque()  # (timestamp, downloaded_bytes)
         self.last_speed: int = 0
@@ -239,7 +239,7 @@ class DownloadTask:
         self.supportsResume: bool = False
         self.throttleBytesWritten: int = 0
         self.throttleStartTimeMs: float = 0.0
-        self.speed_tracker: SpeedTracker = SpeedTracker(window_seconds=3.5)
+        self.speed_tracker: SpeedTracker = SpeedTracker(window_seconds=15.0)
         self.last_broadcast_time: float = 0.0
 
     def update_progress(self, downloaded_bytes: int, now: Optional[float] = None) -> int:

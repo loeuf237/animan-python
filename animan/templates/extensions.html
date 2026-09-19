@@ -1,0 +1,331 @@
+{% import 'fragments/navbar.html' as nav %}
+<!DOCTYPE html>
+<html lang="fr">
+{{ nav.head('Magasins & Extensions') }}
+<body>
+{{ nav.navbar() }}
+
+<main class="main-content">
+  <div class="settings-page-layout fade-in" style="max-width: 1200px; margin: 0 auto; padding: 24px 20px;">
+    
+    <!-- En-tête -->
+    <header class="page-header" style="margin-bottom: 28px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+      <div>
+        <h1 class="page-title" style="display: flex; align-items: center; gap: 12px;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+            <line x1="12" y1="22.08" x2="12" y2="12"/>
+          </svg>
+          Magasins & Extensions Aniyomi
+        </h1>
+        <p class="page-sub">Importez vos dépôts d'extensions compatibles (Yuzono, Keiyoushi, etc.) et activez à la carte les sources anime de votre choix.</p>
+      </div>
+
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3); padding: 8px 14px; border-radius: 9999px; font-weight: 500;">
+          <strong id="active-count-header">{{ enabled_count }}</strong> / {{ total_count }} sources actives
+        </span>
+      </div>
+    </header>
+
+    <!-- Carte d'importation d'un magasin -->
+    <section class="settings-card-pro" style="margin-bottom: 28px; border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); background: linear-gradient(135deg, rgba(20, 24, 45, 0.8) 0%, rgba(15, 18, 35, 0.95) 100%); backdrop-filter: blur(12px); padding: 24px;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(139, 92, 246, 0.2); display: flex; align-items: center; justify-content: center; color: #a78bfa;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
+        </div>
+        <div>
+          <h2 style="font-size: 1.15rem; font-weight: 600; color: #f3f4f6; margin: 0;">Ajouter un magasin d'extensions</h2>
+          <p style="font-size: 0.85rem; color: #9ca3af; margin: 2px 0 0 0;">Entrez l'URL d'un dépôt d'extensions (fichier <code>index.min.json</code>). Seul le dernier magasin ajouté est visible.</p>
+        </div>
+      </div>
+
+      <!-- Barre d'import -->
+      <form id="import-repo-form" onsubmit="handleImportRepo(event)" style="margin-top: 16px;">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <input type="url" id="repo-url-input" class="input-premium" style="flex: 1; min-width: 320px; padding: 12px 16px; font-size: 0.95rem;"
+                 placeholder="https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json" required />
+          <button type="submit" id="btn-import-repo" class="btn btn-primary" style="padding: 12px 24px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+            <svg id="import-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none; animation: spin 1s linear infinite;"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+            <span id="import-btn-text">Importer le magasin</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Raccourcis Dépôts Populaires -->
+      <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.85rem; color: #9ca3af;">
+        <span>Dépôts recommandés :</span>
+        <button type="button" class="speed-preset-chip" onclick="setRepoPreset('https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json')">
+          ⚡ Yuzono Anime Repo (254 extensions)
+        </button>
+        <button type="button" class="speed-preset-chip" onclick="setRepoPreset('https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json')">
+          📦 Keiyoushi Repo
+        </button>
+      </div>
+
+      <!-- Message d'information de règles -->
+      <div style="margin-top: 16px; padding: 10px 14px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid #60a5fa; border-radius: 4px; font-size: 0.82rem; color: #bfdbfe;">
+        ℹ️ <strong>Règle de visibilité :</strong> Seules les sources présentes dans le <strong>dernier magasin ajouté</strong> sont affichées ci-dessous. Par défaut, toutes les sources importées sont <strong>désactivées</strong> : activez manuellement uniquement celles que vous souhaitez utiliser dans la recherche et le streaming.
+      </div>
+    </section>
+
+    <!-- Informations sur le magasin actuellement actif -->
+    {% if active_repo %}
+    <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); padding: 14px 20px; border-radius: 12px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981;"></span>
+        <div>
+          <span style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: #9ca3af;">Magasin actif :</span>
+          <strong style="color: #f3f4f6; margin-left: 6px; font-size: 0.95rem;">{{ active_repo.name }}</strong>
+        </div>
+      </div>
+      <div style="font-size: 0.85rem; color: #9ca3af; display: flex; align-items: center; gap: 16px;">
+        <span>Catalogue : <strong style="color:#e5e7eb;">{{ total_count }}</strong> extensions</span>
+        <span>Actives : <strong style="color:#a78bfa;" id="active-count-badge">{{ enabled_count }}</strong></span>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Barre d'outils de filtrage & Recherche instantanée -->
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+        <button type="button" class="tab-btn active lang-filter-btn" data-lang="all" onclick="filterByLang('all', this)">Toutes ({{ total_count }})</button>
+        <button type="button" class="tab-btn lang-filter-btn" data-lang="fr" onclick="filterByLang('fr', this)">🇫🇷 Français</button>
+        <button type="button" class="tab-btn lang-filter-btn" data-lang="active" onclick="filterByLang('active', this)">⚡ Activées uniquement</button>
+      </div>
+
+      <div style="position: relative; min-width: 260px; flex: 1; max-width: 360px;">
+        <input type="text" id="extension-search-box" class="input-premium" style="width: 100%; padding: 8px 12px 8px 36px; font-size: 0.9rem;"
+               placeholder="Filtrer une extension..." oninput="handleInstantFilter(this.value)" />
+        <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9ca3af;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+      </div>
+    </div>
+
+    <!-- Grille des extensions -->
+    {% if extensions and extensions|length > 0 %}
+    <div class="results-grid" id="extensions-container" style="grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+      {% for ext in extensions %}
+      <article class="anime-card ext-card"
+               data-ext-id="{{ ext.id }}"
+               data-name="{{ ext.name | lower }}"
+               data-pkg="{{ ext.pkg | lower }}"
+               data-lang="{{ ext.lang | lower }}"
+               data-active="{{ 'true' if ext.is_enabled else 'false' }}"
+               style="padding: 16px; display: flex; flex-direction: column; justify-content: space-between; height: 100%; background: rgba(18, 22, 40, 0.75); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; transition: transform 0.2s, border-color 0.2s;">
+        
+        <div>
+          <!-- Header de carte : Icône + Nom + Langue -->
+          <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+            {% if ext.icon_url %}
+            <img src="{{ ext.icon_url }}" alt="{{ ext.name }}" style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain; background: rgba(255,255,255,0.05); padding: 4px;"
+                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            {% endif %}
+            <div class="ext-fallback-avatar" style="width: 40px; height: 40px; border-radius: 8px; background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); display: {% if ext.icon_url %}none{% else %}flex{% endif %}; align-items: center; justify-content: center; font-weight: bold; color: white; font-size: 1.1rem;">
+              {{ ext.name[0] | upper }}
+            </div>
+
+            <div style="flex: 1; min-width: 0;">
+              <h3 style="font-size: 1rem; font-weight: 600; color: #f3f4f6; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{{ ext.name }}">
+                {{ ext.name }}
+              </h3>
+              <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+                <span class="version-badge" style="font-size: 0.7rem; padding: 2px 6px; background: {% if ext.lang == 'fr' %}#2563eb{% elif ext.lang == 'all' %}#7c3aed{% else %}#4b5563{% endif %};">
+                  {{ ext.lang | upper }}
+                </span>
+                <span style="font-size: 0.75rem; color: #9ca3af;">v{{ ext.version }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- URL Source ciblée -->
+          {% if ext.base_url %}
+          <div style="font-size: 0.8rem; color: #9ca3af; margin-bottom: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            <a href="{{ ext.base_url }}" target="_blank" rel="noopener noreferrer" style="color: #818cf8; text-decoration: none;" title="{{ ext.base_url }}">
+              🔗 {{ ext.base_url | replace('https://', '') | replace('http://', '') }}
+            </a>
+          </div>
+          {% endif %}
+        </div>
+
+        <!-- Pied de carte : Statut & Switch d'activation -->
+        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 12px; margin-top: 6px;">
+          <span class="status-indicator-text" id="status-text-{{ ext.id }}" style="font-size: 0.82rem; font-weight: 500; color: {% if ext.is_enabled %}#34d399{% else %}#9ca3af{% endif %};">
+            {% if ext.is_enabled %}● Active{% else %}○ Désactivée{% endif %}
+          </span>
+
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-ext-{{ ext.id }}" {% if ext.is_enabled %}checked{% endif %}
+                   onchange="handleToggleExtension({{ ext.id }}, this.checked, '{{ ext.name }}')" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 60px 20px; text-align: center; background: rgba(18, 22, 40, 0.4); border-radius: 16px; border: 1px dashed rgba(255,255,255,0.1);">
+      <div style="font-size: 2.5rem; margin-bottom: 12px;">📦</div>
+      <h3 style="font-size: 1.25rem; font-weight: 600; color: #f3f4f6; margin-bottom: 6px;">Aucun magasin d'extensions actif</h3>
+      <p style="color: #9ca3af; max-width: 460px; margin: 0 auto 20px auto; font-size: 0.9rem;">
+        Importez un catalogue d'extensions Aniyomi ci-dessus pour afficher et activer vos sources d'animation préférées.
+      </p>
+      <button type="button" class="btn btn-primary" onclick="setRepoPreset('https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json'); document.getElementById('btn-import-repo').click();">
+        ⚡ Importer Yuzono Anime Repo en 1 clic
+      </button>
+    </div>
+    {% endif %}
+
+  </div>
+</main>
+
+<script>
+function setRepoPreset(url) {
+  const input = document.getElementById('repo-url-input');
+  input.value = url;
+  input.focus();
+}
+
+async function handleImportRepo(e) {
+  e.preventDefault();
+  const input = document.getElementById('repo-url-input');
+  const btn = document.getElementById('btn-import-repo');
+  const spinner = document.getElementById('import-spinner');
+  const btnText = document.getElementById('import-btn-text');
+  const url = input.value.trim();
+
+  if (!url) return;
+
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  btnText.textContent = 'Importation massive en cours...';
+
+  try {
+    const res = await fetch('/api/extensions/import-repo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      alert(`✅ Succès ! ${data.count} extensions importées depuis ${data.repo_name}.\nConformément à la règle, toutes les sources sont désactivées par défaut. Activez uniquement celles dont vous avez besoin.`);
+      window.location.reload();
+    } else {
+      alert('❌ Erreur lors de l\'import : ' + (data.detail || 'Erreur inconnue'));
+    }
+  } catch (err) {
+    alert('❌ Erreur réseau lors de l\'import : ' + err.message);
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    btnText.textContent = 'Importer le magasin';
+  }
+}
+
+async function handleToggleExtension(id, enabled, name) {
+  const statusText = document.getElementById(`status-text-${id}`);
+  const card = document.querySelector(`.ext-card[data-ext-id="${id}"]`);
+
+  if (statusText) {
+    statusText.textContent = enabled ? '⏳ Activation...' : '⏳ Désactivation...';
+  }
+
+  try {
+    const res = await fetch(`/api/extensions/${id}/toggle`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      if (statusText) {
+        statusText.textContent = enabled ? '● Active' : '○ Désactivée';
+        statusText.style.color = enabled ? '#34d399' : '#9ca3af';
+      }
+      if (card) {
+        card.setAttribute('data-active', enabled ? 'true' : 'false');
+      }
+      updateActiveCountBadges();
+    } else {
+      alert('Erreur : ' + (data.detail || 'Impossible de modifier le statut.'));
+      // Rollback checkbox
+      const cb = document.getElementById(`toggle-ext-${id}`);
+      if (cb) cb.checked = !enabled;
+    }
+  } catch (err) {
+    alert('Erreur réseau : ' + err.message);
+    const cb = document.getElementById(`toggle-ext-${id}`);
+    if (cb) cb.checked = !enabled;
+  }
+}
+
+function updateActiveCountBadges() {
+  const cards = document.querySelectorAll('.ext-card');
+  let active = 0;
+  cards.forEach(c => {
+    if (c.getAttribute('data-active') === 'true') active++;
+  });
+  const b1 = document.getElementById('active-count-header');
+  const b2 = document.getElementById('active-count-badge');
+  if (b1) b1.textContent = active;
+  if (b2) b2.textContent = active;
+}
+
+let currentLangFilter = 'all';
+let currentSearchQuery = '';
+
+function filterByLang(lang, btn) {
+  currentLangFilter = lang;
+  document.querySelectorAll('.lang-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  applyFilters();
+}
+
+function handleInstantFilter(query) {
+  currentSearchQuery = query.toLowerCase().trim();
+  applyFilters();
+}
+
+function applyFilters() {
+  const cards = document.querySelectorAll('.ext-card');
+  cards.forEach(card => {
+    const name = card.getAttribute('data-name') || '';
+    const pkg = card.getAttribute('data-pkg') || '';
+    const lang = card.getAttribute('data-lang') || '';
+    const isActive = card.getAttribute('data-active') === 'true';
+
+    let matchLang = true;
+    if (currentLangFilter === 'fr') {
+      matchLang = (lang === 'fr');
+    } else if (currentLangFilter === 'active') {
+      matchLang = isActive;
+    }
+
+    let matchSearch = true;
+    if (currentSearchQuery) {
+      matchSearch = name.includes(currentSearchQuery) || pkg.includes(currentSearchQuery);
+    }
+
+    if (matchLang && matchSearch) {
+      card.style.display = 'flex';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+</script>
+
+<style>
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.ext-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(139, 92, 246, 0.4) !important;
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5);
+}
+</style>
+</body>
+</html>

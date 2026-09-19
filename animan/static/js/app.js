@@ -7,6 +7,45 @@ let cinemaPlyrInstance = null;
 let cinemaHlsInstance = null;
 let currentPlayingEpNum = null;
 let currentRange = 'all';
+let currentPlayAbortController = null;
+let currentPlayRequestId = 0;
+
+function stopAllPlayback() {
+  if (currentPlayAbortController) {
+    try { currentPlayAbortController.abort(); } catch (e) {}
+    currentPlayAbortController = null;
+  }
+  currentPlayRequestId++;
+  if (cinemaPlyrInstance) {
+    try { cinemaPlyrInstance.pause(); } catch (e) {}
+  }
+  if (cinemaHlsInstance) {
+    try { cinemaHlsInstance.destroy(); } catch (e) {}
+    cinemaHlsInstance = null;
+  }
+  const cinemaVideo = document.getElementById('cinema-player');
+  if (cinemaVideo) {
+    try {
+      cinemaVideo.pause();
+      cinemaVideo.removeAttribute('src');
+      cinemaVideo.load();
+    } catch (e) {}
+  }
+  if (plyrInstance) {
+    try { plyrInstance.pause(); } catch (e) {}
+  }
+  const plyrVideo = document.getElementById('plyr-player');
+  if (plyrVideo) {
+    try {
+      plyrVideo.pause();
+      plyrVideo.removeAttribute('src');
+      plyrVideo.load();
+    } catch (e) {}
+  }
+}
+
+window.addEventListener('beforeunload', stopAllPlayback);
+window.addEventListener('pagehide', stopAllPlayback);
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
@@ -56,6 +95,7 @@ function highlightActiveNav() {
     ['/downloads', 'nav-downloads', 'mob-nav-downloads'],
     ['/library', 'nav-library', 'mob-nav-library'],
     ['/history', 'nav-history', ''],
+    ['/extensions', 'nav-extensions', 'mob-nav-extensions'],
     ['/settings', 'nav-settings', 'mob-nav-settings'],
     ['/', 'nav-home', 'mob-nav-home']
   ];
@@ -80,6 +120,22 @@ function bindGlobalSettingsToggle() {
     });
   });
 }
+
+// Gestion de la navigation entre les onglets de sources
+window.switchSourceTab = function(sourceId) {
+  document.querySelectorAll('.source-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-source-id') === sourceId);
+  });
+  document.querySelectorAll('.source-content-pane').forEach(pane => {
+    pane.classList.remove('active');
+    pane.style.display = 'none';
+  });
+  const targetPane = document.getElementById(`pane-source-${sourceId}`);
+  if (targetPane) {
+    targetPane.classList.add('active');
+    targetPane.style.display = 'block';
+  }
+};
 
 function initDownloadSettingsPanel() {
   const panel = document.getElementById('settings-panel');
@@ -134,11 +190,70 @@ function initDownloadSettingsPanel() {
     })
     .catch(() => {});
 
+  // Charger les paramètres de chaque source (natives & extensions importées)
+  fetch('/api/sources/settings')
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.sources) {
+        const va = data.sources.find(s => s.id === 'voir-anime');
+        if (va && va.settings) {
+          const qStratSelect = document.getElementById('voiranime-quality-strategy-select');
+          if (qStratSelect && va.settings.quality_strategy) {
+            qStratSelect.value = va.settings.quality_strategy;
+          }
+          const srvSelect = document.getElementById('voiranime-server-select');
+          if (srvSelect && va.settings.default_server && va.settings.default_server !== 'auto') {
+            srvSelect.value = va.settings.default_server;
+          }
+        }
+
+        const imported = data.sources.filter(s => s.type === 'imported');
+        const countBadge = document.getElementById('imported-sources-count');
+        if (countBadge) countBadge.textContent = imported.length;
+
+        const importedContainer = document.getElementById('imported-extensions-list');
+        if (importedContainer) {
+          if (imported.length === 0) {
+            importedContainer.innerHTML = `
+              <div class="source-empty-settings">
+                <svg class="source-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+                <div style="font-weight: 600; color: var(--text); margin-top: 10px;">Aucune extension Aniyomi installée</div>
+                <p>Vous pouvez importer et activer des extensions depuis l'onglet <a href="/extensions" style="color: var(--accent); text-decoration: underline;">Extensions</a>.</p>
+              </div>`;
+          } else {
+            importedContainer.innerHTML = `
+              <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px;">
+                ${imported.map(ext => `
+                  <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                      ${ext.icon ? `<img src="${ext.icon}" style="width: 32px; height: 32px; border-radius: 6px; object-fit: contain; flex-shrink: 0;" onerror="this.style.display='none'"/>` : `<div style="width: 32px; height: 32px; border-radius: 6px; background: rgba(139, 92, 246, 0.15); display: flex; align-items: center; justify-content: center; color: var(--accent); font-weight: 700; font-size: 0.8rem; flex-shrink: 0;">${ext.name.slice(0, 2).toUpperCase()}</div>`}
+                      <div style="min-width: 0;">
+                        <div style="font-weight: 600; font-size: 0.9rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${ext.name}</div>
+                        <div style="font-size: 0.74rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${ext.id}</div>
+                      </div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0;">
+                      <span class="badge" style="font-size: 0.68rem; padding: 2px 6px; border-radius: 4px; background: ${ext.isEnabled ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255, 255, 255, 0.08)'}; color: ${ext.isEnabled ? '#34d399' : 'var(--muted)'};">${ext.isEnabled ? 'Active' : 'Inactive'}</span>
+                      <span style="font-size: 0.72rem; color: var(--muted);">v${ext.version || '1.0'} (${ext.lang.toUpperCase()})</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+              <div style="margin-top: 14px; font-size: 0.8rem; color: var(--muted); text-align: center;">
+                Ces sources utilisent les paramètres généraux d'Animan. Aucun réglage supplémentaire requis.
+              </div>`;
+          }
+        }
+      }
+    })
+    .catch(() => {});
+
   save?.addEventListener('click', async () => {
     const maxConcurrent = parseInt(document.getElementById('max-concurrent-input')?.value || '3', 10);
     const speedKb = parseInt(document.getElementById('global-speed-input-settings')?.value || '0', 10);
     const plexOrganization = !!document.getElementById('plex-org-cb')?.checked;
     const voiranimeDefaultServer = document.getElementById('voiranime-server-select')?.value || 'auto';
+    const voiranimeQualityStrategy = document.getElementById('voiranime-quality-strategy-select')?.value || 'highest';
     let selectedUserAgent = uaSelect?.value || 'Random (Rotator)';
 
     if (selectedUserAgent === 'Custom') {
@@ -158,14 +273,25 @@ function initDownloadSettingsPanel() {
     };
 
     try {
-      const resp = await fetch('/api/download/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await resp.json();
+      const [respGlobal, respSource] = await Promise.all([
+        fetch('/api/download/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }),
+        fetch('/api/sources/settings/voir-anime', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            quality_strategy: voiranimeQualityStrategy,
+            default_server: voiranimeDefaultServer
+          })
+        })
+      ]);
+
+      const data = await respGlobal.json();
       if (data.success) {
-        showToast('Parametres mis a jour', 'success');
+        showToast('Parametres enregistres avec succes', 'success');
       } else {
         showToast(data.error || 'Erreur lors de la mise a jour', 'error');
       }
@@ -231,8 +357,12 @@ function applySizeData(span, data) {
     if (!row.dataset.subtitle) row.dataset.subtitle = data.subtitleUrl;
   }
   if (row && data && data.success) {
-    if (data.currentServer) row.dataset.server = data.currentServer;
-    if (data.currentQuality) row.dataset.quality = data.currentQuality;
+    if (data.currentServer) {
+      row.dataset.detectedServer = data.currentServer;
+      if (!row.dataset.server || row.dataset.server === 'auto') {
+        row.dataset.server = data.currentServer;
+      }
+    }
     if (data.qualitiesSizes) {
       row.dataset.qualitiesSizes = JSON.stringify(data.qualitiesSizes);
     }
@@ -247,16 +377,38 @@ function applySizeData(span, data) {
     const qSelect = row.querySelector('.episode-quality-select');
     if (qSelect && data.qualities && data.qualities.length > 0) {
       qSelect.innerHTML = '';
-      data.qualities.forEach(q => {
+      const batchQ = document.getElementById('batch-quality-select')?.value;
+      const targetQuality = (batchQ && batchQ !== 'auto' ? batchQ : (row.dataset.quality || data.currentQuality || ''));
+      let selectedIdx = 0;
+      let bestDist = Infinity;
+      const targetNumM = targetQuality ? targetQuality.match(/(\d{3,4})/) : null;
+      const targetNum = targetNumM ? parseInt(targetNumM[1], 10) : 0;
+
+      data.qualities.forEach((q, idx) => {
         const opt = document.createElement('option');
         opt.value = q;
         opt.textContent = q;
-        if (data.currentQuality && q.toLowerCase().includes(data.currentQuality.toLowerCase())) {
-          opt.selected = true;
-        }
         qSelect.appendChild(opt);
+
+        if (targetQuality && (q.toLowerCase() === targetQuality.toLowerCase() || q.toLowerCase().includes(targetQuality.toLowerCase()))) {
+          selectedIdx = idx;
+          bestDist = 0;
+        } else if (bestDist > 0 && targetNum > 0) {
+          const qNumM = q.match(/(\d{3,4})/);
+          if (qNumM) {
+            const dist = Math.abs(parseInt(qNumM[1], 10) - targetNum);
+            if (dist < bestDist) {
+              bestDist = dist;
+              selectedIdx = idx;
+            }
+          }
+        }
       });
+      qSelect.selectedIndex = selectedIdx;
+      row.dataset.quality = qSelect.value;
       qSelect.style.display = 'inline-block';
+    } else if (data.currentQuality && !row.dataset.quality) {
+      row.dataset.quality = data.currentQuality;
     }
   }
 }
@@ -330,12 +482,37 @@ function onBatchQualityChange(quality) {
     row.dataset.quality = quality;
     const qSelect = row.querySelector('.episode-quality-select');
     if (qSelect && quality !== 'auto') {
+      let matched = false;
       for (let i = 0; i < qSelect.options.length; i++) {
         if (qSelect.options[i].value.toLowerCase().includes(quality.toLowerCase())) {
           qSelect.selectedIndex = i;
+          matched = true;
           break;
         }
       }
+      if (!matched) {
+        const targetM = quality.match(/(\d{3,4})/);
+        if (targetM) {
+          const targetNum = parseInt(targetM[1], 10);
+          let bestIdx = -1;
+          let bestDist = Infinity;
+          for (let i = 0; i < qSelect.options.length; i++) {
+            const optM = qSelect.options[i].value.match(/(\d{3,4})/);
+            if (optM) {
+              const optNum = parseInt(optM[1], 10);
+              const dist = Math.abs(optNum - targetNum);
+              if (dist < bestDist) {
+                bestDist = dist;
+                bestIdx = i;
+              }
+            }
+          }
+          if (bestIdx >= 0) {
+            qSelect.selectedIndex = bestIdx;
+          }
+        }
+      }
+      row.dataset.quality = qSelect.value;
     }
     const span = row.querySelector('.episode-size');
     const url = row.dataset.url;
@@ -344,6 +521,11 @@ function onBatchQualityChange(quality) {
       if (row.dataset.qualitiesSizes) {
         try {
           const qSizes = JSON.parse(row.dataset.qualitiesSizes);
+          const chosen = qSelect ? qSelect.value : quality;
+          if (qSizes[chosen]) {
+            span.textContent = qSizes[chosen];
+            return;
+          }
           let found = false;
           for (const [k, v] of Object.entries(qSizes)) {
             if (k.toLowerCase().includes(quality.toLowerCase()) || quality.toLowerCase().includes(k.toLowerCase())) {
@@ -469,11 +651,13 @@ async function downloadEpisode(btn) {
   const source = typeof SOURCE !== 'undefined' ? SOURCE : 'french-manga';
   const fileName = sanitizeFilename(animeName + ' - Episode ' + epNum + '.mp4');
 
-  const selectedServer = row?.dataset.server || document.getElementById('batch-server-select')?.value || null;
-  const selectedQuality = row?.querySelector('.episode-quality-select')?.value || row?.dataset.quality || document.getElementById('batch-quality-select')?.value || null;
+  const batchServer = document.getElementById('batch-server-select')?.value;
+  const selectedServer = (batchServer && batchServer !== 'auto' ? batchServer : null) || row?.dataset.server || null;
+  const rowQualitySelect = row?.querySelector('.episode-quality-select');
+  const selectedQuality = (rowQualitySelect && rowQualitySelect.style.display !== 'none' ? rowQualitySelect.value : '') || row?.dataset.quality || document.getElementById('batch-quality-select')?.value || null;
 
-  if (source === 'voir-anime' && !selectedQuality && (!row?.querySelector('.episode-quality-select') || row?.querySelector('.episode-quality-select').style.display === 'none')) {
-    await handleVoirAnimeDownload(url, animeName, epNum, fileName, subtitleUrl, downloadSubtitles, null, selectedServer);
+  if (source === 'voir-anime' && (!selectedQuality || selectedQuality === 'auto') && (!rowQualitySelect || rowQualitySelect.style.display === 'none')) {
+    await handleVoirAnimeDownload(url, animeName, epNum, fileName, subtitleUrl, downloadSubtitles, null, selectedServer, selectedQuality);
     return;
   }
 
@@ -490,19 +674,24 @@ async function downloadEpisode(btn) {
   }
 }
 
-async function handleVoirAnimeDownload(episodeUrl, animeName, epNum, fileName, subtitleUrl, downloadSubtitles, scheduledTime, preferredServer) {
+async function handleVoirAnimeDownload(episodeUrl, animeName, epNum, fileName, subtitleUrl, downloadSubtitles, scheduledTime, preferredServer, preferredQuality) {
   showToast('Résolution des qualités disponibles...', 'info');
   try {
     let qUrl = '/api/voiranime/download-info?episodeUrl=' + encodeURIComponent(episodeUrl);
     if (preferredServer && preferredServer !== 'auto') {
       qUrl += '&server=' + encodeURIComponent(preferredServer);
     }
+    if (preferredQuality && preferredQuality !== 'auto') {
+      qUrl += '&quality=' + encodeURIComponent(preferredQuality);
+    }
     const resp = await fetch(qUrl);
     const info = await resp.json();
     let qualities = {};
     try { qualities = JSON.parse(info.videoQualities || '{}'); } catch (error) {}
 
-    if (Object.keys(qualities).length > 1) {
+    if (preferredQuality && preferredQuality !== 'auto' && info.videoUrl) {
+      await startDownloadRequest(animeName, epNum, info.videoUrl || episodeUrl, fileName, subtitleUrl, scheduledTime, 0, downloadSubtitles, info.serverType, info.selectedQuality || preferredQuality);
+    } else if (Object.keys(qualities).length > 1) {
       showQualityModal(qualities, animeName, epNum, fileName, subtitleUrl, downloadSubtitles, scheduledTime, info.videoChunks, info.serverType);
     } else {
       await startDownloadRequest(animeName, epNum, info.videoUrl || episodeUrl, fileName, subtitleUrl, scheduledTime, 0, downloadSubtitles, info.serverType, info.selectedQuality);
@@ -659,8 +848,9 @@ async function downloadSelected() {
   const episodes = checked.map(cb => {
     const row = cb.closest('.episode-item');
     const num = parseInt(row.dataset.num, 10);
-    const epServer = row.dataset.server || batchServer;
-    const epQuality = row.querySelector('.episode-quality-select')?.value || row.dataset.quality || batchQuality;
+    const epServer = (batchServer && batchServer !== 'auto' ? batchServer : null) || row.dataset.server;
+    const rowQ = row.querySelector('.episode-quality-select');
+    const epQuality = (rowQ && rowQ.style.display !== 'none' ? rowQ.value : '') || row.dataset.quality || (batchQuality && batchQuality !== 'auto' ? batchQuality : null);
     return {
       number: String(num),
       url: row.dataset.url,
@@ -675,7 +865,17 @@ async function downloadSelected() {
 
   try {
     if (source === 'voir-anime' && episodes.length === 1) {
-      await handleVoirAnimeDownload(episodes[0].url, animeName, parseInt(episodes[0].number, 10), episodes[0].fileName, episodes[0].subtitleUrl, episodes[0].downloadSubtitles === 'true', scheduledTime || null);
+      await handleVoirAnimeDownload(
+        episodes[0].url,
+        animeName,
+        parseInt(episodes[0].number, 10),
+        episodes[0].fileName,
+        episodes[0].subtitleUrl,
+        episodes[0].downloadSubtitles === 'true',
+        scheduledTime || null,
+        episodes[0].selectedServer,
+        episodes[0].selectedQuality
+      );
       refreshDownloadBadge();
       return;
     }
@@ -732,8 +932,23 @@ async function playEpisode(btn) {
   const animeUrl = typeof ANIME_URL !== 'undefined' ? ANIME_URL : '';
   const row = btn.closest('.episode-item');
   const version = row?.dataset.version || '';
-  const server = row?.dataset.server || document.getElementById('batch-server-select')?.value || '';
-  const quality = row?.dataset.quality || document.getElementById('batch-quality-select')?.value || '';
+  const batchServer = document.getElementById('batch-server-select')?.value || '';
+  const server = (batchServer && batchServer !== 'auto' ? batchServer : '') || row?.dataset.server || '';
+  const rowQualitySelect = row?.querySelector('.episode-quality-select');
+  const quality = (rowQualitySelect && rowQualitySelect.style.display !== 'none' ? rowQualitySelect.value : '') || row?.dataset.quality || document.getElementById('batch-quality-select')?.value || '';
+
+  // Annuler toute requête de lecture précédente
+  if (currentPlayAbortController) {
+    try { currentPlayAbortController.abort(); } catch (e) {}
+  }
+  const thisRequestId = ++currentPlayRequestId;
+  currentPlayAbortController = new AbortController();
+
+  // État visuel de chargement sur le bouton
+  const origBtnContent = btn.innerHTML;
+  btn.classList.add('is-loading');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-sm"></span>';
 
   showToast('Résolution du flux vidéo...', 'info');
   try {
@@ -748,8 +963,13 @@ async function playEpisode(btn) {
     if (server && server !== 'auto') params.set('server', server);
     if (quality && quality !== 'auto') params.set('quality', quality);
 
-    const resp = await fetch(`/api/media/stream/resolve?${params.toString()}`);
+    const resp = await fetch(`/api/media/stream/resolve?${params.toString()}`, {
+      signal: currentPlayAbortController.signal
+    });
     const data = await resp.json();
+
+    // Si une nouvelle requête a été émise ou si l'utilisateur a annulé
+    if (thisRequestId !== currentPlayRequestId) return;
 
     if (!resp.ok || !data.success) {
       showToast(data.error || 'Flux vidéo introuvable', 'error');
@@ -784,6 +1004,12 @@ async function playEpisode(btn) {
       qualities: data.qualities,
       filePath: data.filePath
     };
+
+    // Si la page ou l'onglet est masqué, ne pas démarrer la lecture en arrière-plan
+    if (document.hidden) {
+      console.warn("Onglet en arrière-plan : la lecture automatique est suspendue.");
+      return;
+    }
 
     const cinemaModal = document.getElementById('cinema-modal');
     if (cinemaModal) {
@@ -823,15 +1049,24 @@ async function playEpisode(btn) {
     }
 
     if (animeUrl) {
-      await fetch('/api/progress/watched', {
+      fetch('/api/progress/watched', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ animeUrl, animeName, episodeNumber: String(epNum), version })
-      });
+      }).catch(() => {});
       row?.classList.add('ep-watched');
     }
   } catch (error) {
+    if (error.name === 'AbortError') {
+      return; // Annulation normale
+    }
     showToast('Erreur lecteur: ' + error.message, 'error');
+  } finally {
+    if (thisRequestId === currentPlayRequestId) {
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+      btn.innerHTML = origBtnContent;
+    }
   }
 }
 
@@ -931,13 +1166,7 @@ function openCinemaModal(videoUrl, title, tracks = [], epNum = null, sourceMeta 
 function closeCinemaPlayer() {
   const modal = document.getElementById('cinema-modal');
   if (modal) modal.classList.remove('open');
-  if (cinemaPlyrInstance) cinemaPlyrInstance.pause();
-  if (cinemaHlsInstance) {
-    cinemaHlsInstance.destroy();
-    cinemaHlsInstance = null;
-  }
-  const video = document.getElementById('cinema-player');
-  if (video) video.pause();
+  stopAllPlayback();
 }
 
 function playAdjacentEpisode(direction) {
@@ -1381,10 +1610,60 @@ async function apiPost(url, body) {
 async function cancelTask(id) {
   try {
     const res = await fetch('/api/download/' + id, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      showToast('Téléchargement annulé', 'info');
+      showToast(data.message || 'Téléchargement annulé', 'info');
+      const row = document.getElementById('task-' + id);
+      if (row) {
+        const completedList = document.getElementById('completed-list');
+        const activeFilter = document.querySelector('.download-tabs .tab-btn.active')?.dataset?.downloadFilter || 'queue';
+        if (activeFilter === 'queue') {
+          row.style.transition = 'all 0.25s ease';
+          row.style.opacity = '0';
+          setTimeout(() => {
+            if (completedList) {
+              row.dataset.category = 'done';
+              row.dataset.status = 'CANCELLED';
+              row.className = 'dl-task-row completed-row';
+              row.removeAttribute('draggable');
+              row.style.opacity = '1';
+              row.style.display = 'none';
+              const actEl = row.querySelector('.dl-task-actions');
+              if (actEl) {
+                actEl.dataset.status = 'CANCELLED';
+                actEl.innerHTML = renderTaskActions({ id: id, status: 'CANCELLED' });
+              }
+              completedList.prepend(row);
+            } else {
+              row.remove();
+            }
+            reindexQueueRows();
+            refreshDownloadStats();
+            refreshDownloadBadge();
+          }, 250);
+        } else {
+          row.dataset.category = 'done';
+          row.dataset.status = 'CANCELLED';
+          row.className = 'dl-task-row completed-row';
+          row.removeAttribute('draggable');
+          const actEl = row.querySelector('.dl-task-actions');
+          if (actEl) {
+            actEl.dataset.status = 'CANCELLED';
+            actEl.innerHTML = renderTaskActions({ id: id, status: 'CANCELLED' });
+          }
+          const badge = row.querySelector('.dl-task-status');
+          if (badge) {
+            badge.textContent = translateStatus('CANCELLED');
+            badge.className = 'status-badge dl-task-status badge-err';
+          }
+          refreshDownloadStats();
+          refreshDownloadBadge();
+        }
+      }
+    } else {
+      showToast(data.error || 'Erreur lors de l\'annulation', 'error');
     }
-    setTimeout(refreshDownloadStats, 250);
+    setTimeout(refreshDownloadStats, 300);
   } catch (e) {
     showToast('Erreur lors de l\'annulation', 'error');
   }
@@ -1392,12 +1671,17 @@ async function cancelTask(id) {
 
 async function removeTask(id) {
   try {
-    await fetch('/api/download/' + id + '/remove', { method: 'DELETE' });
-    document.getElementById('task-' + id)?.remove();
-    reindexQueueRows();
-    refreshDownloadStats();
-    refreshDownloadBadge();
-    showToast('Tâche retirée', 'info');
+    const res = await fetch('/api/download/' + id + '/remove', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      document.getElementById('task-' + id)?.remove();
+      reindexQueueRows();
+      refreshDownloadStats();
+      refreshDownloadBadge();
+      showToast(data.message || 'Tâche retirée', 'info');
+    } else {
+      showToast(data.error || 'Erreur de suppression', 'error');
+    }
   } catch (e) {
     showToast('Erreur de suppression', 'error');
   }
@@ -1907,7 +2191,7 @@ function initShortcuts() {
 function initSearchAutocomplete() {
   const formatProxyImage = (url) => {
     if (!url) return '';
-    if ((url.includes('voir-anime') || url.includes('voembed') || url.includes('vidmoly')) && !url.startsWith('/api/media/image-proxy')) {
+    if ((url.includes('voir-anime') || url.includes('voembed') || url.includes('vidmoly') || url.includes('animepahe')) && !url.startsWith('/api/media/image-proxy')) {
       return `/api/media/image-proxy?url=${encodeURIComponent(url)}`;
     }
     return url;
@@ -1953,7 +2237,7 @@ function initSearchAutocomplete() {
             return;
           }
           const renderItemHtml = (item, srvSource) => {
-            const actualSource = item.source || srvSource || (item.url && item.url.includes('voir-anime') ? 'voir-anime' : 'french-manga');
+            const actualSource = item.source || srvSource || (item.url && (item.url.includes('animepahe') ? 'animepahe' : (item.url.includes('voir-anime') ? 'voir-anime' : 'french-manga')));
             const imgUrl = formatProxyImage(item.imageUrl);
             const posterHtml = imgUrl ? `
               <img class="autocomplete-poster" src="${imgUrl}" alt="" loading="lazy"
@@ -1983,9 +2267,9 @@ function initSearchAutocomplete() {
           };
 
           if (source === 'all') {
-            // Groupement par ordre alphabétique des sources actives: French-Manga puis VoirAnime
-            const fmList = results.filter(i => (i.source === 'french-manga' || (!i.source && !i.url.includes('voir-anime'))));
+            const fmList = results.filter(i => (i.source === 'french-manga' || (!i.source && !i.url.includes('voir-anime') && !i.url.includes('animepahe'))));
             const vaList = results.filter(i => (i.source === 'voir-anime' || (!i.source && i.url.includes('voir-anime'))));
+            const apList = results.filter(i => (i.source === 'animepahe' || (!i.source && i.url.includes('animepahe'))));
 
             let groupedHtml = '';
             if (fmList.length > 0) {
@@ -1995,6 +2279,10 @@ function initSearchAutocomplete() {
             if (vaList.length > 0) {
               groupedHtml += `<div class="autocomplete-group-header source-voir-anime"><span>VoirAnime</span> <small>(${vaList.length})</small></div>`;
               groupedHtml += vaList.slice(0, 4).map(i => renderItemHtml(i, 'voir-anime')).join('');
+            }
+            if (apList.length > 0) {
+              groupedHtml += `<div class="autocomplete-group-header source-animepahe" style="background:rgba(225,29,72,0.15);color:#f43f5e;border-left:3px solid #e11d48;padding:6px 12px;font-weight:700;font-size:0.75rem;text-transform:uppercase;"><span>AnimePahe</span> <small>(${apList.length})</small></div>`;
+              groupedHtml += apList.slice(0, 4).map(i => renderItemHtml(i, 'animepahe')).join('');
             }
             dropdown.innerHTML = groupedHtml || '<div style="padding:16px;color:var(--muted);font-size:13px;text-align:center;">Aucun résultat</div>';
           } else {

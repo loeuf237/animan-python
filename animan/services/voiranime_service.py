@@ -8,6 +8,7 @@ import urllib.parse
 from typing import List, Optional, Dict, Tuple, Any
 from urllib.parse import urljoin
 
+import html
 import httpx
 from bs4 import BeautifulSoup
 
@@ -624,6 +625,7 @@ class VoirAnimeScrapingService:
         episode_url: str,
         preferred_server: Optional[str] = None,
         preferred_quality: Optional[str] = None,
+        quality_strategy: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not is_safe_url(episode_url):
             logger.warning("[voir-anime] SSRF bloqué pour l'URL épisode dans extract_download_info: %s", episode_url)
@@ -670,7 +672,7 @@ class VoirAnimeScrapingService:
                 if target_server and target_server.lower() == "auto":
                     target_server = None
 
-                default_priority = ["myTV", "stape", "voe", "fhd1", "moon"]
+                default_priority = ["myTV", "fhd1", "voe", "moon", "stape"]
                 try_order: List[str] = []
 
                 # Si un serveur préféré est spécifié et disponible, le tenter en premier
@@ -752,7 +754,9 @@ class VoirAnimeScrapingService:
                                             qualities_sizes_formatted[qk] = format_bytes(qsz)
                             else:
                                 try:
-                                    hr = client.head(u, headers={"Referer": "https://voe.sx/"}, timeout=5.0, follow_redirects=True)
+                                    parsed_voe = urllib.parse.urlparse(u)
+                                    v_ref = f"{parsed_voe.scheme}://{parsed_voe.netloc}/" if parsed_voe.netloc else "https://voe.sx/"
+                                    hr = client.head(u, headers={"Referer": v_ref}, timeout=5.0, follow_redirects=True)
                                     cl = hr.headers.get("Content-Length")
                                     if cl and cl.isdigit() and int(cl) > 0:
                                         detected_size = int(cl)
@@ -790,15 +794,49 @@ class VoirAnimeScrapingService:
                 # 4. Sélection de la qualité souhaitée
                 selected_q_label = ""
                 if qualities:
-                    if preferred_quality:
+                    if not quality_strategy:
+                        try:
+                            from animan.services.source_settings_service import source_settings_service
+                            va_settings = source_settings_service.get_source_settings("voir-anime")
+                            quality_strategy = va_settings.get("quality_strategy", "highest")
+                        except Exception:
+                            quality_strategy = "highest"
+
+                    is_lowest_strategy = (
+                        str(quality_strategy).lower() in ["lowest", "faible", "min"]
+                        or (preferred_quality and str(preferred_quality).lower() in ["lowest", "faible", "min"])
+                    )
+
+                    if preferred_quality and preferred_quality.lower() not in ["auto", "max", "highest", "lowest", "faible", "min"]:
+                        pq_clean = preferred_quality.strip().lower()
+                        # 4.1 Correspondance textuelle directe
                         for q_k, q_v in qualities.items():
-                            if preferred_quality.lower() in q_k.lower():
+                            if pq_clean == q_k.lower() or pq_clean in q_k.lower():
                                 best_url = q_v
                                 selected_q_label = q_k
                                 break
 
+                        # 4.2 Recherche numérique la plus proche (ex: 720p, 480p, 360p, 1080p)
+                        if not selected_q_label:
+                            pref_num_m = re.search(r"(\d{3,4})", pq_clean)
+                            if pref_num_m:
+                                target_res = int(pref_num_m.group(1))
+                                parsed_qualities = []
+                                for q_k, q_v in qualities.items():
+                                    res_m = re.search(r"(\d{3,4})", q_k)
+                                    res_val = int(res_m.group(1)) if res_m else 0
+                                    parsed_qualities.append((res_val, q_k, q_v))
+
+                                # Trier par distance absolue avec la cible, puis priorité pour <= target_res
+                                parsed_qualities.sort(key=lambda item: (abs(item[0] - target_res), -(target_res >= item[0])))
+                                if parsed_qualities:
+                                    selected_q_label = parsed_qualities[0][1]
+                                    best_url = parsed_qualities[0][2]
+
+                    # 4.3 Fallback si aucune préférence ou aucune qualité sélectionnée : respecter la stratégie (lowest vs highest)
                     if not selected_q_label:
-                        for q_cand in ["1080p", "720p", "480p", "360p"]:
+                        ordered_candidates = ["360p", "480p", "720p", "1080p"] if is_lowest_strategy else ["1080p", "720p", "480p", "360p"]
+                        for q_cand in ordered_candidates:
                             for q_k, q_v in qualities.items():
                                 if q_cand in q_k.lower():
                                     best_url = q_v
@@ -808,8 +846,14 @@ class VoirAnimeScrapingService:
                                 break
 
                     if not selected_q_label:
-                        selected_q_label = next(iter(qualities.keys()))
-                        best_url = qualities[selected_q_label]
+                        numeric_items = []
+                        for q_k, q_v in qualities.items():
+                            m_num = re.search(r"(\d{3,4})", q_k)
+                            val = int(m_num.group(1)) if m_num else 0
+                            numeric_items.append((val, q_k, q_v))
+                        numeric_items.sort(key=lambda x: x[0], reverse=not is_lowest_strategy)
+                        selected_q_label = numeric_items[0][1]
+                        best_url = numeric_items[0][2]
 
                 if selected_q_label in qualities_sizes_bytes and qualities_sizes_bytes[selected_q_label] > 0:
                     detected_size = qualities_sizes_bytes[selected_q_label]
@@ -862,7 +906,19 @@ class VoirAnimeScrapingService:
                             embed_html = redir_resp.text
                     break
             except Exception:
-                pass
+                try:
+                    from curl_cffi import requests as c_requests
+                    c_resp = c_requests.get(cand_url, headers={"Referer": episode_url}, impersonate="chrome120", timeout=10)
+                    if c_resp.status_code == 200 and len(c_resp.text) > 500:
+                        embed_html = c_resp.text
+                        js_redir = re.search(r"window\.location\.replace\(\x27([^\x27]+)\x27\)", embed_html)
+                        if js_redir:
+                            r2 = c_requests.get(js_redir.group(1), headers={"Referer": episode_url}, impersonate="chrome120", timeout=10)
+                            if r2.status_code == 200:
+                                embed_html = r2.text
+                        break
+                except Exception:
+                    pass
 
         qualities: Dict[str, str] = {}
         bandwidths: Dict[str, int] = {}
@@ -908,13 +964,26 @@ class VoirAnimeScrapingService:
         return best_url, qualities, subtitle_url, qualities_sizes
 
     def _resolve_streamtape(self, ifr_url: str, referer: str, client: httpx.Client) -> Optional[str]:
-        """Résout l'URL directe d'une vidéo Streamtape."""
+        """Résout l'URL directe d'une vidéo Streamtape en neutralisant les pièges d'obfuscation."""
         try:
-            st_resp = client.get(ifr_url, headers={"Referer": referer}, timeout=12)
-            if st_resp.status_code != 200:
-                return None
-            st_html = st_resp.text
-            if "Video not found" in st_html or "deleted by the creator" in st_html or "has been removed" in st_html:
+            vid_m = re.search(r"/[ev]/([a-zA-Z0-9]+)", ifr_url)
+            video_id = vid_m.group(1) if vid_m else ""
+
+            st_html = ""
+            try:
+                from curl_cffi import requests as c_requests
+                c_resp = c_requests.get(ifr_url, headers={"Referer": referer}, impersonate="chrome120", timeout=12)
+                if c_resp.status_code == 200:
+                    st_html = c_resp.text
+            except Exception:
+                pass
+
+            if not st_html:
+                st_resp = client.get(ifr_url, headers={"Referer": referer}, timeout=12)
+                if st_resp.status_code == 200:
+                    st_html = st_resp.text
+
+            if not st_html or "Video not found" in st_html or "deleted by the creator" in st_html or "has been removed" in st_html:
                 return None
 
             pattern = r"innerHTML\s*=\s*['\"]([^'\"]+)['\"]\s*\+\s*(?:''\s*\+\s*)?\(\s*['\"]([^'\"]+)['\"]\s*\)((?:\s*\.substring\(\s*\d+\s*\))+)"
@@ -926,49 +995,123 @@ class VoirAnimeScrapingService:
                 for op in sub_ops:
                     s = s[int(op):]
                 cand = prefix + s
+
+                # Normaliser schéma et domaine
                 if cand.startswith("//"):
                     cand = "https:" + cand
+                elif cand.startswith("https://") or cand.startswith("http://"):
+                    pass
+                elif cand.startswith("streamtape.com/"):
+                    cand = "https://" + cand
                 elif cand.startswith("/"):
-                    cand = "https://" + cand.lstrip("/")
+                    cand = "https://streamtape.com/" + cand.lstrip("/")
+                else:
+                    cand = "https://streamtape.com/" + cand
+                cand = re.sub(r"https?://[^/]*tape[^/]*/(?:streamtape\.com/)+", "https://streamtape.com/", cand)
+                cand = re.sub(r"https?://[^/]*tape[^/]*/", "https://streamtape.com/", cand)
+
+                # Nettoyer les chemins et paramètres piégés
+                cand = cand.replace("/bget_video", "/get_video").replace("/get_videbo", "/get_video").replace("/get_vidbo", "/get_video")
+                if video_id:
+                    cand = re.sub(r"([?&])(?:b?id=)[^&]+", r"\1id=" + video_id, cand)
 
                 if "streamtape.com/get_video?" in cand:
+                    redir_url = None
                     try:
-                        redir_resp = client.get(cand, headers={"Referer": ifr_url}, follow_redirects=False, timeout=8)
-                        if redir_resp.status_code in [301, 302, 303, 307, 308]:
-                            final_url = redir_resp.headers.get("location")
-                            if final_url:
-                                return final_url
-                        return cand
+                        from curl_cffi import requests as c_requests
+                        r_c = c_requests.get(cand, headers={"Referer": "https://streamtape.com/"}, allow_redirects=False, impersonate="chrome120", timeout=8)
+                        if r_c.status_code in [301, 302, 303, 307, 308]:
+                            redir_url = r_c.headers.get("location")
+                        elif r_c.status_code == 200 and "text/html" not in (r_c.headers.get("content-type") or ""):
+                            return cand
                     except Exception:
-                        return cand
+                        pass
+
+                    if not redir_url:
+                        try:
+                            redir_resp = client.get(cand, headers={"Referer": "https://streamtape.com/"}, follow_redirects=False, timeout=8)
+                            if redir_resp.status_code in [301, 302, 303, 307, 308]:
+                                redir_url = redir_resp.headers.get("location")
+                            elif redir_resp.status_code == 200 and "text/html" not in (redir_resp.headers.get("content-type") or ""):
+                                return cand
+                        except Exception:
+                            pass
+
+                    if redir_url:
+                        return redir_url
+                    logger.debug("[voir-anime] Piège HTML ou erreur 404 sur candidat Streamtape ignoré: %s", cand)
 
             m_tape = re.search(r"document\.getElementById\(['\"]videolink['\"]\)\.innerHTML\s*=\s*['\"]([^'\"]+)['\"]", st_html)
             if m_tape:
                 cand = "https:" + m_tape.group(1) if m_tape.group(1).startswith("//") else m_tape.group(1)
+                if video_id:
+                    cand = re.sub(r"([?&])(?:b?id=)[^&]+", r"\1id=" + video_id, cand)
+                try:
+                    from curl_cffi import requests as c_requests
+                    r_c = c_requests.get(cand, headers={"Referer": "https://streamtape.com/"}, allow_redirects=False, impersonate="chrome120", timeout=8)
+                    if r_c.status_code in [301, 302, 303, 307, 308] and r_c.headers.get("location"):
+                        return r_c.headers.get("location")
+                except Exception:
+                    pass
                 return cand
         except Exception as e:
             logger.debug("[voir-anime] Erreur résolution Streamtape: %s", e)
         return None
 
     def _resolve_voe(self, ifr_url: str, referer: str, client: httpx.Client) -> Tuple[str, Dict[str, str]]:
-        """Résout le lecteur VOE vers sa source vidéo."""
+        """Résout le lecteur VOE vers sa source vidéo directe."""
         try:
             resp = client.get(ifr_url, headers={"Referer": referer}, timeout=10)
             if resp.status_code != 200:
                 return "", {}
-            html = resp.text
-            redir_m = re.search(r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]", html)
+            html_text = resp.text
+            redir_m = re.search(r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]", html_text)
+            curr_url = redir_m.group(1) if redir_m else str(resp.url)
             if redir_m:
-                voe_url = redir_m.group(1)
-                redir_resp = client.get(voe_url, headers={"Referer": ifr_url}, timeout=10)
+                redir_resp = client.get(curr_url, headers={"Referer": ifr_url}, timeout=10)
                 if redir_resp.status_code == 200:
-                    html = redir_resp.text
+                    html_text = redir_resp.text
+                    curr_url = str(redir_resp.url)
 
-            m3u8_matches = re.findall(r"['\"](https?://[^\s'\"<>]+\.m3u8[^\s'\"<>]*)['\"]", html)
-            mp4_matches = re.findall(r"['\"](https?://[^\s'\"<>]+\.mp4[^\s'\"<>]*)['\"]", html)
+            # 1. Tenter la page /download de VOE (direct MP4 unescaped)
+            vid_m = re.search(r"/e/([a-zA-Z0-9]+)", curr_url) or re.search(r"/e/([a-zA-Z0-9]+)", ifr_url)
+            if vid_m:
+                vid = vid_m.group(1)
+                parsed_u = urllib.parse.urlparse(curr_url)
+                host = parsed_u.netloc or "voe.sx"
+                dl_page_url = f"https://{host}/{vid}/download"
+                try:
+                    r_dl = client.get(dl_page_url, headers={"Referer": curr_url}, timeout=8)
+                    if r_dl.status_code == 200:
+                        dl_html = r_dl.text
+                        qualities: Dict[str, str] = {}
+                        for a_m in re.finditer(
+                            r"<a[^>]+href=[\x27\x22](https?://[^\x27\x22]+)[\x27\x22][^>]*>(.*?)</a>",
+                            dl_html,
+                            re.DOTALL,
+                        ):
+                            href = html.unescape(a_m.group(1))
+                            text = a_m.group(2).strip()
+                            if ".mp4" in href or "download" in href:
+                                q_m = re.search(r"(\d{3,4}p)", text, re.IGNORECASE)
+                                q_label = f"{q_m.group(1)} (VOE)" if q_m else "720p (VOE)"
+                                qualities[q_label] = href
+                        if qualities:
+                            best = (
+                                qualities.get("1080p (VOE)")
+                                or qualities.get("720p (VOE)")
+                                or next(iter(qualities.values()))
+                            )
+                            return best, qualities
+                except Exception as e:
+                    logger.debug("[voir-anime] VOE download page error: %s", e)
 
-            valid_mp4 = [u for u in mp4_matches if "test-videos" not in u and "google" not in u]
-            valid_m3u8 = [u for u in m3u8_matches if "google" not in u]
+            # 2. Fallback classique regex m3u8 / mp4
+            m3u8_matches = re.findall(r"['\"](https?://[^\s'\"<>]+\.m3u8[^\s'\"<>]*)['\"]", html_text)
+            mp4_matches = re.findall(r"['\"](https?://[^\s'\"<>]+\.mp4[^\s'\"<>]*)['\"]", html_text)
+
+            valid_mp4 = [html.unescape(u) for u in mp4_matches if "test-videos" not in u and "google" not in u]
+            valid_m3u8 = [html.unescape(u) for u in m3u8_matches if "google" not in u]
 
             if valid_m3u8:
                 m3u8_url = valid_m3u8[0]
@@ -980,12 +1123,13 @@ class VoirAnimeScrapingService:
             elif valid_mp4:
                 return valid_mp4[0], {"Original (VOE)": valid_mp4[0]}
 
-            m_src = re.search(r"sources\s*=\s*(\{[^{}]+\})", html)
+            m_src = re.search(r"sources\s*=\s*(\{[^{}]+\})", html_text)
             if m_src:
                 try:
                     data = json.loads(m_src.group(1))
                     hls = data.get("hls") or data.get("mp4")
                     if hls:
+                        hls = html.unescape(hls)
                         return hls, {"VOE": hls}
                 except Exception:
                     pass
