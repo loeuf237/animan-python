@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -219,3 +220,117 @@ async def test_hls_segment_level_resumption():
         content = output_path.read_bytes()
         assert content == b"MPEGTS_SEGMENT_0MPEGTS_SEGMENT_1MPEGTS_SEGMENT_2"
         assert task.progress == 100.0
+
+
+@pytest.mark.asyncio
+async def test_hls_in_situ_micro_cut_retry(tmp_path):
+    """Vérifie qu'une micro-coupure durant le téléchargement d'un segment est résolue in-situ sans interruption globale."""
+    output_path = tmp_path / "microcut.mp4"
+    task = DownloadTask(
+        id=str(uuid.uuid4()),
+        animeName="Microcut Test Anime",
+        episodeNumber=1,
+        fileName="microcut.mp4",
+        savePath=str(output_path),
+        status=DownloadStatus.DOWNLOADING,
+    )
+
+    m3u8_content = (
+        "#EXTM3U\n"
+        "#EXT-X-VERSION:3\n"
+        "#EXTINF:10.0,\n"
+        "http://example.com/hls/seg0.ts\n"
+        "#EXTINF:10.0,\n"
+        "http://example.com/hls/seg1.ts\n"
+        "#EXT-X-ENDLIST\n"
+    )
+
+    attempt_counts = {"http://example.com/hls/seg1.ts": 0}
+
+    class MockResponse:
+        def __init__(self, text="", content=b"", status_code=200):
+            self.text = text
+            self.content = content
+            self.status_code = status_code
+
+    class MockStreamContext:
+        def __init__(self, url):
+            self.url = url
+            self.status_code = 200
+
+        async def __aenter__(self):
+            if "seg1.ts" in self.url:
+                attempt_counts[self.url] += 1
+                if attempt_counts[self.url] == 1:
+                    raise ConnectionResetError("Micro-coupure réseau simulée sur seg1")
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        async def aiter_bytes(self, chunk_size=16384):
+            yield b"SEGMENT_DATA_STREAMED"
+
+    class MockAsyncClientWithStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+        async def get(self, url):
+            return MockResponse(text=m3u8_content)
+
+        def stream(self, method, url):
+            return MockStreamContext(url)
+
+    with patch.object(download_manager, "_create_async_client", return_value=MockAsyncClientWithStream()):
+        with patch.object(download_manager, "is_ffmpeg_available", return_value=False):
+            with patch("asyncio.sleep", return_value=None):
+                await download_manager._download_hls_segments_native(task, "http://example.com/hls/master.m3u8")
+
+    assert output_path.exists()
+    assert attempt_counts["http://example.com/hls/seg1.ts"] == 2, "seg1 doit avoir été retenté in-situ après la micro-coupure"
+    assert task.progress == 100.0
+
+
+@pytest.mark.asyncio
+async def test_bytes_gained_prevents_server_fallback_and_decrements_retry(tmp_path):
+    """Vérifie que la progression en octets protège l'hébergeur contre les faux basculements et réinitialise les erreurs."""
+    output_path = tmp_path / "progression_test.mp4"
+    task = DownloadTask(
+        id=str(uuid.uuid4()),
+        animeName="Slow Conn Test",
+        episodeNumber=2,
+        fileName="progression_test.mp4",
+        savePath=str(output_path),
+        selectedServer="myTV",
+        status=DownloadStatus.DOWNLOADING,
+        retryCount=2,
+        downloadedBytes=0,
+    )
+    task.consecutiveServerErrors = 1
+
+    download_calls = 0
+
+    async def fake_download(t, url):
+        nonlocal download_calls
+        download_calls += 1
+        if download_calls == 1:
+            # Premier essai : gagne 500 KB puis coupure réseau transitoire
+            t.downloadedBytes = 500 * 1024
+            raise ConnectionError("connection reset by peer")
+        else:
+            # Deuxième essai : termine le téléchargement
+            t.downloadedBytes = 1000 * 1024
+            t.status = DownloadStatus.COMPLETED
+
+    with patch.object(download_manager, "is_client_online", return_value=True):
+        with patch.object(download_manager, "_download_single_file", side_effect=fake_download):
+            with patch.object(download_manager, "_download_hls_stream", side_effect=fake_download):
+                with patch("asyncio.sleep", return_value=None):
+                    await download_manager._execute_download(task)
+
+    assert task.selectedServer == "myTV", "L'hébergeur myTV doit être conservé car la connexion a progressé"
+    assert getattr(task, "consecutiveServerErrors", 0) == 0, "Les erreurs serveur doivent être réinitialisées"
+
