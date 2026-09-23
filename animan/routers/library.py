@@ -47,7 +47,7 @@ async def history_page(request: Request):
 @router.get("/voiranime", response_class=HTMLResponse)
 async def voiranime_detail_page(request: Request, url: str = Query(...)):
     if not is_safe_url(url):
-        logger.warning("[voiranime] SSRF bloqué pour l'URL: %s", url)
+        logger.warning("[voiranime] SSRF blocked for URL: %s", url)
         return templates.TemplateResponse(
             request=request,
             name="index.html",
@@ -59,7 +59,7 @@ async def voiranime_detail_page(request: Request, url: str = Query(...)):
                 "latestVoirAnime": [],
             }
         )
-    logger.info("Détail voir-anime page: %s", url)
+    logger.info("VoirAnime page detail: %s", url)
     detail = await voiranime_service.get_anime_detail(url)
     if not detail:
         return templates.TemplateResponse(

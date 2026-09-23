@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from animan.models.download_task import DownloadStatus
 from animan.services.download_manager import download_manager
+from animan.services.proxy_service import proxy_service
 from animan.services.voiranime_service import voiranime_service
 from animan.templates_config import templates
 
@@ -32,6 +33,7 @@ async def settings_page(request: Request):
         name="settings.html",
         context={
             "settings": download_manager.get_settings(),
+            "proxy_settings": proxy_service.get_proxy_settings(),
             "source": "all",
         }
     )
@@ -237,6 +239,31 @@ async def save_settings(request: Request):
     except Exception as e:
         return JSONResponse(status_code=400, content={"error": f"Paramètres invalides: {e}"})
 
+@router.get("/api/proxy/settings")
+async def get_proxy_settings():
+    return proxy_service.get_proxy_settings()
+
+@router.post("/api/proxy/settings")
+async def save_proxy_settings(request: Request):
+    try:
+        data = await request.json()
+        saved = proxy_service.save_proxy_settings(data)
+        return {"success": True, "settings": saved, "message": "Paramètres proxy enregistrés"}
+    except Exception as e:
+        logger.error(f"Error saving proxy settings: {e}")
+        return JSONResponse(status_code=400, content={"error": f"Erreur lors de l'enregistrement: {e}"})
+
+@router.post("/api/proxy/test")
+async def test_proxy(request: Request):
+    try:
+        body = await request.json()
+        url = body.get("proxyUrl")
+        res = await proxy_service.test_proxy_connection(url)
+        return res
+    except Exception as e:
+        logger.error(f"Error testing proxy connection: {e}")
+        return {"success": False, "error": str(e)}
+
 @router.get("/api/episode/servers")
 async def get_episode_servers(url: str = Query(...)):
     try:
@@ -255,7 +282,7 @@ async def get_episode_servers(url: str = Query(...)):
             "defaultServer": "auto",
         }
     except Exception as e:
-        logger.error("Erreur get_episode_servers: %s", e)
+        logger.error("Error get_episode_servers: %s", e)
         return {"success": False, "servers": [], "error": str(e)}
 
 @router.get("/api/episode/size")

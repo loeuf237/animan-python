@@ -28,6 +28,34 @@ class ScrapingService:
         self.latest_cache: List[AnimeResult] = []
         self.last_cache_time: float = 0.0
         self.is_refreshing: bool = False
+        self._load_persistent_cache()
+
+    def _load_persistent_cache(self):
+        try:
+            cache_file = settings.CACHE_DIR / "latest_french_manga.json"
+            if cache_file.exists():
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.latest_cache = [AnimeResult(**item) for item in data.get("items", [])]
+                    self.last_cache_time = float(data.get("timestamp", 0))
+                    logger.info("Disk cache loaded (french-manga: %d animes)", len(self.latest_cache))
+        except Exception as e:
+            logger.warning("Error loading disk cache french-manga: %s", e)
+
+    def _save_persistent_cache(self):
+        try:
+            settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file = settings.CACHE_DIR / "latest_french_manga.json"
+            tmp_file = cache_file.with_suffix(".tmp")
+            data = {
+                "timestamp": self.last_cache_time,
+                "items": [item.model_dump() for item in self.latest_cache]
+            }
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            tmp_file.replace(cache_file)
+        except Exception as e:
+            logger.warning("Error saving disk cache french-manga: %s", e)
 
     def _get_client(self, follow_redirects: bool = True, timeout: Optional[float] = None) -> httpx.Client:
         headers = {
@@ -47,7 +75,7 @@ class ScrapingService:
                 verify=settings.SSL_VERIFY,
             )
         except Exception as e:
-            logger.warning("[scraping] Erreur initialisation proxy client HTTP (%s): %s - bascule en direct sans proxy", proxy, e)
+            logger.warning("[scraping] HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
             return httpx.Client(
                 headers=headers,
                 timeout=t,
@@ -74,7 +102,7 @@ class ScrapingService:
                 verify=settings.SSL_VERIFY,
             )
         except Exception as e:
-            logger.warning("[scraping] Erreur initialisation proxy client HTTP asynchrone (%s): %s - bascule en direct sans proxy", proxy, e)
+            logger.warning("[scraping] Async HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
             return httpx.AsyncClient(
                 headers=headers,
                 timeout=t,
@@ -89,13 +117,25 @@ class ScrapingService:
 
     async def get_latest_releases(self) -> List[AnimeResult]:
         now = time.time()
+        # Stale-While-Revalidate 100% non-bloquant : renvoie immédiatement le cache en mémoire
         if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
-            await self.refresh_cache()
+            if not self.is_refreshing:
+                self.is_refreshing = True
+                asyncio.create_task(self._safe_refresh_cache())
         return list(self.latest_cache)
+
+    async def _safe_refresh_cache(self):
+        if self.is_refreshing:
+            return
+        self.is_refreshing = True
+        try:
+            await self.refresh_cache()
+        finally:
+            self.is_refreshing = False
 
     async def refresh_cache(self):
         try:
-            logger.info("Chargement des dernières sorties depuis %s", self.base_url)
+            logger.info("Loading latest releases from %s", self.base_url)
             async with self._get_async_client() as client:
                 resp = await client.get(self.base_url)
                 if resp.status_code == 200:
@@ -103,16 +143,17 @@ class ScrapingService:
                     if results:
                         self.latest_cache = results
                         self.last_cache_time = time.time()
-                        logger.info("Cache mis à jour (french-manga: %d animés)", len(self.latest_cache))
+                        self._save_persistent_cache()
+                        logger.info("Cache updated (french-manga: %d animes)", len(self.latest_cache))
         except Exception as e:
-            logger.error("Erreur lors de la mise à jour du cache french-manga: %s", e)
+            logger.error("Error updating french-manga cache: %s", e)
 
     # -------------------------------------------------------------------------
     # Recherche
     # -------------------------------------------------------------------------
 
     async def search_anime(self, query: str) -> List[AnimeResult]:
-        logger.info("Recherche anime: '%s'", query)
+        logger.info("Searching anime: '%s'", query)
         results: List[AnimeResult] = []
 
         try:
@@ -129,10 +170,10 @@ class ScrapingService:
             if not results:
                 results = await self.search_via_listing(query)
         except Exception as e:
-            logger.error("Erreur lors de la recherche french-manga: %s", e)
+            logger.error("Error searching french-manga: %s", e)
             results = await self.search_via_listing(query)
 
-        logger.info("Trouvé %d résultat(s) pour '%s'", len(results), query)
+        logger.info("Found %d result(s) for '%s'", len(results), query)
         return results
 
     async def search_via_listing(self, query: str) -> List[AnimeResult]:
@@ -156,7 +197,7 @@ class ScrapingService:
                     if len(results) >= 20:
                         break
         except Exception as e:
-            logger.error("Erreur fallback listing: %s", e)
+            logger.error("Error in fallback listing: %s", e)
 
         return results
 
@@ -181,7 +222,7 @@ class ScrapingService:
                     seen_urls.add(res.url)
                     results.append(res)
             except Exception as e:
-                logger.debug("Erreur parsing carte anime: %s", e)
+                logger.debug("Error parsing anime card: %s", e)
 
         return self.unify_animes(results)
 
@@ -336,9 +377,9 @@ class ScrapingService:
 
     async def get_anime_detail(self, anime_url: str) -> Optional[AnimeDetail]:
         if not is_safe_url(anime_url):
-            logger.warning("[french-manga] SSRF bloqué pour l'URL: %s", anime_url)
+            logger.warning("[french-manga] SSRF blocked for URL: %s", anime_url)
             return None
-        logger.info("Chargement détails anime: %s", anime_url)
+        logger.info("Loading anime details: %s", anime_url)
         try:
             async with self._get_async_client() as client:
                 resp = await client.get(anime_url)
@@ -394,7 +435,7 @@ class ScrapingService:
                         raw_ids = q_params["merged_ids"][0]
                         news_ids = [nid.strip() for nid in raw_ids.split(",") if nid.strip()]
                 except Exception as e:
-                    logger.debug("Erreur parsing merged_ids depuis l'URL: %s", e)
+                    logger.debug("Error parsing merged_ids from URL: %s", e)
 
                 if not news_ids:
                     nid = self.extract_news_id(anime_url, soup)
@@ -411,7 +452,7 @@ class ScrapingService:
                             if api_resp.status_code == 200:
                                 return self.parse_episodes_from_json(api_resp.text)
                         except Exception as e:
-                            logger.warning("API épisodes échouée pour newsid=%s: %s", nid, e)
+                            logger.warning("Episodes API failed for newsid=%s: %s", nid, e)
                         return []
 
                     api_results = await asyncio.gather(*[fetch_episodes_for_id(nid) for nid in news_ids])
@@ -454,7 +495,7 @@ class ScrapingService:
                     source="french-manga",
                 )
         except Exception as e:
-            logger.error("Erreur chargement anime french-manga: %s", e)
+            logger.error("Error loading french-manga anime: %s", e)
             return None
 
     def extract_news_id(self, url: str, soup: BeautifulSoup) -> str:
@@ -532,7 +573,7 @@ class ScrapingService:
                             )
                         )
         except Exception as e:
-            logger.error("Erreur parsing JSON épisodes: %s", e)
+            logger.error("Error parsing episodes JSON: %s", e)
 
         episodes.sort(key=lambda x: (x.version, x.number))
         return episodes
@@ -625,7 +666,7 @@ class ScrapingService:
     # -------------------------------------------------------------------------
 
     def extract_download_info(self, vidzy_url: str) -> Dict[str, str]:
-        logger.info("Extraction lien direct depuis: %s", vidzy_url)
+        logger.info("Extracting direct link from: %s", vidzy_url)
         result = {
             "videoUrl": "",
             "subtitleUrl": "",
@@ -672,7 +713,7 @@ class ScrapingService:
                         h_val = m_hash.group(1)
 
                 if h_val:
-                    logger.info("Hash trouvé: '%s'. Envoi POST...", h_val)
+                    logger.info("Hash found: '%s'. Sending POST...", h_val)
                     # Use client without automatic redirect to catch 302 location
                     with self._get_client(follow_redirects=False) as no_redir_client:
                         post_resp = no_redir_client.post(
@@ -683,15 +724,15 @@ class ScrapingService:
                         if post_resp.status_code in [301, 302]:
                             loc = post_resp.headers.get("Location")
                             if loc and not loc.startswith(f"{domain}/d/"):
-                                logger.info("Lien MP4 résolu (302): %s", loc)
+                                logger.info("Resolved MP4 link (302): %s", loc)
                                 result["videoUrl"] = loc
                         elif post_resp.status_code == 200:
                             direct_url = self._extract_video_from_html(post_resp.text)
                             if direct_url and not direct_url.startswith(f"{domain}/d/"):
-                                logger.info("Lien MP4 extrait (200): %s", direct_url)
+                                logger.info("Extracted MP4 link (200): %s", direct_url)
                                 result["videoUrl"] = direct_url
         except Exception as e:
-            logger.error("Erreur lors de l'extraction de la vidéo sur %s: %s", download_url, e)
+            logger.error("Error extracting video from %s: %s", download_url, e)
 
         # 2. Extraction des sous-titres (optionnelle, isolée avec timeout court)
         try:
@@ -704,7 +745,7 @@ class ScrapingService:
                     if subtitles_list:
                         result["subtitleUrl"] = subtitles_list[0].get("url", "")
         except Exception as e:
-            logger.debug("Sous-titres non disponibles ou timeout sur %s: %s", embed_url, e)
+            logger.debug("Subtitles unavailable or timed out on %s: %s", embed_url, e)
 
         # 3. Vérification stricte : refuser si aucune URL vidéo valide n'est extraite
         if not result.get("videoUrl"):

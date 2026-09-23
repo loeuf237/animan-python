@@ -1,6 +1,6 @@
-{% import 'fragments/navbar.html' as nav %}
+{% import 'fragments/navbar.html' as nav with context %}
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="{{ current_lang() }}">
 {{ nav.head(anime.title) }}
 <body>
 {{ nav.navbar() }}
@@ -81,8 +81,9 @@
       </div>
     </header>
 
-    <!-- Hero Card Tachiyomi avec Backdrop Banner Optionnelle -->
-    <section class="tachiyomi-hero fade-in" {% if anime.bannerUrl %}style="background: linear-gradient(180deg, rgba(15, 23, 42, 0.82) 0%, rgba(15, 23, 42, 0.98) 100%), url('{{ anime.bannerUrl | proxy_img }}') center/cover no-repeat;"{% endif %}>
+    <!-- Hero Card Tachiyomi avec Backdrop Banner Immersif Streaming -->
+    {% set hero_bg_img = (anime.bannerUrl or anime.imageUrl) %}
+    <section class="tachiyomi-hero fade-in" {% if hero_bg_img %}style="--hero-bg-img: url('{{ hero_bg_img | proxy_img }}');"{% endif %}>
       <div class="tachiyomi-cover-wrap">
         {% if anime.imageUrl %}
         <img class="tachiyomi-cover" src="{{ anime.imageUrl | proxy_img }}" alt="{{ anime.title }}"
@@ -187,7 +188,7 @@
     <div class="tachiyomi-episodes-bar">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <h2 class="tachiyomi-episodes-title">
-          <span id="tachiyomi-ep-count">{{ anime.episodes|length if anime.episodes else 0 }}</span> chapitres
+          <span id="tachiyomi-ep-count">{{ anime.episodes|length if anime.episodes else 0 }}</span> {{ t('detail_episodes') }}
         </h2>
         <div class="version-filter" id="version-filter"></div>
       </div>
@@ -199,7 +200,7 @@
       <div class="episode-range-bar" id="episode-range-bar"></div>
       <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
         <input type="number" id="episode-search-input" class="episode-search-input"
-               placeholder="N° d'épisode..." min="1" title="Filtrer un numéro d'épisode précis"/>
+               placeholder="{{ t('detail_search_ep_placeholder') }}" min="1" title="{{ t('detail_search_ep_title') }}"/>
       </div>
     </div>
 
@@ -208,19 +209,19 @@
       <div class="batch-btn-group">
         <label for="select-all-cb" style="cursor:pointer;font-weight:700;display:inline-flex;align-items:center;gap:6px;">
           <input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)"/>
-          Tout
+          {{ t('detail_batch_all') }}
         </label>
-        <button type="button" class="btn btn-sm" onclick="selectBatchFilter('not-downloaded')">Non téléchargés</button>
-        <button type="button" class="btn btn-sm" onclick="selectBatchFilter('not-watched')">Non vus</button>
-        <button type="button" class="btn btn-sm" onclick="selectBatchFilter('invert')">Inverser</button>
+        <button type="button" class="btn btn-sm" onclick="selectBatchFilter('not-downloaded')">{{ t('detail_batch_not_downloaded') }}</button>
+        <button type="button" class="btn btn-sm" onclick="selectBatchFilter('not-watched')">{{ t('detail_batch_not_watched') }}</button>
+        <button type="button" class="btn btn-sm" onclick="selectBatchFilter('invert')">{{ t('detail_batch_invert') }}</button>
       </div>
 
       <div class="batch-server-quality-group" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         {% if source == 'voir-anime' %}
         <div style="display:flex;align-items:center;gap:6px;">
-          <label for="batch-server-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">Serveur :</label>
+          <label for="batch-server-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">{{ t('detail_batch_server') }}</label>
           <select id="batch-server-select" class="input-premium" style="padding:4px 8px;font-size:0.8rem;height:auto;" onchange="onBatchServerChange(this.value)">
-            <option value="auto">Auto (Défaut)</option>
+            <option value="auto">{{ t('detail_batch_server_auto') }}</option>
             <option value="myTV">myTV</option>
             <option value="stape">Streamtape</option>
             <option value="voe">VOE</option>
@@ -230,18 +231,18 @@
         </div>
         {% elif source == 'animepahe' %}
         <div style="display:flex;align-items:center;gap:6px;">
-          <label for="batch-server-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">Serveur :</label>
+          <label for="batch-server-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">{{ t('detail_batch_server') }}</label>
           <select id="batch-server-select" class="input-premium" style="padding:4px 8px;font-size:0.8rem;height:auto;" onchange="onBatchServerChange(this.value)">
-            <option value="auto">Kwik (Défaut)</option>
+            <option value="auto">Kwik (Default)</option>
             <option value="kwik">Kwik FastCDN</option>
           </select>
         </div>
         {% endif %}
 
         <div style="display:flex;align-items:center;gap:6px;">
-          <label for="batch-quality-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">Qualité :</label>
+          <label for="batch-quality-select" style="font-size:0.8rem;font-weight:600;color:var(--muted);">{{ t('detail_batch_quality') }}</label>
           <select id="batch-quality-select" class="input-premium" style="padding:4px 8px;font-size:0.8rem;height:auto;" onchange="onBatchQualityChange(this.value)">
-            <option value="auto">Auto / Max</option>
+            <option value="auto">{{ t('detail_batch_quality_auto') }}</option>
             <option value="1080p">1080p</option>
             <option value="720p">720p</option>
             <option value="480p">480p</option>
@@ -249,19 +250,19 @@
           </select>
         </div>
 
-        <label class="subtitle-cb-label" style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer;" title="Télécharger les sous-titres pour tous les épisodes sélectionnés">
+        <label class="subtitle-cb-label" style="display:inline-flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer;" title="{{ t('detail_batch_subtitles_title') }}">
           <input type="checkbox" id="batch-subtitles-toggle" onchange="toggleBatchSubtitles(this.checked)"/>
-          Sous-titres
+          {{ t('detail_batch_subtitles') }}
         </label>
       </div>
 
-      <span class="selected-info" id="selected-count-text">0 sélectionné(s)</span>
+      <span class="selected-info" id="selected-count-text">0 {{ t('detail_batch_selected_count', count=0) }}</span>
 
       <div class="dl-controls-wrap">
-        <input type="datetime-local" id="schedule-input" class="input-premium" title="Planifier le téléchargement"/>
+        <input type="datetime-local" id="schedule-input" class="input-premium" title="Planifier / Schedule"/>
         <button id="dl-selected-btn" class="btn btn-primary" type="button" onclick="downloadSelected()" disabled>
           <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
-          Télécharger la sélection
+          {{ t('detail_batch_download_btn') }}
         </button>
       </div>
     </div>
@@ -323,29 +324,33 @@
               {% if is_dl %}
               <span class="ep-done-badge" title="Fichier disponible sur le disque dur">
                 <svg viewBox="0 0 24 24" style="width:12px;height:12px;display:inline-block;vertical-align:-1px;margin-right:2px;fill:currentColor;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                Téléchargé
+                {{ t('detail_ep_downloaded') }}
               </span>
               {% endif %}
 
               <span class="episode-size" data-url="{{ ep_url }}">-</span>
 
+              <!-- Sélecteur de qualité flux (VoirAnime / AnimePahe) -->
               {% if source == 'voir-anime' or source == 'animepahe' %}
               <select class="episode-quality-select input-premium"
-                      style="display:none;padding:2px 6px;font-size:0.75rem;height:24px;border-radius:6px;"
-                      title="Choisir la qualité de l'épisode"
+                      style="display:none;padding:2px 6px;font-size:0.75rem;height:24px;border-radius:6px;max-width:96px;"
+                      title="{{ t('detail_batch_quality') }}"
                       onclick="event.stopPropagation();"
                       onchange="onEpisodeQualityChange(this)">
               </select>
               {% endif %}
 
-              <label class="subtitle-cb-label" onclick="event.stopPropagation();" title="Télécharger les sous-titres pour cet épisode">
-                <input type="checkbox" class="subtitle-check"/>
-                <span>ST</span>
-              </label>
-
-              <button type="button" class="btn-sub-tracks" style="display:none;" onclick="event.stopPropagation(); showSubtitleChoiceModal(this)" title="Choisir la piste de sous-titres (Français, etc.)">
-                Pistes ST ▾
-              </button>
+              <!-- Pilule interactive Sous-titres directement visible -->
+              <div class="ep-sub-control" onclick="event.stopPropagation();" style="display:inline-flex;align-items:center;gap:4px;">
+                <button type="button" class="ep-sub-chip" onclick="toggleEpisodeSubtitle(this, event)" title="{{ t('detail_ep_subtitles_title') }}">
+                  <span class="ep-sub-icon">CC</span>
+                  <span class="ep-sub-label">{{ t('detail_ep_subtitles') }}</span>
+                </button>
+                <input type="checkbox" class="subtitle-check" style="display:none;"/>
+                <button type="button" class="btn-sub-tracks btn btn-sm" style="display:none;font-size:11px;padding:2px 8px;" onclick="showSubtitleChoiceModal(this)" title="{{ t('detail_ep_tracks_title') }}">
+                  {{ t('detail_ep_tracks') }}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -358,13 +363,13 @@
                   data-title="{{ ep.title }}"
                   data-downloaded="{{ 'true' if is_dl else 'false' }}"
                   onclick="event.stopPropagation(); playEpisode(this)"
-                  title="{% if is_dl %}Lecture locale (Disque dur){% else %}Streaming direct (En ligne){% endif %}">
+                  title="{% if is_dl %}{{ t('detail_ep_play_local_title') }}{% else %}{{ t('detail_ep_play_stream_title') }}{% endif %}">
             <svg viewBox="0 0 24 24"><path d="M7 4v16l13-8Z"/></svg>
           </button>
 
           {% if is_dl %}
           <!-- Coche circulaire (Téléchargé) -->
-          <button type="button" class="tachiyomi-circle-btn is-downloaded" title="Téléchargé sur le disque dur">
+          <button type="button" class="tachiyomi-circle-btn is-downloaded" title="{{ t('detail_ep_downloaded') }}">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="rgba(255,255,255,0.08)" stroke="currentColor" stroke-width="1.8"/><path d="m9 12 2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           {% else %}
@@ -375,7 +380,7 @@
                   data-title="{{ ep.title }}"
                   data-subtitle="{{ ep.subtitleUrl or '' }}"
                   onclick="event.stopPropagation(); downloadEpisode(this);"
-                  title="Télécharger l'épisode">
+                  title="{{ t('detail_ep_download_title') }}">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v7m-3-3 3 3 3-3M8 17h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           {% endif %}
@@ -385,14 +390,20 @@
     </div>
 
     <!-- Floating Action Button (FAB) Style Tachiyomi -->
-    <button type="button" id="tachiyomi-fab" class="tachiyomi-fab" onclick="onTachiyomiFabClick()" title="Lancer la lecture">
+    <button type="button" id="tachiyomi-fab" class="tachiyomi-fab" onclick="onTachiyomiFabClick()" title="{{ t('detail_fab_start') }}">
       <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7Z" fill="currentColor"/></svg>
-      <span id="tachiyomi-fab-text">Commencer</span>
+      <span id="tachiyomi-fab-text">{{ t('detail_fab_start') }}</span>
     </button>
     {% else %}
-    <section class="empty-state">
-      <h3>Aucun épisode trouvé</h3>
-      <p>La source n'a retourné aucun épisode pour cet anime.</p>
+    <section class="empty-state fade-in">
+      <div class="empty-illustration">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+          <line x1="19" y1="5" x2="19" y2="19"/>
+        </svg>
+      </div>
+      <h3>{{ t('home_empty_title') }}</h3>
+      <p>{{ t('home_empty_sub') }}</p>
     </section>
     {% endif %}
   </div>
@@ -512,6 +523,6 @@
 <link rel="stylesheet" href="/static/vendor/plyr/plyr.css"/>
 <script src="/static/vendor/hls/hls.min.js"></script>
 <script src="/static/vendor/plyr/plyr.polyfilled.js"></script>
-<script src="/js/app.js?v=2.6"></script>
+<script src="/js/app.js?v=2.8"></script>
 </body>
 </html>

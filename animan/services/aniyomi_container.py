@@ -10,6 +10,7 @@ from animan.config import settings
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
 from animan.security import is_safe_url
 from animan.services.aniyomi_dex_parser import SourceRecipe
+from animan.services.proxy_service import proxy_service
 
 logger = logging.getLogger("animan.container")
 
@@ -82,10 +83,11 @@ class AniyomiContainerSource:
         """Effectue une requête HTTP sécurisée vers la source."""
         headers = self._get_headers(referer=self.base_url + "/")
         try:
+            proxy = proxy_service.get_active_proxy()
             # Essai curl_cffi pour bypasser Cloudflare basique si disponible
             try:
                 from curl_cffi.requests import AsyncSession
-                async with AsyncSession(impersonate="chrome124") as session:
+                async with AsyncSession(impersonate="chrome124", proxy=proxy) as session:
                     if method.upper() == "POST":
                         resp = await session.post(url, data=data, headers=headers, timeout=timeout, allow_redirects=False)
                         if resp.status_code in (301, 302, 307, 308) and "location" in resp.headers:
@@ -101,7 +103,7 @@ class AniyomiContainerSource:
             except Exception:
                 pass
 
-            async with httpx.AsyncClient(timeout=timeout, verify=settings.SSL_VERIFY, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=timeout, verify=settings.SSL_VERIFY, follow_redirects=False, proxy=proxy) as client:
                 if method.upper() == "POST":
                     resp = await client.post(url, data=data, headers=headers)
                     # Si redirection (ex: vostfree.ws -> ipv4.vostfree.ws), conserver POST vers la nouvelle adresse

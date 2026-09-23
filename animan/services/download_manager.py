@@ -75,7 +75,7 @@ class DownloadManagerService:
                 verify=settings.SSL_VERIFY,
             )
         except Exception as e:
-            logger.warning("[download_manager] Erreur initialisation proxy client HTTP (%s): %s - bascule en direct sans proxy", proxy_val, e)
+            logger.warning("[download_manager] HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy_val, e)
             return httpx.AsyncClient(
                 headers=headers,
                 timeout=timeout,
@@ -161,9 +161,9 @@ class DownloadManagerService:
                     library_service.save_task(task)
                 self.tasks[task.id] = task
                 self.task_order.append(task.id)
-            logger.info("Chargé %d tâche(s) non terminée(s) depuis la base au démarrage", len(self.tasks))
+            logger.info("Loaded %d unfinished task(s) from database at startup", len(self.tasks))
         except Exception as e:
-            logger.error("Erreur chargement tâches non terminées: %s", e)
+            logger.error("Error loading unfinished tasks: %s", e)
 
     # -------------------------------------------------------------------------
     # Paramètres et Configuration
@@ -177,6 +177,7 @@ class DownloadManagerService:
             "selectedUserAgent": proxy_service.get_selected_user_agent(),
             "voiranimeDefaultServer": self.voiranime_default_server,
             "ffmpegAvailable": self.is_ffmpeg_available(),
+            "proxy": proxy_service.get_proxy_settings(),
         }
 
     def update_settings(
@@ -308,7 +309,7 @@ class DownloadManagerService:
                 if cl2 and cl2.isdigit() and int(cl2) > 0 and range_resp.status_code == 200:
                     return int(cl2)
         except Exception as e:
-            logger.debug("Erreur get_remote_file_size pour %s: %s", url, e)
+            logger.debug("Error in get_remote_file_size for %s: %s", url, e)
         return -1
 
     async def estimate_hls_size(
@@ -401,7 +402,7 @@ class DownloadManagerService:
                     return int((1_800_000 * total_duration) / 8)
 
         except Exception as e:
-            logger.debug("Erreur estimate_hls_size pour %s: %s", m3u8_url, e)
+            logger.debug("Error in estimate_hls_size for %s: %s", m3u8_url, e)
 
         return -1
 
@@ -592,7 +593,7 @@ class DownloadManagerService:
 
                 return info
             except Exception as e:
-                logger.error("Erreur get_or_resolve_episode_info: %s", e)
+                logger.error("Error in get_or_resolve_episode_info: %s", e)
                 return None
 
     # -------------------------------------------------------------------------
@@ -693,7 +694,7 @@ class DownloadManagerService:
             if existing and existing.exists() and existing.stat().st_size > 1024 * 1024:
                 verif = verification_service.verify_file(str(existing), anime_name, name)
                 if verif.valid:
-                    logger.info("Batch: %s Ep%d existe déjà et est valide (%s), ignoré",
+                    logger.info("Batch: %s Ep%d already exists and is valid (%s), skipping",
                                 anime_name, ep_num, format_bytes(existing.stat().st_size))
                     library_service.mark_as_downloaded(url, anime_name, ep_num, "")
                     continue
@@ -704,7 +705,7 @@ class DownloadManagerService:
                 if not cached and not (sel_server or sel_quality):
                     cached = self.resolved_info_cache.get(url)
                 if cached and cached.size > 0 and existing.stat().st_size == cached.size:
-                    logger.info("Batch: %s Ep%d existe déjà avec la même taille, ignoré", anime_name, ep_num)
+                    logger.info("Batch: %s Ep%d already exists with the same size, skipping", anime_name, ep_num)
                     continue
 
             sched_time = None
@@ -838,7 +839,7 @@ class DownloadManagerService:
 
                 if part_path.exists() and part_path.stat().st_size > 0:
                     if t.totalBytes > 0 and part_path.stat().st_size > t.totalBytes:
-                        logger.warning("Fichier .part (%d octets) plus grand que totalBytes (%d) pour %s, suppression",
+                        logger.warning(".part file (%d bytes) larger than totalBytes (%d) for %s, deleting",
                                        part_path.stat().st_size, t.totalBytes, t.fileName)
                         part_path.unlink(missing_ok=True)
                         t.downloadedBytes = 0
@@ -857,7 +858,7 @@ class DownloadManagerService:
                     t.progress = min(99.9, (t.downloadedBytes / t.totalBytes) * 100.0)
                 elif t.downloadedBytes == 0:
                     t.progress = 0.0
-                logger.info("Reprise détectée pour %s: %s déjà téléchargé(s)",
+                logger.info("Resume detected for %s: %s already downloaded",
                             t.fileName, format_bytes(t.downloadedBytes))
 
             t.status = DownloadStatus.PENDING
@@ -933,7 +934,7 @@ class DownloadManagerService:
         if cancelled_tasks:
             library_service.save_tasks_batch(cancelled_tasks)
             self._trigger_process_queue()
-        logger.info("Annulation globale : %d téléchargement(s) annulé(s)", count)
+        logger.info("Global cancellation: %d download(s) cancelled", count)
         return count
 
     def remove_task(self, task_id: str) -> bool:
@@ -978,7 +979,7 @@ class DownloadManagerService:
                     if task.id not in self.task_order:
                         self.task_order.append(task.id)
         except Exception as e:
-            logger.warning("Erreur rechargement tâches DB pour reprise: %s", e)
+            logger.warning("Error reloading DB tasks for resume: %s", e)
 
         for t in list(self.tasks.values()):
             if t.status in [DownloadStatus.PAUSED, DownloadStatus.FAILED]:
@@ -1197,14 +1198,14 @@ class DownloadManagerService:
 
             # Si le statut de vérification est explicitement corrompu, ne pas reprendre
             if task.verificationStatus in ["CORRUPTED", "INVALID"]:
-                logger.warning("Fichier marqué comme %s pour %s, purge obligatoire pour nouveau départ sain",
+                logger.warning("File marked as %s for %s, mandatory purge for fresh start",
                                task.verificationStatus, task.fileName)
                 has_healthy_part = False
             else:
                 target = part_p if part_p.exists() else (out_p if out_p.exists() else None)
                 if target and target.stat().st_size > 1024:
                     if task.totalBytes > 0 and target.stat().st_size > task.totalBytes:
-                        logger.warning("Fichier partiel %s (%s) plus grand que totalBytes (%s), purge requise",
+                        logger.warning("Partial file %s (%s) larger than totalBytes (%s), purge required",
                                        target.name, format_bytes(target.stat().st_size), format_bytes(task.totalBytes))
                         has_healthy_part = False
                     else:
@@ -1218,7 +1219,7 @@ class DownloadManagerService:
 
         # Si un fichier partiel sain existe et qu'on ne force pas le reset complet : reprise !
         if has_healthy_part:
-            logger.info("Fichier partiel sain détecté pour %s, basculement vers resume_download", task.fileName)
+            logger.info("Healthy partial file detected for %s, switching to resume_download", task.fileName)
             self.resume_download(task_id)
             return self.get_task(task_id)
 
@@ -1232,7 +1233,7 @@ class DownloadManagerService:
                 if part_p.exists() and part_p.is_file():
                     part_p.unlink()
             except Exception as e:
-                logger.warning("Impossible de supprimer le fichier corrompu %s: %s", task.savePath, e)
+                logger.warning("Unable to delete corrupted file %s: %s", task.savePath, e)
 
         # Réinitialiser la tâche pour un nouveau téléchargement complet
         task.progress = 0.0
@@ -1254,7 +1255,7 @@ class DownloadManagerService:
         library_service.save_task(task)
         self.broadcast_update(task)
         self._trigger_process_queue()
-        logger.info("Tâche relancée pour re-téléchargement complet : %s", task.fileName)
+        logger.info("Task restarted for full redownload: %s", task.fileName)
         return task
 
     # -------------------------------------------------------------------------
@@ -1316,7 +1317,7 @@ class DownloadManagerService:
 
                     if is_cached_valid and not need_resolve:
                         direct_url = task.directDownloadUrl
-                        logger.info("Réutilisation de l'URL directe en cache pour %s", task.fileName)
+                        logger.info("Reusing cached direct URL for %s", task.fileName)
                     elif is_voir_anime:
                         from animan.services.source_settings_service import source_settings_service
                         va_settings = source_settings_service.get_source_settings("voir-anime")
@@ -1328,7 +1329,7 @@ class DownloadManagerService:
                         has_html_err = "html" in (task.error or "").lower()
                         # Le basculement vers d'autres hébergeurs n'intervient que sur pannes serveur avérées répétées ou page HTML d'erreur
                         if not client_offline and (consec_errs >= 2 or has_html_err):
-                            logger.info("[download_manager] Repli sur les serveurs alternatifs pour %s après échecs confirmés sur %s", task.fileName, pref_srv)
+                            logger.info("[download_manager] Falling back to alternative servers for %s after confirmed failures on %s", task.fileName, pref_srv)
                             if pref_srv:
                                 part_clean = Path(task.savePath + ".part")
                                 if part_clean.exists():
@@ -1434,7 +1435,7 @@ class DownloadManagerService:
 
                     bytes_gained = task.downloadedBytes - bytes_before if 'bytes_before' in locals() else 0
                     if bytes_gained > 0:
-                        logger.info("Progrès de %s octets pour %s malgré coupure réseau, maintien de l'hébergeur %s et réinitialisation des erreurs serveur",
+                        logger.info("Progress of %s bytes for %s despite network interruption, keeping host %s and resetting server errors",
                                     format_bytes(bytes_gained), task.fileName, task.selectedServer)
                         task.retryCount = max(0, task.retryCount - 1)
                         task.consecutiveServerErrors = 0
@@ -1446,12 +1447,12 @@ class DownloadManagerService:
                     if not client_online:
                         task.clientOffline = True
                         logger.warning(
-                            "[download_manager] Coupure Internet locale détectée pour %s (erreur: %s). "
-                            "Conservation de l'hébergeur %s et des données partielles. En attente du rétablissement réseau...",
+                            "[download_manager] Local Internet disconnection detected for %s (error: %s). "
+                            "Retaining host %s and partial data. Waiting for network recovery...",
                             task.fileName, err_msg, task.selectedServer
                         )
                         task.status = DownloadStatus.RETRYING
-                        task.error = "Connexion Internet locale interrompue. En attente du rétablissement réseau..."
+                        task.error = "Local Internet connection interrupted. Waiting for network recovery..."
                         task.speed = 0
                         self.broadcast_update(task)
                         library_service.save_task(task)
@@ -1461,7 +1462,7 @@ class DownloadManagerService:
                             await asyncio.sleep(5.0)
                             if await self.is_client_online():
                                 logger.info(
-                                    "[download_manager] Connexion Internet rétablie pour %s ! Reprise du téléchargement sur l'hébergeur %s.",
+                                    "[download_manager] Internet connection restored for %s! Resuming download on host %s.",
                                     task.fileName, task.selectedServer
                                 )
                                 task.clientOffline = False
@@ -1498,7 +1499,7 @@ class DownloadManagerService:
                         if is_disconnect:
                             if bytes_gained <= 0:
                                 task.consecutiveServerErrors = getattr(task, "consecutiveServerErrors", 0) + 1
-                                logger.info("Échec de connexion ou lien expiré sans progression (%s) pour %s, échecs serveur consécutifs: %d",
+                                logger.info("Connection failure or expired link without progress (%s) for %s, consecutive server failures: %d",
                                             err_msg, task.fileName, task.consecutiveServerErrors)
                             else:
                                 task.consecutiveServerErrors = 0
@@ -1516,7 +1517,7 @@ class DownloadManagerService:
                             or "nodename nor servname" in err_msg
                         )
                         if is_dns:
-                            logger.warning("Panne DNS transitoire (%s) pour %s, temporisation 5s", err_msg, task.fileName)
+                            logger.warning("Transient DNS failure (%s) for %s, waiting 5s", err_msg, task.fileName)
                             await asyncio.sleep(5.0)
                             if task.retryCount > 0:
                                 task.retryCount -= 1
@@ -1553,7 +1554,7 @@ class DownloadManagerService:
                     with open(output_path, "rb") as f_chk:
                         h = f_chk.read(100).lower()
                         if b"<html" in h or b"<!doctype" in h:
-                            logger.warning("Fichier final corrompu (HTML) détecté et supprimé pour %s", task.fileName)
+                            logger.warning("Corrupted final file (HTML) detected and deleted for %s", task.fileName)
                             output_path.unlink(missing_ok=True)
                 except Exception:
                     pass
@@ -1567,7 +1568,7 @@ class DownloadManagerService:
                     expected_size=task.totalBytes if task.totalBytes and task.totalBytes > 0 else None
                 )
                 if verif.valid:
-                    logger.info("Fichier final déjà existant et valide pour %s (%s)",
+                    logger.info("Final file already exists and is valid for %s (%s)",
                                 task.fileName, format_bytes(output_path.stat().st_size))
                     part_path.unlink(missing_ok=True)
                     task.status = DownloadStatus.COMPLETED
@@ -1588,7 +1589,7 @@ class DownloadManagerService:
                     )
                     return
                 else:
-                    logger.warning("Fichier final existant invalide/corrompu pour %s (%s), suppression : %s",
+                    logger.warning("Existing final file invalid/corrupted for %s (%s), deleting: %s",
                                    task.fileName, format_bytes(output_path.stat().st_size), verif.error)
                     output_path.unlink(missing_ok=True)
 
@@ -1599,12 +1600,12 @@ class DownloadManagerService:
                     with open(part_path, "rb") as f_chk:
                         h = f_chk.read(100).lower()
                         if b"<html" in h or b"<!doctype" in h:
-                            logger.warning("Fichier .part corrompu (HTML) détecté et supprimé pour %s", task.fileName)
+                            logger.warning("Corrupted .part file (HTML) detected and deleted for %s", task.fileName)
                             part_path.unlink(missing_ok=True)
                 except Exception:
                     pass
             elif task.totalBytes and task.totalBytes > 0 and part_size > task.totalBytes:
-                logger.warning("Fichier .part (%s) dépasse la taille attendue (%s) pour %s, suppression",
+                logger.warning(".part file (%s) exceeds expected size (%s) for %s, deleting",
                                format_bytes(part_size), format_bytes(task.totalBytes), task.fileName)
                 part_path.unlink(missing_ok=True)
 
@@ -1633,13 +1634,13 @@ class DownloadManagerService:
             is_resume = existing_len > 0
             if is_resume:
                 req_headers["Range"] = f"bytes={existing_len}-"
-                logger.info("Tentative de reprise pour %s depuis %s", task.fileName, format_bytes(existing_len))
+                logger.info("Resume attempt for %s from %s", task.fileName, format_bytes(existing_len))
 
             while True:
                 async with client.stream("GET", direct_url, headers=req_headers) as stream_resp:
                     # Gestion du code 416 Range Not Satisfiable
                     if stream_resp.status_code == 416:
-                        logger.warning("HTTP 416 (Range Not Satisfiable) pour %s avec existing_len=%s",
+                        logger.warning("HTTP 416 (Range Not Satisfiable) for %s with existing_len=%s",
                                        task.fileName, format_bytes(existing_len))
                         if part_path.exists():
                             verif_part = await asyncio.to_thread(
@@ -1649,14 +1650,14 @@ class DownloadManagerService:
                                 file_name=task.fileName
                             )
                             if verif_part.valid:
-                                logger.info("Le fichier .part est en réalité complet et valide pour %s, finalisation", task.fileName)
+                                logger.info(".part file is actually complete and valid for %s, finalizing", task.fileName)
                                 if output_path.exists():
                                     output_path.unlink(missing_ok=True)
                                 shutil.move(str(part_path), str(output_path))
                                 await self._finalize_task(task)
                                 return
                             else:
-                                logger.warning("Fichier .part invalide/corrompu (%s), suppression pour reprise propre", verif_part.error)
+                                logger.warning("Invalid/corrupted .part file (%s), deleting for clean resume", verif_part.error)
                                 part_path.unlink(missing_ok=True)
 
                         existing_len = 0
@@ -1675,7 +1676,7 @@ class DownloadManagerService:
 
                     # Le serveur ne supporte pas Range — on recommence depuis 0
                     if stream_resp.status_code == 200 and is_resume:
-                        logger.warning("Le serveur ne supporte pas la reprise pour %s, téléchargement depuis le début", task.fileName)
+                        logger.warning("Server does not support resume for %s, downloading from beginning", task.fileName)
                         existing_len = 0
                         is_resume = False
 
@@ -1691,7 +1692,7 @@ class DownloadManagerService:
                                 total_bytes = int(total_str)
 
                             if range_start != existing_len:
-                                logger.warning("Désalignement Content-Range pour %s: serveur à %d, local à %d",
+                                logger.warning("Content-Range misalignment for %s: server at %d, local at %d",
                                                task.fileName, range_start, existing_len)
                                 if part_path.exists() and part_path.stat().st_size > range_start:
                                     with open(part_path, "r+b") as f_adj:
@@ -1709,7 +1710,7 @@ class DownloadManagerService:
 
                     # Si le .part dépasse la taille totale, purge et reprise depuis 0
                     if total_bytes > 0 and existing_len > total_bytes:
-                        logger.warning("Fichier .part (%s) plus grand que total_bytes (%s) pour %s, réinitialisation",
+                        logger.warning(".part file (%s) larger than total_bytes (%s) for %s, resetting",
                                        format_bytes(existing_len), format_bytes(total_bytes), task.fileName)
                         part_path.unlink(missing_ok=True)
                         existing_len = 0
@@ -1722,7 +1723,7 @@ class DownloadManagerService:
 
                     # Vérifier si le .part est déjà complet
                     if total_bytes > 0 and existing_len >= total_bytes:
-                        logger.info("Fichier .part déjà complet pour %s, vérification", task.fileName)
+                        logger.info(".part file already complete for %s, verifying", task.fileName)
                         if part_path.exists():
                             verif_part = await asyncio.to_thread(
                                 verification_service.verify_file,
@@ -1737,7 +1738,7 @@ class DownloadManagerService:
                                 await self._finalize_task(task)
                                 return
                             else:
-                                logger.warning("Fichier .part complet mais corrompu pour %s, réinitialisation", task.fileName)
+                                logger.warning(".part file complete but corrupted for %s, resetting", task.fileName)
                                 part_path.unlink(missing_ok=True)
                                 existing_len = 0
                                 is_resume = False
@@ -1779,7 +1780,7 @@ class DownloadManagerService:
                                 task.downloadedBytes = downloaded
                                 self.broadcast_update(task)
                                 library_service.save_task(task)
-                                logger.info("Annulé %s — fichier .part conservé (%s)",
+                                logger.info("Cancelled %s — .part file kept (%s)",
                                             task.fileName, format_bytes(downloaded))
                                 return
                             if task.paused:
@@ -1788,7 +1789,7 @@ class DownloadManagerService:
                                 task.downloadedBytes = downloaded
                                 self.broadcast_update(task)
                                 library_service.save_task(task)
-                                logger.info("Pause %s — progression sauvegardée (%s)",
+                                logger.info("Paused %s — progress saved (%s)",
                                             task.fileName, format_bytes(downloaded))
                                 return
 
@@ -1809,9 +1810,9 @@ class DownloadManagerService:
                                 self.broadcast_update(task)
 
                     if total_bytes > 0 and downloaded < total_bytes:
-                        raise ConnectionError(f"Téléchargement incomplet: {downloaded}/{total_bytes} octets")
+                        raise ConnectionError(f"Incomplete download: {downloaded}/{total_bytes} bytes")
                     if downloaded <= 0:
-                        raise ConnectionError("0 octet reçu")
+                        raise ConnectionError("0 bytes received")
 
                     break
 
@@ -1821,7 +1822,7 @@ class DownloadManagerService:
             if output_path.exists():
                 output_path.unlink(missing_ok=True)
             shutil.move(str(part_path), str(output_path))
-            logger.info("Fichier .part renommé en fichier final : %s (%s)", output_path.name, format_bytes(downloaded))
+            logger.info(".part file renamed to final file: %s (%s)", output_path.name, format_bytes(downloaded))
 
         # Sous-titres
         if task.downloadSubtitles:
@@ -1830,7 +1831,7 @@ class DownloadManagerService:
         await self._finalize_task(task)
 
     async def _download_mytv_chunks(self, task: DownloadTask, chunks: List[str]):
-        logger.info("myTV: %d morceau(x) à télécharger pour %s", len(chunks), task.fileName)
+        logger.info("myTV: %d chunk(s) to download for %s", len(chunks), task.fileName)
         base_path = re.sub(r"\.(mp4|mkv)$", "", task.savePath)
         chunk_files = []
         total_all_chunks = 0
@@ -1902,7 +1903,7 @@ class DownloadManagerService:
                     downloaded_total += chunk_downloaded
 
         # Concaténer
-        logger.info("Concaténation de %d morceaux vers %s", len(chunk_files), task.fileName)
+        logger.info("Concatenating %d chunks to %s", len(chunk_files), task.fileName)
         output_file = Path(task.savePath)
         with open(output_file, "wb") as outfile:
             for pf in chunk_files:
@@ -1916,14 +1917,14 @@ class DownloadManagerService:
         await self._finalize_task(task)
 
     async def _download_hls_stream(self, task: DownloadTask, m3u8_url: str):
-        logger.info("Téléchargement HLS pour %s depuis %s", task.fileName, m3u8_url)
+        logger.info("HLS download for %s from %s", task.fileName, m3u8_url)
         # Si le flux provient de Kwik / Owocdn HLS, le router via le proxy HLS local
         # pour bénéficier du contournement Cloudflare TLS et du déchiffrement transparent AES-128
         is_kwik_owocdn = any(d in m3u8_url for d in ["owocdn.top", "kwik.cx", "kwik."])
         if is_kwik_owocdn and "/api/media/hls-proxy" not in m3u8_url:
             from urllib.parse import quote
             m3u8_url = f"http://127.0.0.1:{settings.PORT}/api/media/hls-proxy/playlist.m3u8?url={quote(m3u8_url)}"
-            logger.info("Routage HLS AnimePahe via proxy local: %s", task.fileName)
+            logger.info("Routing AnimePahe HLS via local proxy: %s", task.fileName)
 
         if task.totalBytes <= 0:
             try:
@@ -1938,7 +1939,7 @@ class DownloadManagerService:
         await self._download_hls_segments_native(task, m3u8_url)
 
     async def _download_hls_segments_native(self, task: DownloadTask, m3u8_url: str):
-        logger.info("Téléchargement HLS par segments (avec reprise) pour %s", task.fileName)
+        logger.info("Segmented HLS download (with resume) for %s", task.fileName)
         output_path = Path(task.savePath)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         segments_dir = output_path.parent / f".{output_path.stem}_segments"
@@ -1954,7 +1955,7 @@ class DownloadManagerService:
         async with self._create_async_client(headers=headers, proxy=proxy, timeout=timeout) as client:
             resp = await client.get(m3u8_url)
             if resp.status_code != 200:
-                raise ConnectionError(f"HTTP {resp.status_code} sur playlist m3u8")
+                raise ConnectionError(f"HTTP {resp.status_code} on m3u8 playlist")
 
             playlist_text = resp.text
             sub_url = m3u8_url
@@ -1969,7 +1970,7 @@ class DownloadManagerService:
                 if sub_url != m3u8_url:
                     sub_resp = await client.get(sub_url)
                     if sub_resp.status_code != 200:
-                        raise ConnectionError(f"HTTP {sub_resp.status_code} sur sous-playlist HLS")
+                        raise ConnectionError(f"HTTP {sub_resp.status_code} on HLS sub-playlist")
                     playlist_text = sub_resp.text
 
             segments = [
@@ -1979,7 +1980,7 @@ class DownloadManagerService:
             ]
 
             if not segments:
-                raise ValueError("Aucun segment trouvé dans la playlist HLS")
+                raise ValueError("No segments found in HLS playlist")
 
             total_segments = len(segments)
 
@@ -1994,7 +1995,7 @@ class DownloadManagerService:
 
             downloaded = existing_bytes
             if existing_bytes > 0:
-                logger.info("Reprise HLS pour %s : %d/%d segments déjà présents (%s)",
+                logger.info("HLS resume for %s: %d/%d segments already present (%s)",
                             task.fileName, len(completed_indices), total_segments, format_bytes(existing_bytes))
                 task.downloadedBytes = downloaded
                 if total_segments > 0:
@@ -2036,8 +2037,8 @@ class DownloadManagerService:
                             async with client.stream("GET", seg_url) as seg_resp:
                                 if seg_resp.status_code != 200:
                                     if seg_resp.status_code in (403, 404, 410):
-                                        raise ConnectionError(f"HTTP {seg_resp.status_code} sur segment {idx} (lien expiré ou introuvable)")
-                                    raise ConnectionError(f"HTTP {seg_resp.status_code} sur segment {idx}")
+                                        raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx} (expired or not found link)")
+                                    raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx}")
 
                                 with open(seg_tmp, "wb") as f_seg:
                                     async for chunk_data in seg_resp.aiter_bytes(chunk_size=16384):
@@ -2059,8 +2060,8 @@ class DownloadManagerService:
                             seg_resp = await client.get(seg_url)
                             if seg_resp.status_code != 200:
                                 if seg_resp.status_code in (403, 404, 410):
-                                    raise ConnectionError(f"HTTP {seg_resp.status_code} sur segment {idx} (lien expiré ou introuvable)")
-                                raise ConnectionError(f"HTTP {seg_resp.status_code} sur segment {idx}")
+                                    raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx} (expired or not found link)")
+                                raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx}")
                             chunk_data = seg_resp.content
                             with open(seg_tmp, "wb") as f_seg:
                                 f_seg.write(chunk_data)
@@ -2093,7 +2094,7 @@ class DownloadManagerService:
                             seg_success = True
                             break
                         else:
-                            raise ConnectionError(f"Segment {idx} téléchargé vide (0 octets)")
+                            raise ConnectionError(f"Segment {idx} downloaded empty (0 bytes)")
 
                     except Exception as seg_err:
                         if seg_bytes_this_attempt > 0:
@@ -2103,21 +2104,21 @@ class DownloadManagerService:
                             seg_tmp.unlink(missing_ok=True)
 
                         err_str = str(seg_err).lower()
-                        if "expiré" in err_str or "403" in err_str or "410" in err_str:
+                        if "expiré" in err_str or "expired" in err_str or "403" in err_str or "410" in err_str:
                             raise seg_err
 
                         if attempt >= max_seg_retries:
-                            logger.warning("Échec définitif du segment %d/%d après %d essais pour %s: %s",
+                            logger.warning("Permanent failure for segment %d/%d after %d retries for %s: %s",
                                            idx + 1, total_segments, max_seg_retries, task.fileName, seg_err)
                             raise seg_err
 
                         backoff = min(1.0 * attempt, 4.0)
-                        logger.warning("Micro-coupure sur segment %d/%d pour %s (%s), réessai %d/%d dans %.1fs...",
+                        logger.warning("Micro-interruption on segment %d/%d for %s (%s), retry %d/%d in %.1fs...",
                                        idx + 1, total_segments, task.fileName, seg_err, attempt + 1, max_seg_retries, backoff)
                         await asyncio.sleep(backoff)
 
                 if not seg_success and not (task.cancelled or task.paused):
-                    raise ConnectionError(f"Impossible de télécharger le segment {idx}")
+                    raise ConnectionError(f"Cannot download segment {idx}")
 
                 now = time.time()
                 task.update_progress(downloaded, now)
@@ -2127,7 +2128,7 @@ class DownloadManagerService:
                     self.broadcast_update(task)
 
         # Assemblage final sans perte des segments HLS
-        logger.info("Assemblage de %d segments HLS vers %s", total_segments, task.fileName)
+        logger.info("Assembling %d HLS segments to %s", total_segments, task.fileName)
         temp_output = output_path.with_suffix(".tmp.mp4")
         if temp_output.exists():
             temp_output.unlink(missing_ok=True)
@@ -2250,16 +2251,16 @@ class DownloadManagerService:
                 task.episodeNumber,
                 ""
             )
-            logger.info("Téléchargement terminé et validé : %s (%s, durée: %s)", task.fileName, task.formattedTotalSize, verif.formattedDuration)
+            logger.info("Download completed and verified: %s (%s, duration: %s)", task.fileName, task.formattedTotalSize, verif.formattedDuration)
 
             if self.plex_organization:
                 await asyncio.to_thread(self._generate_nfo_files, task)
         else:
             task.status = DownloadStatus.FAILED
-            task.error = f"Vérification d'intégrité échouée : {verif.error}"
+            task.error = f"Integrity verification failed: {verif.error}"
             self.broadcast_update(task)
             library_service.save_task(task)
-            logger.error("Téléchargement échoué après vérification pour %s : %s", task.fileName, verif.error)
+            logger.error("Download failed after verification for %s: %s", task.fileName, verif.error)
 
     # -------------------------------------------------------------------------
     # Sous-titres & FFmpeg
@@ -2301,9 +2302,9 @@ class DownloadManagerService:
                         with open(sub_path, "wb") as f:
                             f.write(resp.content)
                         downloaded_paths.append(sub_path)
-                        logger.info("Sous-titres téléchargés: %s", sub_name)
+                        logger.info("Subtitles downloaded: %s", sub_name)
                 except Exception as e:
-                    logger.warning("Erreur téléchargement sous-titres %s: %s", label, e)
+                    logger.warning("Error downloading subtitles %s: %s", label, e)
 
         if downloaded_paths:
             task.savePathSubtitle = json.dumps(downloaded_paths)
@@ -2350,7 +2351,7 @@ class DownloadManagerService:
         cmd.append(output_path)
 
         try:
-            logger.info("Muxing FFmpeg avec commande: %s", " ".join(cmd))
+            logger.info("FFmpeg muxing with command: %s", " ".join(cmd))
             ret = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if ret.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 0:
                 task.fileName = Path(output_path).name
@@ -2360,9 +2361,9 @@ class DownloadManagerService:
                 for sf in existing_subs:
                     sf.unlink(missing_ok=True)
                 library_service.save_task(task)
-                logger.info("Muxing FFmpeg réussi: %s", Path(output_path).name)
+                logger.info("FFmpeg muxing succeeded: %s", Path(output_path).name)
         except Exception as e:
-            logger.error("Erreur FFmpeg: %s", e)
+            logger.error("FFmpeg error: %s", e)
 
     # -------------------------------------------------------------------------
     # Plex / Jellyfin NFO
@@ -2412,7 +2413,7 @@ class DownloadManagerService:
             with open(ep_nfo, "w", encoding="utf-8") as f:
                 f.write(ep_content)
         except Exception as e:
-            logger.error("Erreur génération NFO: %s", e)
+            logger.error("Error generating NFO: %s", e)
 
     # -------------------------------------------------------------------------
     # SSE Broadcast

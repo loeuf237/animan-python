@@ -18,18 +18,48 @@ from animan.services.scraping_service import scraping_service
 from animan.services.animepahe_service import animepahe_service
 from animan.services.extension_service import extension_service
 
+import hashlib
+
 logger = logging.getLogger("animan.router.media")
 router = APIRouter()
 
 IMAGE_CACHE: Dict[str, tuple[bytes, str]] = {}
+IMAGE_DISK_CACHE_DIR = settings.CACHE_DIR / "images"
+IMAGE_DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 Mo max pour prévenir les attaques OOM
+MAX_IMAGE_CACHE_ITEMS = 600
+CACHE_HEADERS = {"Cache-Control": "public, max-age=604800, immutable"}
+
+def _get_disk_cached_image(url: str) -> Optional[tuple[bytes, str]]:
+    try:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        cache_bin = IMAGE_DISK_CACHE_DIR / f"{url_hash}.bin"
+        cache_meta = IMAGE_DISK_CACHE_DIR / f"{url_hash}.meta"
+        if cache_bin.exists() and cache_meta.exists():
+            content = cache_bin.read_bytes()
+            ctype = cache_meta.read_text(encoding="utf-8").strip() or "image/jpeg"
+            return content, ctype
+    except Exception as e:
+        logger.debug("[media] Error reading image disk cache: %s", e)
+    return None
+
+def _save_disk_cached_image(url: str, content: bytes, ctype: str):
+    try:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        cache_bin = IMAGE_DISK_CACHE_DIR / f"{url_hash}.bin"
+        cache_meta = IMAGE_DISK_CACHE_DIR / f"{url_hash}.meta"
+        cache_bin.write_bytes(content)
+        cache_meta.write_text(ctype, encoding="utf-8")
+    except Exception as e:
+        logger.debug("[media] Error writing image disk cache: %s", e)
 
 def _get_media_async_client(timeout: float = 10.0) -> httpx.AsyncClient:
+    proxy = proxy_service.get_active_proxy()
     try:
-        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY)
+        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY, proxy=proxy)
     except Exception as e:
-        logger.warning("[media] Erreur client HTTP proxy: %s - repli trust_env=False", e)
-        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY, trust_env=False)
+        logger.warning("[media] HTTP proxy client error: %s - falling back to trust_env=False", e)
+        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY, trust_env=False, proxy=proxy)
 
 @router.get("/api/media/image-proxy")
 async def proxy_image(url: str):
@@ -38,13 +68,22 @@ async def proxy_image(url: str):
 
     # Protection SSRF
     if not is_safe_url(url):
-        logger.warning("SSRF bloqué sur image-proxy pour l'URL: %s", url)
+        logger.warning("SSRF blocked on image-proxy for URL: %s", url)
         raise HTTPException(status_code=400, detail="URL d'image non autorisée ou non sécurisée")
 
-    # Cache mémoire simple (évite de retélécharger à chaque requête)
+    # 1. Cache mémoire ultra-rapide (0 ms)
     if url in IMAGE_CACHE:
         content, ctype = IMAGE_CACHE[url]
-        return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+        return Response(content=content, media_type=ctype, headers=CACHE_HEADERS)
+
+    # 2. Cache disque persistant (survit aux redémarrages)
+    disk_data = _get_disk_cached_image(url)
+    if disk_data:
+        content, ctype = disk_data
+        if len(IMAGE_CACHE) > MAX_IMAGE_CACHE_ITEMS:
+            IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
+        IMAGE_CACHE[url] = (content, ctype)
+        return Response(content=content, media_type=ctype, headers=CACHE_HEADERS)
 
     try:
         is_animepahe = any(d in url for d in ["animepahe", "kwik", "pahe"])
@@ -67,10 +106,11 @@ async def proxy_image(url: str):
                 final_bytes, ctype = media_data
                 if len(final_bytes) > MAX_IMAGE_SIZE:
                     raise HTTPException(status_code=413, detail="Image trop volumineuse (max 10 Mo)")
-                if len(IMAGE_CACHE) > 100:
+                _save_disk_cached_image(url, final_bytes, ctype)
+                if len(IMAGE_CACHE) > MAX_IMAGE_CACHE_ITEMS:
                     IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
                 IMAGE_CACHE[url] = (final_bytes, ctype)
-                return Response(content=final_bytes, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+                return Response(content=final_bytes, media_type=ctype, headers=CACHE_HEADERS)
 
         headers = {
             "User-Agent": proxy_service.get_user_agent(),
@@ -97,15 +137,16 @@ async def proxy_image(url: str):
                         raise HTTPException(status_code=413, detail="Image trop volumineuse (max 10 Mo)")
 
                 final_bytes = bytes(content)
-                if len(IMAGE_CACHE) > 100:
+                _save_disk_cached_image(url, final_bytes, ctype)
+                if len(IMAGE_CACHE) > MAX_IMAGE_CACHE_ITEMS:
                     IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
                 IMAGE_CACHE[url] = (final_bytes, ctype)
 
-                return Response(content=final_bytes, media_type=ctype, headers={"Cache-Control": "public, max-age=86400"})
+                return Response(content=final_bytes, media_type=ctype, headers=CACHE_HEADERS)
     except HTTPException:
         raise
     except Exception as e:
-        logger.debug("Erreur image-proxy: %s", e)
+        logger.debug("Error in image-proxy: %s", e)
         raise HTTPException(status_code=502, detail="Erreur proxy image")
 
 def parse_subtitle_paths(path_field: Optional[str]) -> List[str]:
@@ -134,7 +175,7 @@ async def resolve_stream(
     1. Si l'épisode est déjà téléchargé sur le disque dur, renvoie le flux local (/api/media/stream/{task_id}).
     2. S'il n'est pas téléchargé, résout le flux en ligne direct sur les serveurs d'hébergement.
     """
-    logger.info("Résolution streaming: %s - Ep %s (source=%s, server=%s, quality=%s)",
+    logger.info("Streaming resolution: %s - Ep %s (source=%s, server=%s, quality=%s)",
                 animeName, episodeNumber, source, server, quality)
 
     # 1. Vérification si l'épisode est déjà téléchargé sur le disque dur
@@ -146,7 +187,7 @@ async def resolve_stream(
     )
 
     if local_task:
-        logger.info("Épisode trouvé sur le disque dur: %s (task_id=%s)", local_task.savePath, local_task.id)
+        logger.info("Episode found on hard disk: %s (task_id=%s)", local_task.savePath, local_task.id)
         # Récupérer les sous-titres locaux s'ils existent
         subtitles = []
         try:
@@ -169,25 +210,27 @@ async def resolve_stream(
         }
 
     # 2. Épisode non téléchargé -> Résolution du streaming direct sur les serveurs d'hébergement
-    logger.info("Épisode non téléchargé sur disque dur. Extraction du flux distant...")
+    logger.info("Episode not downloaded on hard disk. Extracting remote stream...")
     video_url = ""
     server_type = server or "auto"
     selected_quality = quality or "auto"
     qualities_dict: Dict[str, str] = {}
     tracks: List[Dict[str, Any]] = []
 
-    container_source = extension_service.get_container_source_by_id(source)
-    if not container_source:
-        try:
-            parsed_ep = urllib.parse.urlparse(episodeUrl)
-            ep_host = (parsed_ep.hostname or "").lower()
-            if ep_host:
-                for src in extension_service.get_enabled_container_sources():
-                    if src.base_url and ep_host in src.base_url.lower():
-                        container_source = src
-                        break
-        except Exception:
-            pass
+    container_source = None
+    if source not in ("voir-anime", "animepahe", "french-manga"):
+        container_source = extension_service.get_container_source_by_id(source)
+        if not container_source:
+            try:
+                parsed_ep = urllib.parse.urlparse(episodeUrl)
+                ep_host = (parsed_ep.hostname or "").lower()
+                if ep_host:
+                    for src in extension_service.get_enabled_container_sources():
+                        if src.base_url and ep_host in src.base_url.lower():
+                            container_source = src
+                            break
+            except Exception:
+                pass
 
     if container_source:
         container_sources = await container_source.get_episode_sources(episodeUrl)
@@ -278,7 +321,7 @@ async def resolve_stream(
             })
 
     if not video_url:
-        logger.warning("Aucun flux vidéo direct trouvé pour l'épisode distant: %s", episodeUrl)
+        logger.warning("No direct video stream found for remote episode: %s", episodeUrl)
         return JSONResponse(
             status_code=404,
             content={
@@ -315,7 +358,7 @@ async def stream_video(task_id: str, request: Request, range: Optional[str] = He
     file_path = Path(task.savePath)
     # Protection Path Traversal
     if not is_safe_path(file_path):
-        logger.warning("Path Traversal bloqué sur streaming: %s", file_path)
+        logger.warning("Path Traversal blocked on streaming: %s", file_path)
         raise HTTPException(status_code=403, detail="Accès refusé : fichier hors du répertoire autorisé")
 
     if not file_path.exists():
@@ -420,7 +463,7 @@ async def stream_subtitle_at_index(task_id: str, index: int):
 
     file_path = Path(paths[index])
     if not is_safe_path(file_path):
-        logger.warning("Path Traversal bloqué sur sous-titres: %s", file_path)
+        logger.warning("Path Traversal blocked on subtitles: %s", file_path)
         raise HTTPException(status_code=403, detail="Accès refusé : fichier de sous-titres hors du répertoire autorisé")
 
     if not file_path.exists():
@@ -442,7 +485,7 @@ async def proxy_subtitle(url: str = Query(...)):
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL de sous-titre invalide")
     if not is_safe_url(url):
-        logger.warning("SSRF bloqué sur subtitle-proxy: %s", url)
+        logger.warning("SSRF blocked on subtitle-proxy: %s", url)
         raise HTTPException(status_code=400, detail="URL de sous-titre non autorisée")
 
     headers = {
@@ -468,7 +511,7 @@ async def proxy_subtitle(url: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.debug("Erreur subtitle-proxy: %s", e)
+        logger.debug("Error in subtitle-proxy: %s", e)
         raise HTTPException(status_code=502, detail="Erreur lors de la récupération des sous-titres")
 
 
@@ -489,7 +532,7 @@ async def hls_proxy_playlist(request: Request, url: str = Query(...)):
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL HLS invalide")
     if not is_safe_url(url):
-        logger.warning("SSRF bloqué sur hls-proxy/playlist: %s", url)
+        logger.warning("SSRF blocked on hls-proxy/playlist: %s", url)
         raise HTTPException(status_code=400, detail="URL non autorisée")
 
     headers = {
@@ -552,7 +595,7 @@ async def hls_proxy_playlist(request: Request, url: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Erreur hls_proxy_playlist: %s", e)
+        logger.error("Error in hls_proxy_playlist: %s", e)
         raise HTTPException(status_code=502, detail="Erreur proxying playlist HLS")
 
 
@@ -583,7 +626,7 @@ async def hls_proxy_segment(
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL de segment invalide")
     if not is_safe_url(url):
-        logger.warning("SSRF bloqué sur hls-proxy/segment: %s", url)
+        logger.warning("SSRF blocked on hls-proxy/segment: %s", url)
         raise HTTPException(status_code=400, detail="URL non autorisée")
 
     headers = {
@@ -632,6 +675,6 @@ async def hls_proxy_segment(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Erreur hls_proxy_segment: %s", e)
+        logger.error("Error in hls_proxy_segment: %s", e)
         raise HTTPException(status_code=502, detail="Erreur proxying segment")
 

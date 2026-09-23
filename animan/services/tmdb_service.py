@@ -8,6 +8,7 @@ import httpx
 
 from animan.config import settings
 from animan.models.anime import AnimeDetail, Episode
+from animan.services.proxy_service import proxy_service
 
 logger = logging.getLogger("animan.tmdb")
 
@@ -186,7 +187,7 @@ class TmdbService:
             return detail
 
         try:
-            async with httpx.AsyncClient(headers={"User-Agent": "Animan/2.0"}, verify=settings.SSL_VERIFY) as client:
+            async with httpx.AsyncClient(headers={"User-Agent": "Animan/2.0"}, verify=settings.SSL_VERIFY, proxy=proxy_service.get_active_proxy()) as client:
                 candidate = await self.search_anime(detail.title, client)
                 if not candidate:
                     return detail

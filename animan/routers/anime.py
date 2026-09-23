@@ -43,11 +43,9 @@ def detect_source_from_url(url: str, fallback: str = "french-manga") -> str:
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     favorites = library_service.get_all_favorites()
-    latest_fm_t = scraping_service.get_latest_releases()
-    latest_va_t = voiranime_service.get_latest_releases()
-    latest_ap_t = animepahe_service.get_latest_releases()
-    latest_fm, latest_va, latest_ap = await asyncio.gather(latest_fm_t, latest_va_t, latest_ap_t, return_exceptions=True)
-
+    latest_fm = await scraping_service.get_latest_releases()
+    latest_va = await voiranime_service.get_latest_releases()
+    latest_ap = await animepahe_service.get_latest_releases()
     enabled_extensions = extension_service.get_enabled_container_sources()
 
     return templates.TemplateResponse(
@@ -55,15 +53,39 @@ async def home(request: Request):
         name="index.html",
         context={
             "favorites": favorites,
-            "latestFrenchManga": latest_fm if isinstance(latest_fm, list) else [],
-            "latestVoirAnime": latest_va if isinstance(latest_va, list) else [],
-            "latestAnimePahe": latest_ap if isinstance(latest_ap, list) else [],
+            "latestFrenchManga": latest_fm,
+            "latestVoirAnime": latest_va,
+            "latestAnimePahe": latest_ap,
             "enabledExtensions": enabled_extensions,
             "results": None,
             "query": "",
             "source": "french-manga",
         }
     )
+
+@router.get("/api/releases/latest")
+async def api_latest_releases(source: Optional[str] = None):
+    """Retourne les dernières sorties en JSON pour hydratation dynamique instantanée."""
+    norm_source = (source or "all").lower().strip()
+    if norm_source == "french-manga":
+        releases = await scraping_service.get_latest_releases()
+        return {"source": "french-manga", "releases": [r.model_dump() for r in releases]}
+    elif norm_source == "voir-anime":
+        releases = await voiranime_service.get_latest_releases()
+        return {"source": "voir-anime", "releases": [r.model_dump() for r in releases]}
+    elif norm_source == "animepahe":
+        releases = await animepahe_service.get_latest_releases()
+        return {"source": "animepahe", "releases": [r.model_dump() for r in releases]}
+    else:
+        fm = await scraping_service.get_latest_releases()
+        va = await voiranime_service.get_latest_releases()
+        ap = await animepahe_service.get_latest_releases()
+        return {
+            "french-manga": [r.model_dump() for r in fm],
+            "voir-anime": [r.model_dump() for r in va],
+            "animepahe": [r.model_dump() for r in ap],
+        }
+
 
 @router.get("/search", response_class=HTMLResponse)
 async def search(
@@ -72,7 +94,7 @@ async def search(
     source: str = Query("french-manga", alias="source")
 ):
     norm_source = (source or "french-manga").lower().strip()
-    logger.info("Recherche [%s]: %s", norm_source, q)
+    logger.info("Search [%s]: %s", norm_source, q)
 
     enabled_exts = extension_service.get_enabled_container_sources()
     results: List[AnimeResult] = []
@@ -232,9 +254,9 @@ async def anime_detail(
     url: str = Query(..., alias="url"),
     source: str = Query("french-manga", alias="source")
 ):
-    logger.info("Détail anime demandé [%s]: %s", source, url)
+    logger.info("Anime detail requested [%s]: %s", source, url)
     if not is_safe_url(url):
-        logger.warning("SSRF bloqué sur détail anime: %s", url)
+        logger.warning("SSRF blocked on anime detail: %s", url)
         favorites = library_service.get_all_favorites()
         return templates.TemplateResponse(
             request=request,
@@ -252,7 +274,7 @@ async def anime_detail(
     # Détection automatique et correction de la source d'après l'URL
     detected_source = detect_source_from_url(url, fallback=source)
     if detected_source != source:
-        logger.info("Source d'URL corrigée: [%s -> %s] pour %s", source, detected_source, url)
+        logger.info("URL source corrected: [%s -> %s] for %s", source, detected_source, url)
         source = detected_source
 
     container_source = extension_service.get_container_source_by_id(source)
@@ -269,7 +291,7 @@ async def anime_detail(
     if not detail or not detail.episodes:
         if source not in ("animepahe",) and not container_source:
             alt_source = "voir-anime" if source != "voir-anime" else "french-manga"
-            logger.info("Fiche incomplète ou vide avec %s, tentative de repli sur %s: %s", source, alt_source, url)
+            logger.info("Incomplete or empty sheet with %s, attempting fallback to %s: %s", source, alt_source, url)
             if alt_source == "voir-anime":
                 alt_detail = await voiranime_service.get_anime_detail(url)
             else:

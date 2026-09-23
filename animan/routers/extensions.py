@@ -50,8 +50,8 @@ async def import_repo_api(payload: dict = Body(...)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error("[router.extensions] Erreur import repository: %s", e)
-        raise HTTPException(status_code=500, detail=f"Erreur interne lors de l'import: {e}")
+        logger.error("[router.extensions] Error importing repository: %s", e)
+        raise HTTPException(status_code=500, detail=f"Internal error during import: {e}")
 
 
 @router.post("/api/extensions/{ext_id}/toggle")
@@ -64,8 +64,8 @@ async def toggle_extension_api(ext_id: int, payload: dict = Body(...)):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error("[router.extensions] Erreur toggle extension %d: %s", ext_id, e)
-        raise HTTPException(status_code=500, detail=f"Erreur lors de l'activation/désactivation: {e}")
+        logger.error("[router.extensions] Error toggling extension %d: %s", ext_id, e)
+        raise HTTPException(status_code=500, detail=f"Error toggling extension: {e}")
 
 
 @router.get("/api/extensions/list")

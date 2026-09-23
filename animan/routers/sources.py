@@ -21,7 +21,7 @@ async def get_all_source_settings():
             "sources": sources,
         }
     except Exception as e:
-        logger.error("[router.sources] Erreur récupération sources settings: %s", e)
+        logger.error("[router.sources] Error fetching source settings: %s", e)
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
@@ -36,7 +36,7 @@ async def get_source_settings(source_id: str):
             "settings": settings,
         }
     except Exception as e:
-        logger.error("[router.sources] Erreur lecture source %s: %s", source_id, e)
+        logger.error("[router.sources] Error reading source %s: %s", source_id, e)
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
@@ -56,5 +56,5 @@ async def save_source_settings(source_id: str, request: Request):
             "message": "Paramètres de la source mis à jour avec succès",
         }
     except Exception as e:
-        logger.error("[router.sources] Erreur sauvegarde source %s: %s", source_id, e)
+        logger.error("[router.sources] Error saving source %s: %s", source_id, e)
         return JSONResponse(status_code=400, content={"success": False, "error": str(e)})

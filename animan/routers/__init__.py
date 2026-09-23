@@ -4,6 +4,7 @@ from animan.routers.library import router as library_router
 from animan.routers.media import router as media_router
 from animan.routers.extensions import router as extensions_router
 from animan.routers.sources import router as sources_router
+from animan.routers.i18n import router as i18n_router
 
 __all__ = [
     "anime_router",
@@ -12,5 +13,6 @@ __all__ = [
     "media_router",
     "extensions_router",
     "sources_router",
+    "i18n_router",
 ]
 

@@ -5,6 +5,7 @@ HOME_DIR = Path.home()
 DEFAULT_DOWNLOAD_DIR = str(HOME_DIR / "Downloads" / "Animan")
 DEFAULT_DB_DIR = HOME_DIR / ".animan" / "db"
 DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
+DEFAULT_CACHE_DIR = HOME_DIR / ".animan" / "cache"
 
 class Settings:
     PORT: int = int(os.getenv("ANIMAN_PORT", "8080"))
@@ -56,13 +57,20 @@ class Settings:
     # Proxies
     PROXIES_CONFIG: str = os.getenv("ANIMAN_PROXIES", "")
 
+    # Internationalization (i18n)
+    DEFAULT_LANGUAGE: str = os.getenv("ANIMAN_LANGUAGE", "fr")
+    LOG_LANGUAGE: str = os.getenv("ANIMAN_LOG_LANGUAGE", "en")
+
     # Project directories
     BASE_DIR: Path = Path(__file__).resolve().parent
     TEMPLATES_DIR: Path = BASE_DIR / "templates"
     STATIC_DIR: Path = BASE_DIR / "static"
+    CACHE_DIR: Path = Path(os.getenv("ANIMAN_CACHE_DIR", str(DEFAULT_CACHE_DIR)))
 
 settings = Settings()
 
 # Ensure directories exist
 Path(settings.DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
 DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
+settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+

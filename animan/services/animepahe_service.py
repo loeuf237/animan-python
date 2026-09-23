@@ -32,9 +32,10 @@ class CurlClientWrapper:
 
     async def __aenter__(self):
         try:
-            self.session = AsyncSession(impersonate="chrome124")
+            proxy = proxy_service.get_active_proxy()
+            self.session = AsyncSession(impersonate="chrome124", proxy=proxy)
         except Exception as e:
-            logger.debug("[animepahe] Erreur instanciation AsyncSession: %s", e)
+            logger.debug("[animepahe] Error instantiating AsyncSession: %s", e)
             self.session = None
         return self
 
@@ -57,7 +58,7 @@ class CurlClientWrapper:
                 cookies=self.cookies,
                 timeout=timeout,
             )
-        async with httpx.AsyncClient(timeout=timeout, verify=settings.SSL_VERIFY, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=settings.SSL_VERIFY, follow_redirects=True, proxy=proxy_service.get_active_proxy()) as client:
             return await client.get(url, headers=req_headers, cookies=self.cookies)
 
 
@@ -68,8 +69,37 @@ class AnimepaheService:
         self.cookie = settings.ANIMEPAHE_COOKIE
         self.latest_cache: List[AnimeResult] = []
         self.last_cache_time: float = 0.0
+        self.is_refreshing: bool = False
         self._cookies_cache: Optional[Dict[str, str]] = None
         self._cookies_cache_time: float = 0.0
+        self._load_persistent_cache()
+
+    def _load_persistent_cache(self):
+        try:
+            cache_file = settings.CACHE_DIR / "latest_animepahe.json"
+            if cache_file.exists():
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.latest_cache = [AnimeResult(**item) for item in data.get("items", [])]
+                    self.last_cache_time = float(data.get("timestamp", 0))
+                    logger.info("[animepahe] Disk cache loaded (%d animes)", len(self.latest_cache))
+        except Exception as e:
+            logger.warning("[animepahe] Error loading disk cache: %s", e)
+
+    def _save_persistent_cache(self):
+        try:
+            settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file = settings.CACHE_DIR / "latest_animepahe.json"
+            tmp_file = cache_file.with_suffix(".tmp")
+            data = {
+                "timestamp": self.last_cache_time,
+                "items": [item.model_dump() for item in self.latest_cache]
+            }
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            tmp_file.replace(cache_file)
+        except Exception as e:
+            logger.warning("[animepahe] Error saving disk cache: %s", e)
 
     def _extract_browser_cookies(self, domain: str = "animepahe") -> Dict[str, str]:
         """Tente d'extraire automatiquement les cookies (cf_clearance, animepahe_session) depuis Edge/Chrome."""
@@ -116,7 +146,7 @@ class AnimepaheService:
                 if not p.exists():
                     continue
                 try:
-                    conn = sqlite3.connect(f"file:{p}?immutable=1", uri=True)
+                    conn = sqlite3.connect(f"file:{p}?immutable=1", uri=True, timeout=2.0)
                     cursor = conn.cursor()
                     cursor.execute("SELECT host_key, name, encrypted_value FROM cookies WHERE host_key LIKE ?", (f"%{domain}%",))
                     for host, name, enc in cursor.fetchall():
@@ -134,16 +164,16 @@ class AnimepaheService:
                                 pass
                     conn.close()
                 except Exception as e:
-                    logger.debug("[animepahe] Erreur lecture cookie db %s: %s", p, e)
+                    logger.debug("[animepahe] Error reading cookie db %s: %s", p, e)
 
                 if cookies:
                     break
 
             if cookies:
-                logger.info("[animepahe] %d cookie(s) extraits automatiquement depuis le navigateur", len(cookies))
+                logger.info("[animepahe] %d cookie(s) automatically extracted from browser", len(cookies))
             return cookies
         except Exception as e:
-            logger.debug("[animepahe] Impossible d'extraire les cookies navigateur: %s", e)
+            logger.debug("[animepahe] Unable to extract browser cookies: %s", e)
             return {}
 
     def _get_cookies(self) -> Dict[str, str]:
@@ -171,13 +201,14 @@ class AnimepaheService:
         try:
             return CurlClientWrapper(headers=headers, cookies=cookies, timeout=timeout)
         except Exception as e:
-            logger.warning("[animepahe] Erreur client HTTP: %s, repli httpx", e)
+            logger.warning("[animepahe] HTTP client error: %s, falling back to httpx", e)
             return httpx.AsyncClient(
                 timeout=timeout,
                 follow_redirects=True,
                 verify=settings.SSL_VERIFY,
                 headers=headers,
                 cookies=cookies,
+                proxy=proxy_service.get_active_proxy(),
             )
 
     async def fetch_media_bytes(self, url: str, referer: Optional[str] = None) -> Optional[tuple[bytes, str]]:
@@ -191,22 +222,23 @@ class AnimepaheService:
             "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
         }
         try:
-            async with AsyncSession(impersonate="chrome124") as session:
+            proxy = proxy_service.get_active_proxy()
+            async with AsyncSession(impersonate="chrome124", proxy=proxy) as session:
                 resp = await session.get(url, headers=headers, cookies=cookies, timeout=10)
                 if resp.status_code == 200:
                     ctype = resp.headers.get("content-type", "image/webp")
                     return resp.content, ctype
         except Exception as e:
-            logger.debug("[animepahe] Erreur fetch_media_bytes curl_cffi: %s, repli httpx", e)
+            logger.debug("[animepahe] fetch_media_bytes curl_cffi error: %s, falling back to httpx", e)
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, verify=settings.SSL_VERIFY, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=10.0, verify=settings.SSL_VERIFY, follow_redirects=True, proxy=proxy_service.get_active_proxy()) as client:
                 resp = await client.get(url, headers=headers, cookies=cookies)
                 if resp.status_code == 200:
                     ctype = resp.headers.get("content-type", "image/webp")
                     return resp.content, ctype
         except Exception as e:
-            logger.warning("[animepahe] Erreur fetch_media_bytes: %s", e)
+            logger.warning("[animepahe] fetch_media_bytes error: %s", e)
         return None
 
     async def _fetch_api(self, path: str, timeout: float = 8.0) -> Optional[Dict[str, Any]]:
@@ -221,13 +253,13 @@ class AnimepaheService:
                         if "application/json" in content_type or resp.text.strip().startswith(("{", "[")):
                             data = resp.json()
                             if base != self.base_url:
-                                logger.info("[animepahe] Miroir actif basculé sur: %s", base)
+                                logger.info("[animepahe] Active mirror switched to: %s", base)
                                 self.base_url = base
                             return data
                     elif resp.status_code in (403, 502, 503):
-                        logger.debug("[animepahe] Miroir %s a renvoyé %d pour %s", base, resp.status_code, path)
+                        logger.debug("[animepahe] Mirror %s returned %d for %s", base, resp.status_code, path)
             except Exception as e:
-                logger.debug("[animepahe] Erreur sur miroir %s pour %s: %s", base, path, e)
+                logger.debug("[animepahe] Error on mirror %s for %s: %s", base, path, e)
         return None
 
     # -------------------------------------------------------------------------
@@ -236,13 +268,25 @@ class AnimepaheService:
 
     async def get_latest_releases(self) -> List[AnimeResult]:
         now = time.time()
+        # Stale-While-Revalidate 100% non-bloquant : renvoie immédiatement le cache mémoire
         if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
-            await self.refresh_cache()
+            if not self.is_refreshing:
+                self.is_refreshing = True
+                asyncio.create_task(self._safe_refresh_cache())
         return list(self.latest_cache)
+
+    async def _safe_refresh_cache(self):
+        if self.is_refreshing:
+            return
+        self.is_refreshing = True
+        try:
+            await self.refresh_cache()
+        finally:
+            self.is_refreshing = False
 
     async def refresh_cache(self):
         try:
-            logger.info("[animepahe] Chargement des dernières sorties depuis %s", self.base_url)
+            logger.info("[animepahe] Loading latest releases from %s", self.base_url)
             data = await self._fetch_api("/api?m=airing&page=1", timeout=7.0)
             if data and "data" in data:
                 results: List[AnimeResult] = []
@@ -272,9 +316,10 @@ class AnimepaheService:
                 if results:
                     self.latest_cache = results
                     self.last_cache_time = time.time()
-                    logger.info("[animepahe] Cache mis à jour (%d animés)", len(results))
+                    self._save_persistent_cache()
+                    logger.info("[animepahe] Cache updated (%d animes)", len(results))
         except Exception as e:
-            logger.warning("[animepahe] Erreur actualisation cache: %s", e)
+            logger.warning("[animepahe] Cache refresh error: %s", e)
 
     # -------------------------------------------------------------------------
     # Recherche
@@ -285,7 +330,7 @@ class AnimepaheService:
         if not clean_q:
             return []
 
-        logger.info("[animepahe] Recherche: '%s'", clean_q)
+        logger.info("[animepahe] Search: '%s'", clean_q)
         results: List[AnimeResult] = []
 
         try:
@@ -324,9 +369,9 @@ class AnimepaheService:
                         )
                     )
         except Exception as e:
-            logger.error("[animepahe] Erreur recherche '%s': %s", clean_q, e)
+            logger.error("[animepahe] Error searching '%s': %s", clean_q, e)
 
-        logger.info("[animepahe] Trouvé %d résultat(s) pour '%s'", len(results), clean_q)
+        logger.info("[animepahe] Found %d result(s) for '%s'", len(results), clean_q)
         return results
 
     # -------------------------------------------------------------------------
@@ -335,10 +380,10 @@ class AnimepaheService:
 
     async def get_anime_detail(self, anime_url: str) -> Optional[AnimeDetail]:
         if not is_safe_url(anime_url):
-            logger.warning("[animepahe] SSRF bloqué pour l'URL: %s", anime_url)
+            logger.warning("[animepahe] SSRF blocked for URL: %s", anime_url)
             return None
 
-        logger.info("[animepahe] Chargement détails anime: %s", anime_url)
+        logger.info("[animepahe] Loading anime details: %s", anime_url)
         try:
             # Récupération de la page HTML
             html = ""
@@ -537,7 +582,7 @@ class AnimepaheService:
         if not kwik_url or not is_safe_url(kwik_url):
             return None
 
-        logger.info("[animepahe] Résolution flux Kwik: %s", kwik_url)
+        logger.info("[animepahe] Resolving Kwik stream: %s", kwik_url)
         try:
             headers = {
                 "User-Agent": settings.ANIMEPAHE_USER_AGENT,
@@ -547,36 +592,37 @@ class AnimepaheService:
 
             # 1. Tentative avec httpx (compatible avec les mocks unitaires)
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers, verify=settings.SSL_VERIFY) as client:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers, verify=settings.SSL_VERIFY, proxy=proxy_service.get_active_proxy()) as client:
                     resp = await client.get(kwik_url)
                     if resp.status_code == 200:
                         html = resp.text
                     elif resp.status_code in (403, 503):
-                        logger.debug("[animepahe] Kwik bloqué par Cloudflare (%d), bascule curl_cffi", resp.status_code)
+                        logger.debug("[animepahe] Kwik blocked by Cloudflare (%d), switching to curl_cffi", resp.status_code)
             except Exception as e:
-                logger.debug("[animepahe] httpx exception sur %s: %s, bascule curl_cffi", kwik_url, e)
+                logger.debug("[animepahe] httpx exception on %s: %s, switching to curl_cffi", kwik_url, e)
 
             # 2. Contournement Cloudflare via curl_cffi impersonate si httpx a échoué / bloqué
             if not html:
                 try:
-                    async with AsyncSession(impersonate="chrome124") as session:
+                    proxy = proxy_service.get_active_proxy()
+                    async with AsyncSession(impersonate="chrome124", proxy=proxy) as session:
                         resp = await session.get(kwik_url, headers=headers, timeout=15.0, allow_redirects=True)
                         if resp.status_code == 200:
                             html = resp.text
                         elif resp.status_code == 429:
-                            logger.warning("[animepahe] Kwik a répondu avec code 429 (rate limit), pause 1.5s et nouvelle tentative...")
+                            logger.warning("[animepahe] Kwik responded with code 429 (rate limit), waiting 1.5s and retrying...")
                             await asyncio.sleep(1.5)
                             resp = await session.get(kwik_url, headers=headers, timeout=15.0, allow_redirects=True)
                             if resp.status_code == 200:
                                 html = resp.text
                             else:
-                                logger.warning("[animepahe] Kwik a encore répondu avec code %d après retry", resp.status_code)
+                                logger.warning("[animepahe] Kwik responded again with code %d after retry", resp.status_code)
                                 return None
                         else:
-                            logger.warning("[animepahe] Kwik a répondu avec code %d", resp.status_code)
+                            logger.warning("[animepahe] Kwik responded with code %d", resp.status_code)
                             return None
                 except Exception as e:
-                    logger.warning("[animepahe] Échec curl_cffi sur %s: %s", kwik_url, e)
+                    logger.warning("[animepahe] curl_cffi failed on %s: %s", kwik_url, e)
                     return None
 
             # 3. Vérification si URL .mp4 ou .m3u8 en clair
@@ -615,7 +661,7 @@ class AnimepaheService:
                         pass
 
         except Exception as e:
-            logger.warning("[animepahe] Échec résolution stream Kwik (%s): %s", kwik_url, e)
+            logger.warning("[animepahe] Failed resolving Kwik stream (%s): %s", kwik_url, e)
 
         return None
 

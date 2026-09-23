@@ -93,7 +93,7 @@ class ExtensionService:
         if not clean_url.endswith(".json"):
             clean_url = clean_url.rstrip("/") + "/index.min.json"
 
-        logger.info("[extensions] Téléchargement du magasin d'extensions: %s", clean_url)
+        logger.info("[extensions] Downloading extension repository: %s", clean_url)
 
         # Téléchargement de l'index
         try:
@@ -103,7 +103,7 @@ class ExtensionService:
                     raise ValueError(f"Impossible de joindre le magasin (HTTP {resp.status_code})")
                 data = resp.json()
         except Exception as e:
-            logger.error("[extensions] Échec téléchargement index: %s", e)
+            logger.error("[extensions] Failed downloading repository index: %s", e)
             raise ValueError(f"Erreur lors de la récupération du catalogue: {e}")
 
         if not isinstance(data, list):
@@ -192,7 +192,7 @@ class ExtensionService:
         # Réinitialise le cache des sources en mémoire pour ne conserver que celles du dépôt actif
         self._load_enabled_sources()
 
-        logger.info("[extensions] %d extensions importées depuis %s (Toutes désactivées par défaut)", imported_count, repo_name)
+        logger.info("[extensions] %d extensions imported from %s (All disabled by default)", imported_count, repo_name)
         return {
             "success": True,
             "repo_id": repo_id,
@@ -272,11 +272,11 @@ class ExtensionService:
 
                 recipe = SourceRecipe.from_dict(recipe_dict)
                 self._active_container_sources[pkg] = AniyomiContainerSource(recipe)
-                logger.info("[extensions] Extension activée: %s (%s)", ext_data["name"], pkg)
+                logger.info("[extensions] Extension enabled: %s (%s)", ext_data["name"], pkg)
             else:
                 cursor.execute("UPDATE imported_extensions SET is_enabled = 0 WHERE id = ?;", (ext_id,))
                 self._active_container_sources.pop(pkg, None)
-                logger.info("[extensions] Extension désactivée: %s (%s)", ext_data["name"], pkg)
+                logger.info("[extensions] Extension disabled: %s (%s)", ext_data["name"], pkg)
 
             conn.commit()
 
@@ -302,7 +302,7 @@ class ExtensionService:
         if local_apk.exists() and local_apk.stat().st_size > 1000:
             apk_bytes = local_apk.read_bytes()
         elif apk_url:
-            logger.info("[extensions] Téléchargement APK pour %s depuis %s", name, apk_url)
+            logger.info("[extensions] Downloading APK for %s from %s", name, apk_url)
             try:
                 async with httpx.AsyncClient(timeout=25.0, verify=settings.SSL_VERIFY, follow_redirects=True) as client:
                     resp = await client.get(apk_url, headers={"User-Agent": settings.DEFAULT_USER_AGENT})
@@ -310,7 +310,7 @@ class ExtensionService:
                         apk_bytes = resp.content
                         local_apk.write_bytes(apk_bytes)
             except Exception as e:
-                logger.warning("[extensions] Échec téléchargement APK pour %s: %s", name, e)
+                logger.warning("[extensions] Failed downloading APK for %s: %s", name, e)
 
         if apk_bytes:
             recipe = AniyomiDexParser.parse_apk(apk_bytes, pkg_name=pkg, default_base_url=base_url)
@@ -342,9 +342,9 @@ class ExtensionService:
                         recipe = SourceRecipe.from_dict(recipe_data)
                         self._active_container_sources[ext["pkg"]] = AniyomiContainerSource(recipe)
                     except Exception as e:
-                        logger.warning("[extensions] Erreur chargement source %s: %s", ext["name"], e)
+                        logger.warning("[extensions] Error loading source %s: %s", ext["name"], e)
 
-        logger.info("[extensions] %d source(s) Aniyomi activée(s) en mémoire", len(self._active_container_sources))
+        logger.info("[extensions] %d Aniyomi source(s) enabled in memory", len(self._active_container_sources))
 
     # -------------------------------------------------------------------------
     # Accesseurs pour le coeur d'Animan

@@ -26,6 +26,35 @@ class VoirAnimeScrapingService:
         self.default_server = settings.VOIRANIME_DEFAULT_SERVER
         self.latest_cache: List[AnimeResult] = []
         self.last_cache_time: float = 0.0
+        self.is_refreshing: bool = False
+        self._load_persistent_cache()
+
+    def _load_persistent_cache(self):
+        try:
+            cache_file = settings.CACHE_DIR / "latest_voir_anime.json"
+            if cache_file.exists():
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.latest_cache = [AnimeResult(**item) for item in data.get("items", [])]
+                    self.last_cache_time = float(data.get("timestamp", 0))
+                    logger.info("[voir-anime] Disk cache loaded (%d animes)", len(self.latest_cache))
+        except Exception as e:
+            logger.warning("[voir-anime] Error loading disk cache: %s", e)
+
+    def _save_persistent_cache(self):
+        try:
+            settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file = settings.CACHE_DIR / "latest_voir_anime.json"
+            tmp_file = cache_file.with_suffix(".tmp")
+            data = {
+                "timestamp": self.last_cache_time,
+                "items": [item.model_dump() for item in self.latest_cache]
+            }
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            tmp_file.replace(cache_file)
+        except Exception as e:
+            logger.warning("[voir-anime] Error saving disk cache: %s", e)
 
     def _get_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
         return {
@@ -48,7 +77,7 @@ class VoirAnimeScrapingService:
                 verify=settings.SSL_VERIFY,
             )
         except Exception as e:
-            logger.warning("[voir-anime] Erreur initialisation proxy client HTTP (%s): %s - bascule en direct sans proxy", proxy, e)
+            logger.warning("[voir-anime] HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
             return httpx.Client(
                 headers=headers,
                 timeout=t,
@@ -70,7 +99,7 @@ class VoirAnimeScrapingService:
                 verify=settings.SSL_VERIFY,
             )
         except Exception as e:
-            logger.warning("[voir-anime] Erreur initialisation proxy client HTTP asynchrone (%s): %s - bascule en direct sans proxy", proxy, e)
+            logger.warning("[voir-anime] Async HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
             return httpx.AsyncClient(
                 headers=headers,
                 timeout=t,
@@ -81,13 +110,25 @@ class VoirAnimeScrapingService:
 
     async def get_latest_releases(self) -> List[AnimeResult]:
         now = time.time()
+        # Stale-While-Revalidate 100% non-bloquant : renvoie immédiatement le cache mémoire
         if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
-            await self.refresh_cache()
+            if not self.is_refreshing:
+                self.is_refreshing = True
+                asyncio.create_task(self._safe_refresh_cache())
         return list(self.latest_cache)
+
+    async def _safe_refresh_cache(self):
+        if self.is_refreshing:
+            return
+        self.is_refreshing = True
+        try:
+            await self.refresh_cache()
+        finally:
+            self.is_refreshing = False
 
     async def refresh_cache(self):
         try:
-            logger.info("[voir-anime] Chargement des dernières sorties depuis %s", self.base_url)
+            logger.info("[voir-anime] Loading latest releases from %s", self.base_url)
             async with self._get_async_client() as client:
                 resp = await client.get(self.base_url)
                 if resp.status_code == 200:
@@ -95,9 +136,10 @@ class VoirAnimeScrapingService:
                     if results:
                         self.latest_cache = results
                         self.last_cache_time = time.time()
-                        logger.info("[voir-anime] Cache mis à jour (%d animés)", len(self.latest_cache))
+                        self._save_persistent_cache()
+                        logger.info("[voir-anime] Cache updated (%d animes)", len(self.latest_cache))
         except Exception as e:
-            logger.error("[voir-anime] Erreur mise à jour cache: %s", e)
+            logger.error("[voir-anime] Cache update error: %s", e)
 
     def parse_asp_html(self, html: str, default_version: str = "VOSTFR") -> List[AnimeResult]:
         if not html:
@@ -252,13 +294,13 @@ class VoirAnimeScrapingService:
         return sorted(combined, key=sort_key)
 
     async def search_anime(self, query: str) -> List[AnimeResult]:
-        logger.info("[voir-anime] Recherche: '%s'", query)
+        logger.info("[voir-anime] Search: '%s'", query)
         results: List[AnimeResult] = []
         try:
             # 1. Moteur officiel Ajax Search Pro (identique au moteur live du site voir-anime.to)
             results = await self.search_via_asp(query)
         except Exception as e:
-            logger.error("[voir-anime] Erreur recherche ASP: %s", e)
+            logger.error("[voir-anime] ASP search error: %s", e)
 
         # 2. Fallback vers la recherche standard WordPress si ASP ne renvoie rien
         if not results:
@@ -274,9 +316,9 @@ class VoirAnimeScrapingService:
                         if resp2.status_code == 200:
                             results = self.parse_cards(resp2.text)
             except Exception as e:
-                logger.error("[voir-anime] Erreur recherche fallback: %s", e)
+                logger.error("[voir-anime] Fallback search error: %s", e)
 
-        logger.info("[voir-anime] %d résultat(s) pour '%s'", len(results), query)
+        logger.info("[voir-anime] %d result(s) for '%s'", len(results), query)
         return results
 
     def parse_cards(self, html: str) -> List[AnimeResult]:
@@ -373,9 +415,9 @@ class VoirAnimeScrapingService:
 
     async def get_anime_detail(self, anime_url: str) -> Optional[AnimeDetail]:
         if not is_safe_url(anime_url):
-            logger.warning("[voir-anime] SSRF bloqué pour l'URL: %s", anime_url)
+            logger.warning("[voir-anime] SSRF blocked for URL: %s", anime_url)
             return None
-        logger.info("[voir-anime] Détail anime: %s", anime_url)
+        logger.info("[voir-anime] Anime detail: %s", anime_url)
         try:
             async with self._get_async_client() as client:
                 resp = await client.get(anime_url)
@@ -704,7 +746,7 @@ class VoirAnimeScrapingService:
                 # 3. Résolution selon l'ordre de priorité (avec fallback automatique si indisponible)
                 for s_name in try_order:
                     s_url = sources[s_name]
-                    logger.info("[voir-anime] Tentative de résolution sur serveur '%s' (%s)", s_name, s_url)
+                    logger.info("[voir-anime] Attempting resolution on server '%s' (%s)", s_name, s_url)
                     s_lower = s_name.lower()
 
                     if s_lower == "mytv" or any(h in s_url for h in ["voembed", "vidmoly"]):

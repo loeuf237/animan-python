@@ -47,9 +47,9 @@ class DownloadVerificationService:
     def __init__(self):
         self._ffprobe_path = shutil.which("ffprobe")
         if self._ffprobe_path:
-            logger.info("Service de vérification initialisé avec ffprobe (%s)", self._ffprobe_path)
+            logger.info("Verification service initialized with ffprobe (%s)", self._ffprobe_path)
         else:
-            logger.warning("ffprobe non détecté sur le système. Mode de vérification par headers activé.")
+            logger.warning("ffprobe not detected on the system. Headers verification mode enabled.")
 
     @property
     def is_ffprobe_available(self) -> bool:
@@ -82,7 +82,7 @@ class DownloadVerificationService:
             if found:
                 path = found
                 relocated_path = str(found)
-                logger.info("Fichier relocalisé avec succès : %s -> %s", file_path_str, relocated_path)
+                logger.info("File successfully relocated: %s -> %s", file_path_str, relocated_path)
             else:
                 return VerificationResult(
                     valid=False,
@@ -185,8 +185,8 @@ class DownloadVerificationService:
 
                 if proc.returncode != 0:
                     err_lines = [l.strip() for l in proc.stderr.splitlines() if l.strip()]
-                    err_summary = err_lines[-1] if err_lines else "Erreur décodage conteneur vidéo"
-                    logger.warning("Échec validation ffprobe pour %s: %s", path.name, err_summary)
+                    err_summary = err_lines[-1] if err_lines else "Video container decode error"
+                    logger.warning("ffprobe validation failed for %s: %s", path.name, err_summary)
                     return VerificationResult(
                         valid=False,
                         status="CORRUPTED",
@@ -238,7 +238,7 @@ class DownloadVerificationService:
                             test_proc = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
                             err_lines = [l.strip() for l in test_proc.stderr.splitlines() if l.strip()]
                             if len(err_lines) > 20:
-                                logger.warning("Fichier vidéo corrompu lors du décodage à %ds pour %s: %d erreurs détectées",
+                                logger.warning("Corrupted video file during decoding at %ds for %s: %d errors detected",
                                                int(check_pos), path.name, len(err_lines))
                                 return VerificationResult(
                                     valid=False,
@@ -251,7 +251,7 @@ class DownloadVerificationService:
                                     verifiedAt=now_iso,
                                 )
                         except Exception as dec_err:
-                            logger.debug("Vérification de décodage ignorée: %s", dec_err)
+                            logger.debug("Decoding verification skipped: %s", dec_err)
 
                 return VerificationResult(
                     valid=True,
@@ -271,7 +271,7 @@ class DownloadVerificationService:
                 )
 
             except subprocess.TimeoutExpired:
-                logger.error("Délai d'attente dépassé (timeout) pour ffprobe sur %s", path.name)
+                logger.error("Timeout expired for ffprobe on %s", path.name)
                 return VerificationResult(
                     valid=False,
                     status="CORRUPTED",
@@ -283,7 +283,7 @@ class DownloadVerificationService:
                     verifiedAt=now_iso,
                 )
             except Exception as e:
-                logger.error("Exception lors de la vérification ffprobe de %s: %s", path.name, e)
+                logger.error("Exception during ffprobe check of %s: %s", path.name, e)
 
         # 4. Fallback sans ffprobe : vérification des signatures (magic numbers)
         try:

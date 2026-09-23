@@ -49,6 +49,7 @@ window.addEventListener('pagehide', stopAllPlayback);
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  initTelegramOfflineDetector();
   highlightActiveNav();
   bindGlobalSettingsToggle();
   loadEpisodeSizes();
@@ -74,7 +75,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 function initTheme() {
-  const saved = localStorage.getItem(THEME_KEY) || 'dark';
+  const urlTheme = new URLSearchParams(window.location.search).get('theme');
+  const saved = (urlTheme === 'light' || urlTheme === 'dark') ? urlTheme : (localStorage.getItem(THEME_KEY) || 'dark');
   applyTheme(saved);
   document.getElementById('theme-toggle')?.addEventListener('click', () => {
     const current = document.documentElement.getAttribute('data-theme') || 'dark';
@@ -88,6 +90,46 @@ function applyTheme(theme) {
   document.querySelectorAll('.icon-sun').forEach(el => { el.style.display = theme === 'light' ? '' : 'none'; });
   localStorage.setItem(THEME_KEY, theme);
 }
+
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+  return match ? decodeURIComponent(match[3]) : null;
+}
+
+function getCurrentLang() {
+  const cookieLang = getCookie('animan_lang');
+  if (cookieLang === 'fr' || cookieLang === 'en') return cookieLang;
+  const docLang = document.documentElement.lang;
+  if (docLang === 'fr' || docLang === 'en') return docLang;
+  return 'fr';
+}
+
+function setLanguage(lang) {
+  if (lang !== 'fr' && lang !== 'en') lang = 'fr';
+  const maxAge = 365 * 24 * 60 * 60;
+  document.cookie = `animan_lang=${lang}; path=/; max-age=${maxAge}; SameSite=Lax`;
+  fetch('/api/i18n/set-language', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: lang })
+  }).finally(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('lang')) {
+      url.searchParams.set('lang', lang);
+    }
+    window.location.href = url.toString();
+  });
+}
+
+function toggleLanguage() {
+  const current = getCurrentLang();
+  const next = current === 'fr' ? 'en' : 'fr';
+  setLanguage(next);
+}
+
+window.getCurrentLang = getCurrentLang;
+window.setLanguage = setLanguage;
+window.toggleLanguage = toggleLanguage;
 
 function highlightActiveNav() {
   const path = window.location.pathname;
@@ -190,6 +232,151 @@ function initDownloadSettingsPanel() {
     })
     .catch(() => {});
 
+  // Gestion du volet Proxy
+  const proxyEnableCb = document.getElementById('proxy-enable-cb');
+  const proxyConfigFields = document.getElementById('proxy-config-fields');
+  const proxyTypeSelect = document.getElementById('proxy-type-select');
+  const proxyHostInput = document.getElementById('proxy-host-input');
+  const proxyPortInput = document.getElementById('proxy-port-input');
+  const proxyUserInput = document.getElementById('proxy-user-input');
+  const proxyPassInput = document.getElementById('proxy-pass-input');
+  const proxyTogglePassBtn = document.getElementById('proxy-toggle-pass-btn');
+  const proxyEyeIcon = document.getElementById('proxy-eye-icon');
+  const proxyCustomUrlInput = document.getElementById('proxy-custom-url-input');
+  const proxyUrlPreview = document.getElementById('proxy-url-preview');
+  const testProxyBtn = document.getElementById('test-proxy-btn');
+  const proxyTestBadge = document.getElementById('proxy-test-status-badge');
+
+  function updateProxyFieldsState() {
+    const enabled = !!proxyEnableCb?.checked;
+    if (proxyConfigFields) {
+      proxyConfigFields.style.opacity = enabled ? '1' : '0.45';
+      proxyConfigFields.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+  }
+
+  function updateProxyPreview() {
+    if (!proxyUrlPreview) return;
+    const custom = proxyCustomUrlInput?.value.trim();
+    if (custom) {
+      proxyUrlPreview.textContent = custom;
+      return;
+    }
+    const type = proxyTypeSelect?.value || 'socks5';
+    const host = proxyHostInput?.value.trim();
+    const port = proxyPortInput?.value.trim() || '1080';
+    const user = proxyUserInput?.value.trim();
+    const pass = proxyPassInput?.value;
+
+    if (!host) {
+      proxyUrlPreview.textContent = 'Non configuré';
+      return;
+    }
+
+    let auth = '';
+    if (user) {
+      auth = `${encodeURIComponent(user)}${pass ? ':••••••' : ''}@`;
+    }
+    proxyUrlPreview.textContent = `${type}://${auth}${host}:${port}`;
+  }
+
+  if (proxyEnableCb) {
+    proxyEnableCb.addEventListener('change', updateProxyFieldsState);
+    updateProxyFieldsState();
+  }
+
+  [proxyTypeSelect, proxyHostInput, proxyPortInput, proxyUserInput, proxyPassInput, proxyCustomUrlInput].forEach(el => {
+    el?.addEventListener('input', updateProxyPreview);
+    el?.addEventListener('change', updateProxyPreview);
+  });
+
+  if (proxyTogglePassBtn && proxyPassInput) {
+    proxyTogglePassBtn.addEventListener('click', () => {
+      const isPass = proxyPassInput.type === 'password';
+      proxyPassInput.type = isPass ? 'text' : 'password';
+      if (proxyEyeIcon) {
+        proxyEyeIcon.innerHTML = isPass
+          ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'
+          : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+      }
+    });
+  }
+
+  // Initialisation des données proxy
+  fetch('/api/proxy/settings')
+    .then(r => r.json())
+    .then(p => {
+      if (p) {
+        if (proxyEnableCb) proxyEnableCb.checked = !!p.enabled;
+        if (proxyTypeSelect && p.proxy_type) proxyTypeSelect.value = p.proxy_type;
+        if (proxyHostInput) proxyHostInput.value = p.host || '';
+        if (proxyPortInput) proxyPortInput.value = p.port || 1080;
+        if (proxyUserInput) proxyUserInput.value = p.username || '';
+        if (proxyPassInput) proxyPassInput.value = p.password || '';
+        if (proxyCustomUrlInput) proxyCustomUrlInput.value = p.custom_url || '';
+        updateProxyFieldsState();
+        updateProxyPreview();
+      }
+    })
+    .catch(() => {});
+
+  // Test de connexion proxy
+  if (testProxyBtn) {
+    testProxyBtn.addEventListener('click', async () => {
+      if (proxyTestBadge) {
+        proxyTestBadge.style.display = 'inline-flex';
+        proxyTestBadge.className = 'status-badge';
+        proxyTestBadge.innerHTML = '<span class="spinner-sm" style="display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span> Test en cours...';
+      }
+      testProxyBtn.disabled = true;
+
+      // Construction de l'URL candidate pour le test
+      let testUrl = proxyCustomUrlInput?.value.trim() || '';
+      if (!testUrl && proxyHostInput?.value.trim()) {
+        const type = proxyTypeSelect?.value || 'socks5';
+        const host = proxyHostInput.value.trim();
+        const port = proxyPortInput?.value.trim() || '1080';
+        const user = proxyUserInput?.value.trim() || '';
+        const pass = proxyPassInput?.value || '';
+        let auth = '';
+        if (user) {
+          auth = `${encodeURIComponent(user)}${pass ? ':' + encodeURIComponent(pass) : ''}@`;
+        }
+        testUrl = `${type}://${auth}${host}:${port}`;
+      }
+
+      try {
+        const res = await fetch('/api/proxy/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ proxyUrl: testUrl })
+        });
+        const result = await res.json();
+        if (result.success) {
+          if (proxyTestBadge) {
+            proxyTestBadge.className = 'status-badge badge-ok';
+            proxyTestBadge.textContent = `✓ Opérationnel (IP: ${result.ip || 'OK'} - ${result.latency_ms || 0} ms)`;
+          }
+          showToast(`Proxy opérationnel ! IP : ${result.ip || 'inconnue'} (${result.latency_ms || 0} ms)`, 'success');
+        } else {
+          if (proxyTestBadge) {
+            proxyTestBadge.className = 'status-badge badge-err';
+            proxyTestBadge.textContent = `✗ Échec : ${result.error || 'Connexion impossible'}`;
+          }
+          showToast(result.error || 'Échec du test proxy', 'error');
+        }
+      } catch (err) {
+        if (proxyTestBadge) {
+          proxyTestBadge.className = 'status-badge badge-err';
+          proxyTestBadge.textContent = `✗ Erreur réseau : ${err.message}`;
+        }
+        showToast(`Erreur réseau: ${err.message}`, 'error');
+      } finally {
+        testProxyBtn.disabled = false;
+      }
+    });
+  }
+
   // Charger les paramètres de chaque source (natives & extensions importées)
   fetch('/api/sources/settings')
     .then(r => r.json())
@@ -272,8 +459,18 @@ function initDownloadSettingsPanel() {
       voiranimeDefaultServer,
     };
 
+    const proxyPayload = {
+      enabled: !!document.getElementById('proxy-enable-cb')?.checked,
+      proxy_type: document.getElementById('proxy-type-select')?.value || 'socks5',
+      host: document.getElementById('proxy-host-input')?.value.trim() || '',
+      port: parseInt(document.getElementById('proxy-port-input')?.value || '1080', 10),
+      username: document.getElementById('proxy-user-input')?.value.trim() || '',
+      password: document.getElementById('proxy-pass-input')?.value || '',
+      custom_url: document.getElementById('proxy-custom-url-input')?.value.trim() || '',
+    };
+
     try {
-      const [respGlobal, respSource] = await Promise.all([
+      const [respGlobal, respSource, respProxy] = await Promise.all([
         fetch('/api/download/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -286,14 +483,19 @@ function initDownloadSettingsPanel() {
             quality_strategy: voiranimeQualityStrategy,
             default_server: voiranimeDefaultServer
           })
+        }),
+        fetch('/api/proxy/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(proxyPayload)
         })
       ]);
 
       const data = await respGlobal.json();
       if (data.success) {
-        showToast('Parametres enregistres avec succes', 'success');
+        showToast('Paramètres enregistrés avec succès', 'success');
       } else {
-        showToast(data.error || 'Erreur lors de la mise a jour', 'error');
+        showToast(data.error || 'Erreur lors de la mise à jour', 'error');
       }
     } catch (error) {
       showToast('Erreur de connexion', 'error');
@@ -769,6 +971,8 @@ function showSubtitleChoiceModal(btn) {
         row.dataset.subtitle = sub.url;
         const cb = row.querySelector('.subtitle-check');
         if (cb) cb.checked = true;
+        const chip = row.querySelector('.ep-sub-chip');
+        if (chip) syncEpisodeSubtitleChip(chip, true, `✓ ${sub.label || sub.srclang || 'Sous-titres'}`);
         modal.style.display = 'none';
         showToast(`Sous-titre sélectionné : ${sub.label || sub.srclang || 'Piste'}`, 'success');
       };
@@ -779,11 +983,34 @@ function showSubtitleChoiceModal(btn) {
   modal.style.display = 'flex';
 }
 
+function syncEpisodeSubtitleChip(btn, isChecked, customLabel) {
+  if (!btn) return;
+  btn.classList.toggle('active', isChecked);
+  const labelEl = btn.querySelector('.ep-sub-label');
+  if (labelEl) {
+    labelEl.textContent = isChecked ? (customLabel || '✓ Sous-titres') : 'Sous-titres';
+  }
+}
+
+function toggleEpisodeSubtitle(btn, event) {
+  if (event) event.stopPropagation();
+  const row = btn.closest('.episode-item');
+  if (!row) return;
+  const cb = row.querySelector('.subtitle-check');
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  syncEpisodeSubtitleChip(btn, cb.checked);
+}
+
 function toggleBatchSubtitles(checked) {
   document.querySelectorAll('.episode-item').forEach(row => {
     if (row.style.display === 'none') return;
     const cb = row.querySelector('.subtitle-check');
-    if (cb) cb.checked = checked;
+    if (cb) {
+      cb.checked = checked;
+      const chip = row.querySelector('.ep-sub-chip');
+      if (chip) syncEpisodeSubtitleChip(chip, checked);
+    }
   });
 }
 
@@ -966,13 +1193,18 @@ async function playEpisode(btn) {
     const resp = await fetch(`/api/media/stream/resolve?${params.toString()}`, {
       signal: currentPlayAbortController.signal
     });
-    const data = await resp.json();
+    let data;
+    try {
+      data = await resp.json();
+    } catch (parseErr) {
+      data = { success: false, error: 'Source momentanément indisponible sur ce serveur' };
+    }
 
     // Si une nouvelle requête a été émise ou si l'utilisateur a annulé
     if (thisRequestId !== currentPlayRequestId) return;
 
     if (!resp.ok || !data.success) {
-      showToast(data.error || 'Flux vidéo introuvable', 'error');
+      handlePlayStreamError(btn, server);
       return;
     }
 
@@ -1060,7 +1292,7 @@ async function playEpisode(btn) {
     if (error.name === 'AbortError') {
       return; // Annulation normale
     }
-    showToast('Erreur lecteur: ' + error.message, 'error');
+    handlePlayStreamError(btn, server);
   } finally {
     if (thisRequestId === currentPlayRequestId) {
       btn.classList.remove('is-loading');
@@ -1069,6 +1301,52 @@ async function playEpisode(btn) {
     }
   }
 }
+
+function handlePlayStreamError(btn, currentServer) {
+  const serverSelect = document.getElementById('batch-server-select');
+  let nextServerVal = null;
+  let nextServerLabel = 'un autre miroir';
+
+  if (serverSelect) {
+    const opts = Array.from(serverSelect.options).filter(opt => opt.value && opt.value !== 'auto' && opt.value !== currentServer);
+    if (opts.length > 0) {
+      nextServerVal = opts[0].value;
+      nextServerLabel = opts[0].text;
+    }
+  }
+
+  showToast(
+    'Source momentanément indisponible sur ce serveur.',
+    'error',
+    nextServerVal ? {
+      text: `Essayer ${nextServerLabel}`,
+      onClick: () => {
+        if (serverSelect) {
+          serverSelect.value = nextServerVal;
+          if (typeof onBatchServerChange === 'function') onBatchServerChange(nextServerVal);
+        }
+        const row = btn.closest('.episode-item');
+        if (row) row.dataset.server = nextServerVal;
+        playEpisode(btn);
+      }
+    } : null
+  );
+}
+
+function toggleEpisodeTechMenu(btn, event) {
+  if (event) event.stopPropagation();
+  const popover = btn.parentElement?.querySelector('.ep-tech-popover');
+  if (!popover) return;
+  const isVisible = popover.style.display !== 'none';
+  document.querySelectorAll('.ep-tech-popover').forEach(p => p.style.display = 'none');
+  popover.style.display = isVisible ? 'none' : 'block';
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.ep-tech-options-wrap')) {
+    document.querySelectorAll('.ep-tech-popover').forEach(p => p.style.display = 'none');
+  }
+});
 
 function openCinemaModal(videoUrl, title, tracks = [], epNum = null, sourceMeta = null) {
   const modal = document.getElementById('cinema-modal');
@@ -1310,18 +1588,45 @@ function renderTaskRowInner(task, queueIndex = 1) {
 
   if (cat === 'done') {
     const vStatus = task.verificationStatus || 'UNVERIFIED';
+    const isEn = getCurrentLang() === 'en';
     let verifBadge = '';
     if (vStatus === 'VALID') {
       const dur = task.formattedDuration ? ` • ${task.formattedDuration}` : '';
-      verifBadge = `<span class="status-badge dl-verif-badge badge-ok" style="font-size:10px; padding: 2px 6px;" title="Fichier intègre et lisible sur le disque">✓ Valide${escapeHtml(dur)}</span>`;
+      const label = isEn ? '✓ Valid' : '✓ Valide';
+      const tip = isEn ? 'File intact and playable on disk' : 'Fichier intègre et lisible sur le disque';
+      verifBadge = `<span class="status-badge dl-verif-badge badge-ok" style="font-size:10px; padding: 2px 6px;" title="${tip}">${label}${escapeHtml(dur)}</span>`;
     } else if (vStatus === 'MISSING') {
-      verifBadge = `<span class="status-badge dl-verif-badge badge-err" style="font-size:10px; padding: 2px 6px;" title="${escapeHtml(task.verificationError || 'Fichier introuvable sur le disque')}">⚠ Manquant</span>`;
+      const label = isEn ? '⚠ Missing' : '⚠ Manquant';
+      const tip = escapeHtml(task.verificationError || (isEn ? 'File not found on disk' : 'Fichier introuvable sur le disque'));
+      verifBadge = `<span class="status-badge dl-verif-badge badge-err" style="font-size:10px; padding: 2px 6px;" title="${tip}">${label}</span>`;
     } else if (vStatus === 'CORRUPTED') {
-      verifBadge = `<span class="status-badge dl-verif-badge badge-err" style="font-size:10px; padding: 2px 6px;" title="${escapeHtml(task.verificationError || 'Fichier vidéo corrompu')}">✗ Corrompu</span>`;
+      const label = isEn ? '✗ Corrupted' : '✗ Corrompu';
+      const tip = escapeHtml(task.verificationError || (isEn ? 'Corrupted video file' : 'Fichier vidéo corrompu'));
+      verifBadge = `<span class="status-badge dl-verif-badge badge-err" style="font-size:10px; padding: 2px 6px;" title="${tip}">${label}</span>`;
     } else if (vStatus === 'EMPTY') {
-      verifBadge = `<span class="status-badge dl-verif-badge badge-err" style="font-size:10px; padding: 2px 6px;" title="Fichier de 0 octet">✗ Vide</span>`;
+      const label = isEn ? '✗ Empty' : '✗ Vide';
+      const tip = isEn ? '0-byte file' : 'Fichier de 0 octet';
+      verifBadge = `<span class="status-badge dl-verif-badge badge-err" style="font-size:10px; padding: 2px 6px;" title="${tip}">${label}</span>`;
     } else {
-      verifBadge = `<span class="status-badge dl-verif-badge badge-other" style="font-size:10px; padding: 2px 6px;" title="Non vérifié">Non vérifié</span>`;
+      const label = isEn ? 'Unverified' : 'Non vérifié';
+      verifBadge = `<span class="status-badge dl-verif-badge badge-other" style="font-size:10px; padding: 2px 6px;" title="${label}">${label}</span>`;
+    }
+
+    let statusEl;
+    if (task.status === 'FAILED') {
+      const failedText = isEn ? 'Failed' : 'Échec';
+      const retryTitle = isEn ? 'Retry immediately' : 'Réessayer immédiatement';
+      const errTitle = escapeHtml(task.error || (isEn ? 'Download error' : 'Erreur lors du téléchargement'));
+      statusEl = `
+        <span class="dl-error-badge-compact" title="${errTitle}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+          ${failedText}
+          <button type="button" class="dl-error-retry-btn" title="${retryTitle}" onclick="event.stopPropagation(); redownloadTask('${escapeHtml(task.id)}')">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </span>`;
+    } else {
+      statusEl = `<span class="status-badge dl-task-status ${statusClass(task.status)}">${translateStatus(task.status)}</span>`;
     }
 
     return `
@@ -1333,9 +1638,7 @@ function renderTaskRowInner(task, queueIndex = 1) {
         </div>
       </div>
       <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
-        <span class="status-badge dl-task-status ${statusClass(task.status)}">
-          ${translateStatus(task.status)}
-        </span>
+        ${statusEl}
         ${verifBadge}
       </div>
       <span class="dl-size">${escapeHtml(task.totalSize || '0 B')}</span>
@@ -1371,9 +1674,6 @@ function renderTaskRowInner(task, queueIndex = 1) {
       </div>
     </div>
     <div class="dl-progress-wrap">
-      <div class="dl-progress-bar">
-        <div class="dl-progress-fill" style="width:${progress}%"></div>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <span class="dl-size">${escapeHtml(task.downloadedSize || '0 B')} / ${escapeHtml(task.totalSize || '0 B')}</span>
         <span class="dl-eta" id="eta-${escapeHtml(task.id)}">${etaText}</span>
@@ -1382,13 +1682,16 @@ function renderTaskRowInner(task, queueIndex = 1) {
     <span class="dl-progress-text">${progress.toFixed(1)}%</span>
     <div class="dl-speed-col">
       <span class="dl-speed">${escapeHtml(task.speed || '')}</span>
-      <span class="dl-error">${escapeHtml(task.error || '')}</span>
+      ${task.error ? `<span class="dl-error-badge-compact" title="${escapeHtml(task.error)}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg> Erreur</span>` : ''}
       <div class="dl-speed-limit-container" style="margin-top: 0.25rem;">
         ${limitHtml}
       </div>
     </div>
     <div class="dl-task-actions" data-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}" data-animename="${escapeHtml(animeName)}" data-episodenumber="${escapeHtml(String(epNum))}">
       ${renderTaskActions(task)}
+    </div>
+    <div class="dl-task-bottom-bar">
+      <div class="dl-task-bottom-fill ${task.status === 'PAUSED' ? 'is-paused' : (task.error ? 'is-error' : '')}" style="width:${progress}%"></div>
     </div>`;
 }
 
@@ -1464,6 +1767,12 @@ function updateTaskRow(task) {
     const fill = row.querySelector('.dl-progress-fill');
     if (fill) fill.style.width = (task.progress || 0) + '%';
 
+    const bottomFill = row.querySelector('.dl-task-bottom-fill');
+    if (bottomFill) {
+      bottomFill.style.width = (task.progress || 0) + '%';
+      bottomFill.className = 'dl-task-bottom-fill' + (task.status === 'PAUSED' ? ' is-paused' : (task.error ? ' is-error' : ''));
+    }
+
     const text = row.querySelector('.dl-progress-text');
     if (text) text.textContent = Number(task.progress || 0).toFixed(1) + '%';
 
@@ -1532,6 +1841,7 @@ function renderTaskActions(task) {
   const animeName = task.animeName || '';
   const safeAnime = animeName.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
   const epNum = (task.episodeNumber !== undefined && task.episodeNumber !== null && task.episodeNumber !== '' && String(task.episodeNumber) !== 'undefined') ? `'${task.episodeNumber}'` : 'null';
+  const isEn = getCurrentLang() === 'en';
   const upIcon = '<svg viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
   const downIcon = '<svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>';
   const pauseIcon = '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>';
@@ -1541,39 +1851,53 @@ function renderTaskActions(task) {
   const retryIcon = '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>';
   const shieldIcon = '<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>';
 
+  const tPause = isEn ? 'Pause' : 'Pause';
+  const tCancel = isEn ? 'Cancel' : 'Annuler';
+  const tResume = isEn ? 'Resume' : 'Reprendre';
+  const tUp = isEn ? 'Move to top' : 'Monter';
+  const tDown = isEn ? 'Move down' : 'Descendre';
+  const tPrioritize = isEn ? 'Prioritize series' : 'Prioriser la série';
+  const tResumeDl = isEn ? 'Resume download' : 'Reprendre le téléchargement';
+  const tRetry = isEn ? 'Redownload / Retry' : 'Re-télécharger / Réessayer';
+  const tVerify = isEn ? 'Verify integrity' : "Vérifier l'intégrité";
+  const tRemove = isEn ? 'Remove' : 'Retirer';
+  const tPlay = isEn ? 'Play' : 'Lire';
+  const tRedownloadEp = isEn ? 'Redownload this episode' : 'Re-télécharger cet épisode';
+
   if (task.status === 'DOWNLOADING' || task.status === 'RETRYING' || task.status === 'MUXING') {
-    return `<button class="btn btn-icon" title="Pause" onclick="apiPost('/api/download/${id}/pause')">${pauseIcon}</button>
-            <button class="btn btn-icon btn-danger" title="Annuler" onclick="cancelTask('${id}')">${xIcon}</button>`;
+    return `<button class="btn btn-icon" title="${tPause}" onclick="apiPost('/api/download/${id}/pause')">${pauseIcon}</button>
+            <button class="btn btn-icon btn-danger" title="${tCancel}" onclick="cancelTask('${id}')">${xIcon}</button>`;
   }
   if (task.status === 'PAUSED') {
-    return `<button class="btn btn-icon btn-primary" title="Reprendre" onclick="apiPost('/api/download/${id}/resume')">${playIcon}</button>
-            <button class="btn btn-icon btn-danger" title="Annuler" onclick="cancelTask('${id}')">${xIcon}</button>`;
+    return `<button class="btn btn-icon btn-primary" title="${tResume}" onclick="apiPost('/api/download/${id}/resume')">${playIcon}</button>
+            <button class="btn btn-icon btn-danger" title="${tCancel}" onclick="cancelTask('${id}')">${xIcon}</button>`;
   }
   if (task.status === 'PENDING' || task.status === 'SCHEDULED') {
-    return `<button class="btn btn-icon" title="Monter" onclick="moveTaskToTop('${id}')">${upIcon}</button>
-            <button class="btn btn-icon" title="Descendre" disabled>${downIcon}</button>
-            ${animeName ? `<button class="btn btn-icon" title="Prioriser la série" onclick="moveSeriesToTop(\`${safeAnime}\`)"><svg viewBox="0 0 24 24"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>` : ''}
-            <button class="btn btn-icon btn-danger" title="Annuler" onclick="cancelTask('${id}')">${xIcon}</button>`;
+    return `<button class="btn btn-icon" title="${tUp}" onclick="moveTaskToTop('${id}')">${upIcon}</button>
+            <button class="btn btn-icon" title="${tDown}" disabled>${downIcon}</button>
+            ${animeName ? `<button class="btn btn-icon" title="${tPrioritize}" onclick="moveSeriesToTop(\`${safeAnime}\`)"><svg viewBox="0 0 24 24"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg></button>` : ''}
+            <button class="btn btn-icon btn-danger" title="${tCancel}" onclick="cancelTask('${id}')">${xIcon}</button>`;
   }
   if (task.status === 'FAILED' || task.status === 'CANCELLED') {
     const hasProgress = (task.downloadedBytes && task.downloadedBytes > 0) || (task.progress && task.progress > 0);
-    return `${hasProgress ? `<button class="btn btn-icon btn-success" title="Reprendre le téléchargement" onclick="apiPost('/api/download/${id}/resume')">${playIcon}</button>` : ''}
-            <button class="btn btn-icon btn-primary" title="Re-télécharger / Réessayer" onclick="redownloadTask('${id}')">${retryIcon}</button>
-            <button class="btn btn-icon" title="Vérifier l'intégrité" onclick="verifyTask('${id}', this)">${shieldIcon}</button>
-            <button class="btn btn-icon" title="Retirer" onclick="removeTask('${id}')">${trashIcon}</button>`;
+    return `${hasProgress ? `<button class="btn btn-icon btn-success" title="${tResumeDl}" onclick="apiPost('/api/download/${id}/resume')">${playIcon}</button>` : ''}
+            <button class="btn btn-icon btn-primary" title="${tRetry}" onclick="redownloadTask('${id}')">${retryIcon}</button>
+            <button class="btn btn-icon" title="${tVerify}" onclick="verifyTask('${id}', this)">${shieldIcon}</button>
+            <button class="btn btn-icon" title="${tRemove}" onclick="removeTask('${id}')">${trashIcon}</button>`;
   }
   if (task.status === 'COMPLETED') {
     const isProblem = ['MISSING', 'CORRUPTED', 'EMPTY'].includes(task.verificationStatus);
-    return `<button class="btn btn-icon btn-primary" title="Lire" onclick="playDownloadedTask('${id}', \`${safeAnime}\`, ${epNum})">${playIcon}</button>
-            <button class="btn btn-icon" title="Vérifier l'intégrité" onclick="verifyTask('${id}', this)">${shieldIcon}</button>
-            ${isProblem ? `<button class="btn btn-icon btn-primary" title="Re-télécharger cet épisode" onclick="redownloadTask('${id}')">${retryIcon}</button>` : ''}
-            <button class="btn btn-icon" title="Retirer" onclick="removeTask('${id}')">${trashIcon}</button>`;
+    return `<button class="btn btn-icon btn-primary" title="${tPlay}" onclick="playDownloadedTask('${id}', \`${safeAnime}\`, ${epNum})">${playIcon}</button>
+            <button class="btn btn-icon" title="${tVerify}" onclick="verifyTask('${id}', this)">${shieldIcon}</button>
+            ${isProblem ? `<button class="btn btn-icon btn-primary" title="${tRedownloadEp}" onclick="redownloadTask('${id}')">${retryIcon}</button>` : ''}
+            <button class="btn btn-icon" title="${tRemove}" onclick="removeTask('${id}')">${trashIcon}</button>`;
   }
   return '';
 }
 
 function translateStatus(status) {
-  const labels = {
+  const isEn = getCurrentLang() === 'en';
+  const labelsFr = {
     PENDING: 'En attente',
     SCHEDULED: 'Planifié',
     DOWNLOADING: 'Téléchargement',
@@ -1584,6 +1908,18 @@ function translateStatus(status) {
     CANCELLED: 'Annulé',
     MUXING: 'Muxing sous-titres'
   };
+  const labelsEn = {
+    PENDING: 'Pending',
+    SCHEDULED: 'Scheduled',
+    DOWNLOADING: 'Downloading',
+    RETRYING: 'Retrying',
+    PAUSED: 'Paused',
+    COMPLETED: 'Completed',
+    FAILED: 'Failed',
+    CANCELLED: 'Cancelled',
+    MUXING: 'Muxing subtitles'
+  };
+  const labels = isEn ? labelsEn : labelsFr;
   return labels[status] || status;
 }
 
@@ -1828,14 +2164,35 @@ function setText(id, value) {
   if (el) el.textContent = value;
 }
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', action = null) {
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');
   toast.className = 'toast ' + type;
-  toast.textContent = message;
+  
+  const span = document.createElement('span');
+  span.textContent = message;
+  toast.appendChild(span);
+
+  if (action && action.text) {
+    const actBtn = document.createElement('button');
+    actBtn.type = 'button';
+    actBtn.className = 'toast-link';
+    actBtn.style.background = 'none';
+    actBtn.style.border = 'none';
+    actBtn.style.padding = '0';
+    actBtn.style.font = 'inherit';
+    actBtn.textContent = action.text;
+    actBtn.onclick = (e) => {
+      e.stopPropagation();
+      toast.remove();
+      if (typeof action.onClick === 'function') action.onClick();
+    };
+    toast.appendChild(actBtn);
+  }
+
   container.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), action ? 7000 : 4000);
 }
 
 function sanitizeFilename(name) {
@@ -2148,9 +2505,17 @@ async function playDownloadedTask(taskId, animeName, episodeNumber) {
 
 function initShortcuts() {
   document.addEventListener('keydown', (e) => {
+    // Ctrl + K ou Cmd + K : Ouvre la modale globale Command Palette
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openCommandPalette();
+      return;
+    }
+
     const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
 
     if (e.key === 'Escape') {
+      closeCommandPalette();
       closeCinemaPlayer();
       document.getElementById('settings-panel')?.classList.remove('open');
       document.querySelectorAll('.search-autocomplete-dropdown').forEach(d => d.classList.remove('open'));
@@ -2161,21 +2526,9 @@ function initShortcuts() {
 
     if (isInput) return;
 
-    // Ctrl + K ou Cmd + K : Focus recherche
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    if (e.key === '/') {
       e.preventDefault();
-      const input = document.getElementById('topbar-search-input') || document.getElementById('search-input');
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    } else if (e.key === '/' && !isInput) {
-      e.preventDefault();
-      const input = document.getElementById('topbar-search-input') || document.getElementById('search-input');
-      if (input) {
-        input.focus();
-        input.select();
-      }
+      openCommandPalette();
     } else if (e.key.toLowerCase() === 't' && !isInput) {
       const current = document.documentElement.getAttribute('data-theme') || 'dark';
       applyTheme(current === 'dark' ? 'light' : 'dark');
@@ -2185,8 +2538,82 @@ function initShortcuts() {
 }
 
 // =========================================================================
-// Autocomplétion de recherche en direct
+// Command Palette Modale Globale (Spotlight / Raycast) & Autocomplétion
 // =========================================================================
+
+const searchMemoryCache = new Map();
+
+function openCommandPalette(initialQuery) {
+  const modal = document.getElementById('command-palette-backdrop');
+  const input = document.getElementById('palette-search-input');
+  if (!modal || !input) return;
+
+  modal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+
+  if (typeof initialQuery === 'string' && initialQuery.trim().length > 0) {
+    input.value = initialQuery;
+  }
+  input.focus();
+  input.select();
+
+  const clearBtn = document.getElementById('palette-clear-btn');
+  if (clearBtn) clearBtn.style.display = input.value.trim() ? 'inline-flex' : 'none';
+
+  if (input.value.trim().length >= 2) {
+    input.dispatchEvent(new Event('input'));
+  }
+}
+
+function closeCommandPalette(event) {
+  if (event && event.target && event.target.closest('.palette-card')) return;
+  const modal = document.getElementById('command-palette-backdrop');
+  if (modal) {
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+}
+
+function clearPaletteInput() {
+  const input = document.getElementById('palette-search-input');
+  const clearBtn = document.getElementById('palette-clear-btn');
+  const emptyHint = document.getElementById('palette-empty-hint');
+  const columns = document.getElementById('palette-columns');
+  const loading = document.getElementById('palette-loading');
+  const noResults = document.getElementById('palette-no-results');
+  const countText = document.getElementById('palette-results-count');
+
+  if (input) {
+    input.value = '';
+    input.focus();
+  }
+  if (clearBtn) clearBtn.style.display = 'none';
+  if (emptyHint) emptyHint.style.display = 'flex';
+  if (columns) columns.style.display = 'none';
+  if (loading) loading.style.display = 'none';
+  if (noResults) noResults.style.display = 'none';
+  if (countText) countText.textContent = 'Prêt';
+}
+
+function setPaletteSource(source, chipBtn) {
+  const tabs = document.querySelectorAll('.palette-tab-chip');
+  tabs.forEach(t => t.classList.toggle('active', t === chipBtn));
+
+  const topSource = document.getElementById('topbar-search-source');
+  if (topSource) topSource.value = source;
+
+  const input = document.getElementById('palette-search-input');
+  if (input && input.value.trim().length >= 2) {
+    input.dispatchEvent(new Event('input'));
+  }
+}
+
+function handleTopbarSearchSubmit(event) {
+  event.preventDefault();
+  const input = document.getElementById('topbar-search-input');
+  const val = input ? input.value.trim() : '';
+  openCommandPalette(val);
+}
 
 function initSearchAutocomplete() {
   const formatProxyImage = (url) => {
@@ -2197,149 +2624,229 @@ function initSearchAutocomplete() {
     return url;
   };
 
-  const bindInput = (inputId, dropdownId, getSource) => {
-    const input = document.getElementById(inputId);
-    const dropdown = document.getElementById(dropdownId);
-    if (!input || !dropdown) return;
+  // 1. Liaison de la modale globale Command Palette
+  const bindPaletteModal = () => {
+    const input = document.getElementById('palette-search-input');
+    const clearBtn = document.getElementById('palette-clear-btn');
+    const emptyHint = document.getElementById('palette-empty-hint');
+    const loading = document.getElementById('palette-loading');
+    const columns = document.getElementById('palette-columns');
+    const listCol = document.getElementById('palette-list-col');
+    const noResults = document.getElementById('palette-no-results');
+    const countText = document.getElementById('palette-results-count');
+    if (!input || !columns || !listCol) return;
 
     let debounceTimer = null;
-    let selectedIndex = -1;
+    let selectedIndex = 0;
+    let currentResults = [];
+
+    const getActiveSource = () => {
+      const activeTab = document.querySelector('.palette-tab-chip.active');
+      return activeTab?.dataset.src || 'all';
+    };
+
+    const updatePreview = (item) => {
+      if (!item) return;
+      const previewBackdrop = document.getElementById('palette-preview-backdrop');
+      const previewPoster = document.getElementById('palette-preview-poster');
+      const previewTitle = document.getElementById('palette-preview-title');
+      const previewMeta = document.getElementById('palette-preview-meta');
+      const previewDesc = document.getElementById('palette-preview-desc');
+      const previewCta = document.getElementById('palette-preview-cta');
+
+      const imgUrl = formatProxyImage(item.imageUrl);
+      if (previewPoster) {
+        if (imgUrl) {
+          previewPoster.src = imgUrl;
+          previewPoster.style.display = 'block';
+          if (previewBackdrop) previewBackdrop.style.backgroundImage = `url('${imgUrl}')`;
+        } else {
+          previewPoster.style.display = 'none';
+          if (previewBackdrop) previewBackdrop.style.backgroundImage = 'none';
+        }
+      }
+
+      if (previewTitle) previewTitle.textContent = item.title || '';
+      if (previewDesc) previewDesc.textContent = item.synopsis || item.description || (item.episodeInfo ? `Informations : ${item.episodeInfo}` : '');
+
+      const src = item.source || getActiveSource();
+      const sourceLabel = src === 'voir-anime' ? 'VoirAnime' : (src === 'animepahe' ? 'AnimePahe' : 'French-Manga');
+
+      if (previewMeta) {
+        let metaHtml = `<span class="source-tag source-tag-${src}">${escapeHtml(sourceLabel)}</span>`;
+        if (item.version) {
+          metaHtml += `<span class="autocomplete-badge ${item.version.toUpperCase() === 'VF' ? 'autocomplete-badge-vf' : 'autocomplete-badge-vostfr'}">${escapeHtml(item.version)}</span>`;
+        }
+        if (item.type) {
+          metaHtml += `<span style="font-size:11px;color:var(--muted);">${escapeHtml(item.type)}</span>`;
+        }
+        if (item.episodeInfo) {
+          metaHtml += `<span style="font-size:11px;color:var(--muted);">${escapeHtml(item.episodeInfo)}</span>`;
+        }
+        previewMeta.innerHTML = metaHtml;
+      }
+
+      if (previewCta) {
+        previewCta.href = `/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(src)}`;
+      }
+    };
 
     const updateSelection = (items) => {
-      items.forEach((item, idx) => {
+      items.forEach((itemEl, idx) => {
         if (idx === selectedIndex) {
-          item.classList.add('selected');
-          item.scrollIntoView({ block: 'nearest' });
+          itemEl.classList.add('selected');
+          itemEl.scrollIntoView({ block: 'nearest' });
+          if (currentResults[idx]) {
+            updatePreview(currentResults[idx]);
+          }
         } else {
-          item.classList.remove('selected');
+          itemEl.classList.remove('selected');
         }
+      });
+    };
+
+    const renderPaletteModalResults = (results, source) => {
+      currentResults = results || [];
+      selectedIndex = 0;
+      if (loading) loading.style.display = 'none';
+
+      if (!results || results.length === 0) {
+        if (emptyHint) emptyHint.style.display = 'none';
+        if (columns) columns.style.display = 'none';
+        if (noResults) noResults.style.display = 'flex';
+        if (countText) countText.textContent = '0 résultat';
+        return;
+      }
+
+      if (emptyHint) emptyHint.style.display = 'none';
+      if (noResults) noResults.style.display = 'none';
+      if (columns) columns.style.display = 'grid';
+      if (countText) countText.textContent = `${results.length} résultat(s)`;
+
+      let listHtml = '';
+      results.forEach((item, idx) => {
+        const actualSource = item.source || (item.url && item.url.includes('animepahe') ? 'animepahe' : (item.url && item.url.includes('voir-anime') ? 'voir-anime' : 'french-manga'));
+        item.source = actualSource;
+        const imgUrl = formatProxyImage(item.imageUrl);
+        const posterHtml = imgUrl ? `
+          <img class="autocomplete-poster" src="${imgUrl}" alt="" loading="lazy"
+               onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+          <div class="autocomplete-poster-placeholder" style="display:none;">🎬</div>
+        ` : `
+          <div class="autocomplete-poster-placeholder">🎬</div>
+        `;
+
+        const versionBadge = item.version ? `
+          <span class="autocomplete-badge ${item.version.toUpperCase() === 'VF' ? 'autocomplete-badge-vf' : 'autocomplete-badge-vostfr'}">${escapeHtml(item.version)}</span>
+        ` : '';
+
+        const sourceLabel = actualSource === 'voir-anime' ? 'VoirAnime' : (actualSource === 'animepahe' ? 'AnimePahe' : 'French-Manga');
+
+        listHtml += `
+          <a href="/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(actualSource)}"
+             class="autocomplete-item ${idx === 0 ? 'selected' : ''}"
+             data-index="${idx}">
+            ${posterHtml}
+            <div class="autocomplete-info">
+              <div class="autocomplete-title">${escapeHtml(item.title)}</div>
+              <div class="autocomplete-sub">
+                <span class="source-tag source-tag-${actualSource}">${sourceLabel}</span>
+                ${versionBadge}
+                ${item.episodeInfo ? `<span>• ${escapeHtml(item.episodeInfo)}</span>` : ''}
+              </div>
+            </div>
+          </a>
+        `;
+      });
+
+      listCol.innerHTML = listHtml;
+      updatePreview(results[0]);
+
+      const itemEls = listCol.querySelectorAll('.autocomplete-item');
+      itemEls.forEach((el, idx) => {
+        el.addEventListener('mouseenter', () => {
+          selectedIndex = idx;
+          itemEls.forEach((it, i) => it.classList.toggle('selected', i === idx));
+          if (currentResults[idx]) updatePreview(currentResults[idx]);
+        });
       });
     };
 
     input.addEventListener('input', () => {
       clearTimeout(debounceTimer);
-      selectedIndex = -1;
       const query = input.value.trim();
+      if (clearBtn) clearBtn.style.display = query.length > 0 ? 'inline-flex' : 'none';
+
       if (query.length < 2) {
-        dropdown.innerHTML = '';
-        dropdown.classList.remove('open');
+        if (emptyHint) emptyHint.style.display = 'flex';
+        if (columns) columns.style.display = 'none';
+        if (loading) loading.style.display = 'none';
+        if (noResults) noResults.style.display = 'none';
+        if (countText) countText.textContent = 'Prêt';
         return;
       }
+
+      const source = getActiveSource();
+      const cacheKey = `${query.toLowerCase()}:${source}`;
+
+      if (searchMemoryCache.has(cacheKey)) {
+        renderPaletteModalResults(searchMemoryCache.get(cacheKey), source);
+        return;
+      }
+
+      if (emptyHint) emptyHint.style.display = 'none';
+      if (columns) columns.style.display = 'none';
+      if (noResults) noResults.style.display = 'none';
+      if (loading) loading.style.display = 'flex';
+
       debounceTimer = setTimeout(async () => {
         try {
-          const source = getSource();
           const resp = await fetch(`/api/search?q=${encodeURIComponent(query)}&source=${encodeURIComponent(source)}`);
           if (!resp.ok) return;
           const results = await resp.json();
-          if (!results || results.length === 0) {
-            dropdown.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px;text-align:center;">Aucun résultat trouvé pour "' + escapeHtml(query) + '"</div>';
-            dropdown.classList.add('open');
-            return;
-          }
-          const renderItemHtml = (item, srvSource) => {
-            const actualSource = item.source || srvSource || (item.url && (item.url.includes('animepahe') ? 'animepahe' : (item.url.includes('voir-anime') ? 'voir-anime' : 'french-manga')));
-            const imgUrl = formatProxyImage(item.imageUrl);
-            const posterHtml = imgUrl ? `
-              <img class="autocomplete-poster" src="${imgUrl}" alt="" loading="lazy"
-                   onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
-              <div class="autocomplete-poster-placeholder" style="display:none;">🎬</div>
-            ` : `
-              <div class="autocomplete-poster-placeholder">🎬</div>
-            `;
-
-            const versionBadge = item.version ? `
-              <span class="autocomplete-badge ${item.version.toUpperCase() === 'VF' ? 'autocomplete-badge-vf' : 'autocomplete-badge-vostfr'}">${escapeHtml(item.version)}</span>
-            ` : '';
-
-            return `
-              <a href="/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(actualSource)}" class="autocomplete-item">
-                ${posterHtml}
-                <div class="autocomplete-info">
-                  <div class="autocomplete-title">${escapeHtml(item.title)}</div>
-                  <div class="autocomplete-sub">
-                    <span>${escapeHtml(item.type || 'Anime')}</span>
-                    ${versionBadge}
-                    ${item.episodeInfo ? `<span>• ${escapeHtml(item.episodeInfo)}</span>` : ''}
-                  </div>
-                </div>
-              </a>
-            `;
-          };
-
-          if (source === 'all') {
-            const fmList = results.filter(i => (i.source === 'french-manga' || (!i.source && !i.url.includes('voir-anime') && !i.url.includes('animepahe'))));
-            const vaList = results.filter(i => (i.source === 'voir-anime' || (!i.source && i.url.includes('voir-anime'))));
-            const apList = results.filter(i => (i.source === 'animepahe' || (!i.source && i.url.includes('animepahe'))));
-
-            let groupedHtml = '';
-            if (fmList.length > 0) {
-              groupedHtml += `<div class="autocomplete-group-header source-french-manga"><span>French-Manga</span> <small>(${fmList.length})</small></div>`;
-              groupedHtml += fmList.slice(0, 4).map(i => renderItemHtml(i, 'french-manga')).join('');
-            }
-            if (vaList.length > 0) {
-              groupedHtml += `<div class="autocomplete-group-header source-voir-anime"><span>VoirAnime</span> <small>(${vaList.length})</small></div>`;
-              groupedHtml += vaList.slice(0, 4).map(i => renderItemHtml(i, 'voir-anime')).join('');
-            }
-            if (apList.length > 0) {
-              groupedHtml += `<div class="autocomplete-group-header source-animepahe" style="background:rgba(225,29,72,0.15);color:#f43f5e;border-left:3px solid #e11d48;padding:6px 12px;font-weight:700;font-size:0.75rem;text-transform:uppercase;"><span>AnimePahe</span> <small>(${apList.length})</small></div>`;
-              groupedHtml += apList.slice(0, 4).map(i => renderItemHtml(i, 'animepahe')).join('');
-            }
-            dropdown.innerHTML = groupedHtml || '<div style="padding:16px;color:var(--muted);font-size:13px;text-align:center;">Aucun résultat</div>';
-          } else {
-            dropdown.innerHTML = results.slice(0, 6).map(item => renderItemHtml(item, source)).join('');
-          }
-          dropdown.classList.add('open');
-        } catch (e) {}
-      }, 220);
+          searchMemoryCache.set(cacheKey, results || []);
+          renderPaletteModalResults(results || [], source);
+        } catch (e) {
+          if (loading) loading.style.display = 'none';
+        }
+      }, 300);
     });
 
     input.addEventListener('keydown', (e) => {
-      if (!dropdown.classList.contains('open')) return;
-      const items = Array.from(dropdown.querySelectorAll('.autocomplete-item'));
-      if (items.length === 0) return;
-
+      const items = Array.from(listCol.querySelectorAll('.autocomplete-item'));
       if (e.key === 'ArrowDown') {
+        if (items.length === 0) return;
         e.preventDefault();
         selectedIndex = (selectedIndex + 1) % items.length;
         updateSelection(items);
       } else if (e.key === 'ArrowUp') {
+        if (items.length === 0) return;
         e.preventDefault();
         selectedIndex = (selectedIndex - 1 + items.length) % items.length;
         updateSelection(items);
-      } else if (e.key === 'Enter' && selectedIndex >= 0 && items[selectedIndex]) {
-        e.preventDefault();
-        items[selectedIndex].click();
+      } else if (e.key === 'Enter') {
+        if (items.length > 0 && selectedIndex >= 0 && items[selectedIndex]) {
+          e.preventDefault();
+          items[selectedIndex].click();
+        }
       } else if (e.key === 'Escape') {
-        dropdown.classList.remove('open');
-      }
-    });
-
-    document.addEventListener('click', (e) => {
-      if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-        dropdown.classList.remove('open');
+        closeCommandPalette();
       }
     });
   };
 
-  bindInput('topbar-search-input', 'topbar-search-dropdown', () => {
-    return document.getElementById('topbar-search-source')?.value || 'all';
-  });
+  bindPaletteModal();
 
-  bindInput('search-input', 'hero-search-dropdown', () => {
-    const checkedRadio = document.querySelector('input[name="source"]:checked');
-    return checkedRadio?.value || 'french-manga';
-  });
-
-  // Synchronisation dynamique du changement de source
+  // 2. Synchronisation dynamique du changement de source
   document.querySelectorAll('input[name="source"]').forEach(radio => {
     radio.addEventListener('change', (e) => {
       const topbarSource = document.getElementById('topbar-search-source');
       if (topbarSource) topbarSource.value = e.target.value;
 
-      // Si du texte est déjà saisi, relancer instantanément l'autocomplétion
-      const heroInput = document.getElementById('search-input');
-      if (heroInput && heroInput.value.trim().length >= 2) {
-        heroInput.dispatchEvent(new Event('input'));
+      const paletteChip = document.querySelector(`.palette-tab-chip[data-src="${e.target.value}"]`);
+      if (paletteChip) {
+        document.querySelectorAll('.palette-tab-chip').forEach(t => t.classList.remove('active'));
+        paletteChip.classList.add('active');
       }
     });
   });
@@ -2873,13 +3380,16 @@ function updateTachiyomiFab() {
   fab.style.display = 'inline-flex';
 
   // Trouver le premier épisode non vu
+  const isEn = getCurrentLang() === 'en';
   const firstUnwatched = rows.find(r => !r.classList.contains('ep-watched'));
   if (firstUnwatched) {
     const num = firstUnwatched.dataset.num;
-    fabText.textContent = (num === '1' || rows.length === 1) ? 'Commencer' : `Reprendre (Ep. ${num})`;
+    const startTxt = isEn ? 'Start' : 'Commencer';
+    const resumeTxt = isEn ? `Resume (Ep. ${num})` : `Reprendre (Ep. ${num})`;
+    fabText.textContent = (num === '1' || rows.length === 1) ? startTxt : resumeTxt;
     fab.dataset.targetNum = num;
   } else {
-    fabText.textContent = 'Revoir (Ep. 1)';
+    fabText.textContent = isEn ? 'Rewatch (Ep. 1)' : 'Revoir (Ep. 1)';
     fab.dataset.targetNum = rows[0].dataset.num;
   }
 }
@@ -2906,7 +3416,11 @@ async function markAllEpisodes(watched) {
   });
 
   updateTachiyomiFab();
-  showToast(watched ? 'Tous les épisodes ont été marqués comme vus' : 'Tous les épisodes ont été marqués comme non vus', 'info');
+  const isEn = getCurrentLang() === 'en';
+  const msg = watched
+    ? (isEn ? 'All episodes marked as watched' : 'Tous les épisodes ont été marqués comme vus')
+    : (isEn ? 'All episodes marked as unwatched' : 'Tous les épisodes ont été marqués comme non vus');
+  showToast(msg, 'info');
 
   const overflow = document.getElementById('tachiyomi-overflow-menu');
   if (overflow) overflow.classList.remove('show');
@@ -2917,4 +3431,227 @@ document.addEventListener('DOMContentLoaded', () => {
     updateTachiyomiFab();
   }
 });
+
+// =============================================================================
+// TELEGRAM-STYLE OFFLINE PROXY DETECTOR & PROMPT
+// =============================================================================
+
+const TELEGRAM_OFFLINE_STRINGS = {
+  fr: {
+    waiting: "En attente du réseau...",
+    prompt: "Connexion interrompue. Se connecter via un proxy ?",
+    btn_enable: "Activer le proxy",
+    btn_configure: "Configurer un proxy",
+    btn_settings: "Paramètres",
+    reconnected: "Connecté !",
+    dismiss: "Ignorer",
+    enabling: "Activation...",
+    enabled: "Proxy activé !"
+  },
+  en: {
+    waiting: "Waiting for network...",
+    prompt: "Connection lost. Connect via proxy?",
+    btn_enable: "Enable proxy",
+    btn_configure: "Configure proxy",
+    btn_settings: "Settings",
+    reconnected: "Connected!",
+    dismiss: "Dismiss",
+    enabling: "Enabling...",
+    enabled: "Proxy enabled!"
+  }
+};
+
+function getTgOfflineText(key) {
+  const lang = (typeof getCurrentLang === 'function') ? getCurrentLang() : 'fr';
+  return TELEGRAM_OFFLINE_STRINGS[lang]?.[key] || TELEGRAM_OFFLINE_STRINGS.fr[key] || '';
+}
+
+function initTelegramOfflineDetector() {
+  let isOffline = !navigator.onLine;
+  let banner = document.getElementById('telegram-offline-banner');
+
+  function createBanner() {
+    if (banner) return banner;
+    banner = document.createElement('aside');
+    banner.id = 'telegram-offline-banner';
+    banner.className = 'tg-offline-banner';
+    banner.setAttribute('role', 'status');
+    banner.setAttribute('aria-live', 'polite');
+    banner.innerHTML = `
+      <div class="tg-indicator-icon" id="tg-indicator-icon">
+        <svg id="tg-status-icon-offline" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="1" y1="1" x2="23" y2="23"/>
+          <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/>
+          <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/>
+          <path d="M10.71 5.05A16 16 0 0 1 22.58 9"/>
+          <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/>
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+          <line x1="12" y1="20" x2="12.01" y2="20"/>
+        </svg>
+        <svg id="tg-status-icon-online" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+      </div>
+      <div class="tg-offline-text">
+        <div class="tg-offline-title" id="tg-offline-title">${getTgOfflineText('waiting')}</div>
+        <div class="tg-offline-sub" id="tg-offline-sub">${getTgOfflineText('prompt')}</div>
+      </div>
+      <div class="tg-offline-actions" id="tg-offline-actions"></div>
+    `;
+    document.body.appendChild(banner);
+    return banner;
+  }
+
+  async function updateBannerActions() {
+    const actionsEl = document.getElementById('tg-offline-actions');
+    if (!actionsEl) return;
+
+    let proxy = null;
+    try {
+      const r = await fetch('/api/proxy/settings');
+      if (r.ok) proxy = await r.json();
+    } catch (_) {}
+
+    const hasHost = !!(proxy && proxy.host && String(proxy.host).trim());
+    const isProxyEnabled = !!(proxy && proxy.enabled);
+
+    if (hasHost && !isProxyEnabled) {
+      actionsEl.innerHTML = `
+        <button type="button" class="tg-action-btn-primary" id="tg-enable-proxy-btn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/>
+            <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>
+          </svg>
+          <span>${getTgOfflineText('btn_enable')}</span>
+        </button>
+        <a href="/settings#proxy" class="tg-action-btn-subtle" title="${getTgOfflineText('btn_settings')}">
+          ${getTgOfflineText('btn_settings')}
+        </a>
+        <button type="button" class="tg-action-btn-close" id="tg-dismiss-btn" aria-label="${getTgOfflineText('dismiss')}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      `;
+
+      document.getElementById('tg-enable-proxy-btn')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const textSpan = btn.querySelector('span');
+        btn.disabled = true;
+        if (textSpan) textSpan.textContent = getTgOfflineText('enabling');
+        try {
+          const resp = await fetch('/api/proxy/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled: true })
+          });
+          const res = await resp.json();
+          if (res.success) {
+            if (typeof showToast === 'function') showToast(getTgOfflineText('enabled'), 'success');
+            // Tester la connectivité via le proxy
+            fetch('/api/proxy/test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({})
+            }).then(r => r.json()).then(tRes => {
+              if (tRes.success) {
+                setOnlineState();
+              }
+            }).catch(() => {});
+          }
+        } catch (err) {
+          if (typeof showToast === 'function') showToast(`Erreur: ${err.message}`, 'error');
+        } finally {
+          btn.disabled = false;
+          if (textSpan) textSpan.textContent = getTgOfflineText('btn_enable');
+        }
+      });
+    } else {
+      actionsEl.innerHTML = `
+        <a href="/settings#proxy" class="tg-action-btn-primary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/>
+            <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>
+          </svg>
+          <span>${getTgOfflineText('btn_configure')}</span>
+        </a>
+        <button type="button" class="tg-action-btn-close" id="tg-dismiss-btn" aria-label="${getTgOfflineText('dismiss')}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      `;
+    }
+
+    document.getElementById('tg-dismiss-btn')?.addEventListener('click', () => {
+      sessionStorage.setItem('animan_offline_dismissed', '1');
+      banner?.classList.remove('show');
+    });
+  }
+
+  function setOfflineState() {
+    isOffline = true;
+    if (sessionStorage.getItem('animan_offline_dismissed') === '1') return;
+
+    createBanner();
+    banner.classList.remove('connected');
+    const offIcon = document.getElementById('tg-status-icon-offline');
+    const onIcon = document.getElementById('tg-status-icon-online');
+    if (offIcon) offIcon.style.display = '';
+    if (onIcon) onIcon.style.display = 'none';
+
+    const titleEl = document.getElementById('tg-offline-title');
+    const subEl = document.getElementById('tg-offline-sub');
+    if (titleEl) titleEl.textContent = getTgOfflineText('waiting');
+    if (subEl) {
+      subEl.textContent = getTgOfflineText('prompt');
+      subEl.style.display = '';
+    }
+
+    updateBannerActions();
+    banner.classList.add('show');
+  }
+
+  function setOnlineState() {
+    isOffline = false;
+    sessionStorage.removeItem('animan_offline_dismissed');
+    if (!banner || !banner.classList.contains('show')) return;
+
+    banner.classList.add('connected');
+    const offIcon = document.getElementById('tg-status-icon-offline');
+    const onIcon = document.getElementById('tg-status-icon-online');
+    if (offIcon) offIcon.style.display = 'none';
+    if (onIcon) onIcon.style.display = '';
+
+    const titleEl = document.getElementById('tg-offline-title');
+    const subEl = document.getElementById('tg-offline-sub');
+    if (titleEl) titleEl.textContent = getTgOfflineText('reconnected');
+    if (subEl) subEl.style.display = 'none';
+
+    const actionsEl = document.getElementById('tg-offline-actions');
+    if (actionsEl) actionsEl.innerHTML = '';
+
+    setTimeout(() => {
+      banner.classList.remove('show');
+      setTimeout(() => {
+        banner.classList.remove('connected');
+      }, 400);
+    }, 2200);
+  }
+
+  window.addEventListener('offline', setOfflineState);
+  window.addEventListener('online', setOnlineState);
+
+  // Hook global pour simuler / tester en direct
+  window.__simulateOffline = (offline) => {
+    if (offline) {
+      sessionStorage.removeItem('animan_offline_dismissed');
+      setOfflineState();
+    } else {
+      setOnlineState();
+    }
+  };
+
+  if (!navigator.onLine) {
+    setOfflineState();
+  }
+}
+
+window.initTelegramOfflineDetector = initTelegramOfflineDetector;
 
