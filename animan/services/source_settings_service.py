@@ -1,26 +1,29 @@
+from contextlib import contextmanager
 import json
 import logging
 import sqlite3
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional, List
 from animan.config import settings
 
-logger = logging.getLogger("animan.sources")
+logger = logging.getLogger("animan.source_settings")
 
 
 class SourceSettingsService:
-    """Service de gestion et de persistance des configurations par source d'anime.
-    Prend en charge les sources natives d'Animan (voir-anime, animepahe, french-manga)
-    ainsi que l'ensemble des sources/extensions importées (conteneurs Aniyomi).
-    """
+    """Service de gestion de la persistance des configurations spécifiques par source."""
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or settings.DATABASE_PATH
         self._init_db()
 
-    def _get_conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_conn(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
         """Crée la table source_settings si elle n'existe pas encore."""
@@ -38,6 +41,16 @@ class SourceSettingsService:
         except Exception as e:
             logger.error("[source_settings] Erreur initialisation table: %s", e)
 
+    def _get_default_settings(self, source_id: str) -> Dict[str, Any]:
+        """Retourne les paramètres par défaut pour une source donnée."""
+        sid = (source_id or "").strip().lower()
+        if sid in ["voir-anime", "voiranime"]:
+            return {
+                "quality_strategy": "highest",  # "highest" ou "lowest"
+                "default_server": "auto",
+            }
+        return {}
+
     def get_source_settings(self, source_id: str) -> Dict[str, Any]:
         """Retourne les paramètres enregistrés pour une source spécifique."""
         sid = (source_id or "").strip().lower()
@@ -54,13 +67,7 @@ class SourceSettingsService:
         except Exception as e:
             logger.debug("[source_settings] Erreur lecture settings pour %s: %s", sid, e)
 
-        # Paramètres par défaut selon la source
-        if sid in ["voir-anime", "voiranime"]:
-            return {
-                "quality_strategy": "highest",  # "highest" ou "lowest"
-                "default_server": "auto",
-            }
-        return {}
+        return self._get_default_settings(sid)
 
     def save_source_settings(self, source_id: str, new_settings: Dict[str, Any]) -> Dict[str, Any]:
         """Enregistre ou met à jour les paramètres d'une source."""
@@ -129,8 +136,23 @@ class SourceSettingsService:
             },
         ]
 
+        all_settings: Dict[str, Dict[str, Any]] = {}
+        try:
+            with self._get_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT source_id, settings_json FROM source_settings;")
+                for row in cursor.fetchall():
+                    if row["settings_json"]:
+                        try:
+                            all_settings[row["source_id"].lower()] = json.loads(row["settings_json"])
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.debug("[source_settings] Impossible de charger les paramètres de sources: %s", e)
+
         for s in native_sources:
-            s["settings"] = self.get_source_settings(s["id"])
+            sid = s["id"].lower()
+            s["settings"] = all_settings.get(sid, self._get_default_settings(sid))
             sources_list.append(s)
 
         # 2. Extensions Aniyomi importées
@@ -146,6 +168,7 @@ class SourceSettingsService:
                 for r in rows:
                     ext = dict(r)
                     ext_id = ext["pkg"]
+                    sid_lower = ext_id.lower()
                     sources_list.append({
                         "id": ext_id,
                         "name": ext["name"],
@@ -158,7 +181,7 @@ class SourceSettingsService:
                         "isEnabled": bool(ext["is_enabled"]),
                         "description": f"Extension Aniyomi importée ({ext['pkg']}).",
                         "has_custom_settings": False,
-                        "settings": self.get_source_settings(ext_id),
+                        "settings": all_settings.get(sid_lower, self._get_default_settings(sid_lower)),
                     })
         except Exception as e:
             logger.debug("[source_settings] Impossible de lister les extensions importées: %s", e)

@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import contextmanager
 import json
 import logging
 import os
@@ -31,10 +32,15 @@ class ExtensionService:
         self._init_db()
         self._load_enabled_sources()
 
-    def _get_conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_conn(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
         """Initialise les tables de dépôts et d'extensions dans SQLite."""
