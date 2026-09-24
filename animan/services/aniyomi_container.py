@@ -14,37 +14,11 @@ from animan.services.proxy_service import proxy_service
 
 logger = logging.getLogger("animan.container")
 
-_hanime_catalog_cache: List[Dict[str, Any]] = []
-_hanime_catalog_time: float = 0.0
+from animan.services.container_adapters import adapter_registry
+from animan.services.container_adapters.hanime_adapter import get_hanime_catalog
+from animan.services.extractors import extractor_registry
 
-async def _get_hanime_catalog() -> List[Dict[str, Any]]:
-    global _hanime_catalog_cache, _hanime_catalog_time
-    now = asyncio.get_event_loop().time()
-    if _hanime_catalog_cache and (now - _hanime_catalog_time) < 3600:
-        return _hanime_catalog_cache
-
-    url = "https://guest.freeanimehentai.net/api/v11/search_hvs"
-    headers = {
-        "User-Agent": settings.DEFAULT_USER_AGENT,
-        "Accept": "application/json, text/plain, */*",
-        "Origin": "https://hanime.tv",
-        "Referer": "https://hanime.tv/",
-    }
-    proxy = proxy_service.get_active_proxy()
-    try:
-        async with httpx.AsyncClient(timeout=12.0, verify=settings.SSL_VERIFY, proxy=proxy) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                items = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-                if items:
-                    _hanime_catalog_cache = items
-                    _hanime_catalog_time = now
-                    return _hanime_catalog_cache
-    except Exception as e:
-        logger.warning("Erreur lors de la récupération du catalogue Hanime: %s", e)
-
-    return _hanime_catalog_cache
+_get_hanime_catalog = get_hanime_catalog
 
 
 def _clean_selector(sel: Optional[str]) -> str:
@@ -162,37 +136,10 @@ class AniyomiContainerSource:
         if not clean_q or not self.base_url:
             return []
 
-        # Support spécifique Hanime.tv via API de catalogue Astro
-        if "hanime" in (self.pkg or "").lower() or "hanime" in self.base_url.lower():
-            catalog = await _get_hanime_catalog()
-            q_lower = clean_q.lower()
-            results: List[AnimeResult] = []
-            for item in catalog:
-                name = item.get("name", "")
-                slug = item.get("slug", "")
-                search_titles = str(item.get("search_titles", ""))
-                tags = [str(t).lower() for t in item.get("tags", [])]
-                if (q_lower in name.lower() or
-                    q_lower in slug.lower() or
-                    q_lower in search_titles.lower() or
-                    any(q_lower == t for t in tags)):
-                    img_url = item.get("poster_url") or item.get("cover_url", "")
-                    results.append(
-                        AnimeResult(
-                            id=str(item.get("id")) if item.get("id") else str(hash(slug))[-8:],
-                            title=name,
-                            imageUrl=img_url,
-                            url=f"https://hanime.tv/videos/hentai/{slug}",
-                            version="EN",
-                            type="Anime",
-                            episodeInfo=item.get("brand") or self.name,
-                            source=self.source_id,
-                        )
-                    )
-                    if len(results) >= 50:
-                        break
-            logger.info("[container:%s] Hanime search: trouvé %d résultat(s)", self.name, len(results))
-            return results
+        # Délégation aux adaptateurs d'architecture/API spécifique (Hanime, Anime-Sama, etc.)
+        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
+        if adapter:
+            return await adapter.search_anime(clean_q, self)
 
         logger.info("[container:%s] Recherche: '%s'", self.name, clean_q)
         results: List[AnimeResult] = []
@@ -297,26 +244,10 @@ class AniyomiContainerSource:
         if not self.base_url:
             return []
 
-        # Support spécifique Hanime.tv
-        if "hanime" in (self.pkg or "").lower() or "hanime" in self.base_url.lower():
-            catalog = await _get_hanime_catalog()
-            sorted_items = sorted(catalog, key=lambda x: x.get("created_at_unix", 0) or x.get("released_at_unix", 0), reverse=True)
-            results = []
-            for item in sorted_items[:24]:
-                slug = item.get("slug", "")
-                results.append(
-                    AnimeResult(
-                        id=str(item.get("id")) if item.get("id") else str(hash(slug))[-8:],
-                        title=item.get("name", "Sans titre"),
-                        imageUrl=item.get("poster_url") or item.get("cover_url", ""),
-                        url=f"https://hanime.tv/videos/hentai/{slug}",
-                        version="EN",
-                        type="Anime",
-                        episodeInfo="Récents",
-                        source=self.source_id,
-                    )
-                )
-            return results
+        # Délégation aux adaptateurs d'architecture/API spécifique
+        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
+        if adapter:
+            return await adapter.get_latest_releases(self)
 
         rel_path = self.recipe.latest_request_path or self.recipe.popular_request_path or "/"
         target_url = urljoin(self.base_url, rel_path)
@@ -362,44 +293,10 @@ class AniyomiContainerSource:
         if not is_safe_url(anime_url):
             return None
 
-        # Support spécifique Hanime.tv
-        if "hanime" in (self.pkg or "").lower() or "hanime" in self.base_url.lower():
-            catalog = await _get_hanime_catalog()
-            slug = anime_url.rstrip("/").split("/")[-1]
-            found_item = None
-            for item in catalog:
-                if item.get("slug") == slug:
-                    found_item = item
-                    break
-            if found_item:
-                title = found_item.get("name", "Anime")
-                img_url = found_item.get("poster_url") or found_item.get("cover_url", "")
-                raw_desc = found_item.get("description", "")
-                desc = re.sub(r'<[^>]+>', '', raw_desc).strip()
-                genres = found_item.get("tags", [])
-                episodes = [
-                    Episode(
-                        number=1,
-                        title=title,
-                        url=anime_url,
-                        downloadPageUrl=anime_url,
-                        playerUrl=anime_url,
-                        thumbnailUrl=img_url,
-                        version="EN",
-                        animeId=str(found_item.get("id", ""))[-8:],
-                    )
-                ]
-                return AnimeDetail(
-                    id=str(found_item.get("id", hash(anime_url)))[-8:],
-                    title=title,
-                    imageUrl=img_url,
-                    synopsis=desc,
-                    genres=genres[:6] if isinstance(genres, list) else [],
-                    episodes=episodes,
-                    source=self.source_id,
-                    url=anime_url,
-                    version="EN",
-                )
+        # Délégation aux adaptateurs d'architecture/API spécifique
+        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
+        if adapter:
+            return await adapter.get_anime_detail(anime_url, self)
 
         html = await self._fetch_html(anime_url)
         if not html:
@@ -528,32 +425,23 @@ class AniyomiContainerSource:
         if not is_safe_url(play_url):
             return []
 
-        # Si l'URL de lecture est déjà un lien d'intégration vidéo direct (Vidmoly, Sibnet, Sendvid, Uqload, Streamtape, VOE, etc.)
-        domain = urlparse(play_url).netloc.lower()
-        known_embed_hosts = {
-            "ansembed": "Vidmoly",
-            "vidmoly": "Vidmoly",
-            "sibnet": "Sibnet",
-            "sendvid": "Sendvid",
-            "uqload": "Uqload",
-            "streamtape": "Streamtape",
-            "stape": "Streamtape",
-            "voe": "VOE",
-            "myvi": "Myvi",
-            "mp4upload": "Mp4Upload",
-            "dood": "Doodstream",
-            "filemoon": "Filemoon",
-            "kwik": "Kwik",
-        }
-        for k_domain, s_name in known_embed_hosts.items():
-            if k_domain in domain:
-                return [{
-                    "name": f"{self.name} - {s_name}",
-                    "server": s_name,
-                    "url": play_url,
-                    "quality": "HD",
-                    "format": "embed",
-                }]
+        # 1. Vérifier si un adaptateur personnalisé gère cette source
+        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
+        if adapter:
+            adapter_sources = await adapter.get_episode_sources(play_url, self)
+            if adapter_sources:
+                return adapter_sources
+
+        # 2. Si l'URL de lecture est déjà un lien d'intégration vidéo direct via le hub d'extracteurs
+        matched_ext = extractor_registry.find_extractor(play_url)
+        if matched_ext:
+            return [{
+                "name": f"{self.name} - {matched_ext.name}",
+                "server": matched_ext.name,
+                "url": play_url,
+                "quality": "HD",
+                "format": "embed",
+            }]
 
         html = await self._fetch_html(play_url)
         if not html:
