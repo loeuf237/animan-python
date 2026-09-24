@@ -161,6 +161,30 @@ app.include_router(extensions_router)
 app.include_router(sources_router)
 app.include_router(i18n_router)
 
+_embedded_server = None
+
+def start_embedded_server(host: str = "127.0.0.1", port: int = 8080):
+    """Point d'entrée pour les environnements embarqués (Android / Chaquopy, etc.)."""
+    global _embedded_server
+    import uvicorn
+    logger.info("Démarrage du serveur embarqué Animan sur %s:%d...", host, port)
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        loop="asyncio",
+        timeout_keep_alive=30,
+    )
+    _embedded_server = uvicorn.Server(config)
+    _embedded_server.run()
+
+def stop_embedded_server():
+    """Arrête proprement le serveur embarqué Uvicorn."""
+    global _embedded_server
+    if _embedded_server is not None:
+        _embedded_server.should_exit = True
+
 if __name__ == "__main__":
     import os
     reload_enabled = os.getenv("ANIMAN_RELOAD", "true").lower() in ("1", "true", "yes")
@@ -174,4 +198,5 @@ if __name__ == "__main__":
         reload_dirs=["animan"] if reload_enabled else None,
         timeout_keep_alive=30,
     )
+
 

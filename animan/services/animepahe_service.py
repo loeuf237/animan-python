@@ -10,7 +10,10 @@ import sqlite3
 from pathlib import Path
 from bs4 import BeautifulSoup
 import httpx
-from curl_cffi.requests import AsyncSession
+try:
+    from curl_cffi.requests import AsyncSession
+except ImportError:
+    AsyncSession = None
 
 from animan.config import settings
 from animan.models.anime import AnimeResult, AnimeDetail, Episode

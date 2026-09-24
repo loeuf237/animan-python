@@ -1,6 +1,13 @@
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
+if not hasattr(BaseModel, "model_dump"):
+    setattr(BaseModel, "model_dump", lambda self, **kwargs: self.dict(**kwargs))
+if not hasattr(BaseModel, "model_dump_json"):
+    setattr(BaseModel, "model_dump_json", lambda self, **kwargs: self.json(**kwargs))
+if not hasattr(BaseModel, "model_validate"):
+    setattr(BaseModel, "model_validate", classmethod(lambda cls, obj, **kwargs: cls.parse_obj(obj)))
+
 class Episode(BaseModel):
     number: int
     title: str

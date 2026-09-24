@@ -46,3 +46,21 @@ def get_enabled_extensions_helper():
         return []
 
 templates.env.globals["get_enabled_extensions"] = get_enabled_extensions_helper
+
+_orig_template_response = templates.TemplateResponse
+
+def _compatible_template_response(name=None, context=None, *args, **kwargs):
+    req = kwargs.pop("request", None)
+    template_name = name or kwargs.pop("name", None)
+    ctx = dict(context) if context is not None else dict(kwargs.pop("context", {}))
+    if req is not None and "request" not in ctx:
+        ctx["request"] = req
+    try:
+        if req is not None:
+            return _orig_template_response(request=req, name=template_name, context=ctx, *args, **kwargs)
+        else:
+            return _orig_template_response(template_name, ctx, *args, **kwargs)
+    except TypeError:
+        return _orig_template_response(template_name, ctx, *args, **kwargs)
+
+templates.TemplateResponse = _compatible_template_response

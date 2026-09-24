@@ -15,11 +15,14 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.animan.app.databinding.ActivityMainBinding
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.*
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.URL
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,7 +43,12 @@ class MainActivity : AppCompatActivity() {
         setupUI()
 
         val savedUrl = getSavedServerUrl()
-        connectWithProbe(savedUrl)
+        if (savedUrl.contains("127.0.0.1") || savedUrl.contains("localhost")) {
+            startEmbeddedPythonServer()
+            connectWithProbe(savedUrl, maxRetries = 15)
+        } else {
+            connectWithProbe(savedUrl, maxRetries = 3)
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -176,15 +184,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun connectWithProbe(url: String) {
+    private fun startEmbeddedPythonServer() {
+        thread(isDaemon = true, name = "AnimanEmbeddedServer") {
+            try {
+                if (!Python.isStarted()) {
+                    Python.start(AndroidPlatform(applicationContext))
+                }
+                val py = Python.getInstance()
+                val runModule = py.getModule("run")
+                runModule.callAttr("start_embedded_server", "127.0.0.1", 8080)
+            } catch (e: Exception) {
+                android.util.Log.e("AnimanApp", "Erreur serveur Python embarqué: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun connectWithProbe(url: String, maxRetries: Int = 15) {
         probeJob?.cancel()
         binding.errorLayout.visibility = View.GONE
         binding.loadingLayout.visibility = View.VISIBLE
-        binding.txtLoadingStatus.text = "Connexion à $url..."
+        binding.txtLoadingStatus.text = if (url.contains("127.0.0.1") || url.contains("localhost")) {
+            "Démarrage du serveur local Animan..."
+        } else {
+            "Connexion à $url..."
+        }
 
         probeJob = lifecycleScope.launch {
-            val isReachable = withContext(Dispatchers.IO) {
-                testHttpReachability(url, timeoutMs = 2000)
+            var isReachable = false
+            for (attempt in 1..maxRetries) {
+                isReachable = withContext(Dispatchers.IO) {
+                    testHttpReachability(url, timeoutMs = 800)
+                }
+                if (isReachable) break
+                if (attempt < maxRetries) {
+                    delay(700)
+                }
             }
 
             if (isReachable) {
@@ -313,7 +347,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun getSavedServerUrl(): String {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_SERVER_URL, "http://localhost:8080") ?: "http://localhost:8080"
+        return prefs.getString(KEY_SERVER_URL, "http://127.0.0.1:8080") ?: "http://127.0.0.1:8080"
     }
 
     private fun saveServerUrl(url: String) {

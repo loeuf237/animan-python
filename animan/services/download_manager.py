@@ -2354,7 +2354,8 @@ class DownloadManagerService:
                 try:
                     ext = ".srt" if ".srt" in url else ".ass" if ".ass" in url else ".vtt"
                     clean_lbl = re.sub(r'[<>:"/\\|?*]', "_", label)
-                    sub_name = f"{re.sub(r'\.(mp4|mkv|avi)$', '', task.fileName)}.{clean_lbl}{ext}"
+                    base_filename = re.sub(r'\.(mp4|mkv|avi)$', '', task.fileName)
+                    sub_name = f"{base_filename}.{clean_lbl}{ext}"
                     sub_path = str(Path(task.savePath).parent / sub_name)
 
                     resp = await client.get(url)

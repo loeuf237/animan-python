@@ -74,6 +74,7 @@ CONVERSATION_HISTORY.md
 android/.gradle/
 android/build/
 android/app/build/
+android/app/src/main/python/
 android/local.properties
 *.apk
 *.aab
