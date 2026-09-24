@@ -3,7 +3,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{{ title }} - Animan</title>
-  <link rel="stylesheet" href="/css/style.css?v=2.8"/>
+  <link rel="stylesheet" href="/css/style.css?v=2.9"/>
   <link rel="icon" type="image/png" href="/img/favicon.png"/>
   <link rel="apple-touch-icon" href="/img/icon-192.png"/>
   <link rel="manifest" href="/manifest.json"/>
@@ -59,6 +59,10 @@
   </aside>
 
   <header class="app-topbar">
+    <a href="/" class="brand-mark-mobile" aria-label="Animan">
+      <img src="/img/icon-192.png" alt="Animan Logo" class="brand-logo-img"/>
+    </a>
+
     <div class="top-search search-input-wrap">
       <form action="/search" method="get" id="topbar-search-form" style="display:flex;width:100%;position:relative;" onsubmit="handleTopbarSearchSubmit(event)">
         <input type="hidden" name="source" value="{{ source or 'all' }}" id="topbar-search-source"/>

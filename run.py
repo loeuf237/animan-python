@@ -46,7 +46,15 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(voiranime_service._safe_refresh_cache())
     asyncio.create_task(animepahe_service._safe_refresh_cache())
 
-    logger.info("Application ready at http://%s:%d", settings.HOST, settings.PORT)
+    import socket
+    lan_ip = "127.0.0.1"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            lan_ip = s.getsockname()[0]
+    except Exception:
+        pass
+    logger.info("Application ready at http://localhost:%d and http://%s:%d (LAN / Mobile)", settings.PORT, lan_ip, settings.PORT)
     yield
 
     logger.info("Stopping Animan...")
@@ -96,7 +104,8 @@ async def security_headers_and_csrf_middleware(request: Request, call_next):
                 from urllib.parse import urlparse
                 parsed_source = urlparse(source_url)
                 source_host = (parsed_source.hostname or "").lower()
-                allowed_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "testserver", settings.HOST.lower()}
+                request_host = (request.url.hostname or "").lower()
+                allowed_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "testserver", settings.HOST.lower(), request_host}
                 if source_host and source_host not in allowed_hosts:
                     logger.warning("CSRF blocked: Origin '%s' rejected for %s %s", source_url, request.method, request.url.path)
                     return JSONResponse(status_code=403, content={"error": "Forbidden origin (CSRF blocked)"})
@@ -155,9 +164,10 @@ app.include_router(i18n_router)
 if __name__ == "__main__":
     import os
     reload_enabled = os.getenv("ANIMAN_RELOAD", "true").lower() in ("1", "true", "yes")
+    bind_host = os.getenv("ANIMAN_HOST", "0.0.0.0")
     uvicorn.run(
         "run:app" if reload_enabled else app,
-        host=settings.HOST,
+        host=bind_host,
         port=settings.PORT,
         log_level="info",
         reload=reload_enabled,

@@ -13,7 +13,13 @@ import android.view.View
 import android.webkit.*
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.animan.app.databinding.ActivityMainBinding
+import kotlinx.coroutines.*
+import java.net.HttpURLConnection
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -22,7 +28,8 @@ class MainActivity : AppCompatActivity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private val PREFS_NAME = "animan_prefs"
     private val KEY_SERVER_URL = "server_url"
-    private val DEFAULT_URL = "http://localhost:8080"
+    private var probeJob: Job? = null
+    private var scanJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,10 +37,10 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         setupWebView()
-        setupErrorHandling()
+        setupUI()
 
         val savedUrl = getSavedServerUrl()
-        loadUrl(savedUrl)
+        connectWithProbe(savedUrl)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -69,8 +76,7 @@ class MainActivity : AppCompatActivity() {
                 if (request?.isForMainFrame == true) {
                     binding.progressBar.visibility = View.GONE
                     binding.loadingLayout.visibility = View.GONE
-                    binding.errorLayout.visibility = View.VISIBLE
-                    binding.editServerUrl.setText(getSavedServerUrl())
+                    showErrorScreen()
                 }
             }
         }
@@ -115,7 +121,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Native Download Listener for MP4 and downloads
         binding.webView.setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
             try {
                 val filename = URLUtil.guessFileName(url, contentDisposition, mimetype)
@@ -140,7 +145,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setupErrorHandling() {
+    private fun setupUI() {
+        binding.btnCancelLoading.setOnClickListener {
+            probeJob?.cancel()
+            binding.loadingLayout.visibility = View.GONE
+            showErrorScreen()
+        }
+
         binding.btnConnect.setOnClickListener {
             var inputUrl = binding.editServerUrl.text.toString().trim()
             if (inputUrl.isNotEmpty()) {
@@ -148,24 +159,161 @@ class MainActivity : AppCompatActivity() {
                     inputUrl = "http://$inputUrl"
                 }
                 saveServerUrl(inputUrl)
-                loadUrl(inputUrl)
+                connectWithProbe(inputUrl)
             }
         }
 
-        binding.btnRetry.setOnClickListener {
-            loadUrl(getSavedServerUrl())
+        binding.btnScanLan.setOnClickListener {
+            startLanAutoDiscovery()
+        }
+
+        binding.btnConnectDiscovered.setOnClickListener {
+            val foundUrl = binding.txtDiscoveredUrl.text.toString().trim()
+            if (foundUrl.isNotEmpty()) {
+                saveServerUrl(foundUrl)
+                connectWithProbe(foundUrl)
+            }
         }
     }
 
-    private fun loadUrl(url: String) {
+    private fun connectWithProbe(url: String) {
+        probeJob?.cancel()
         binding.errorLayout.visibility = View.GONE
         binding.loadingLayout.visibility = View.VISIBLE
-        binding.webView.loadUrl(url)
+        binding.txtLoadingStatus.text = "Connexion à $url..."
+
+        probeJob = lifecycleScope.launch {
+            val isReachable = withContext(Dispatchers.IO) {
+                testHttpReachability(url, timeoutMs = 2000)
+            }
+
+            if (isReachable) {
+                binding.webView.loadUrl(url)
+            } else {
+                binding.loadingLayout.visibility = View.GONE
+                showErrorScreen()
+                // Launch background auto-discovery
+                startLanAutoDiscovery()
+            }
+        }
+    }
+
+    private fun showErrorScreen() {
+        binding.errorLayout.visibility = View.VISIBLE
+        binding.editServerUrl.setText(getSavedServerUrl())
+    }
+
+    private fun startLanAutoDiscovery() {
+        scanJob?.cancel()
+        binding.scanProgressLayout.visibility = View.VISIBLE
+        binding.txtScanProgress.text = "Recherche d'un serveur Animan sur le réseau Wi-Fi..."
+
+        scanJob = lifecycleScope.launch {
+            val discovered = withContext(Dispatchers.IO) {
+                findAnimanServerOnLan()
+            }
+
+            binding.scanProgressLayout.visibility = View.GONE
+            if (discovered != null) {
+                binding.discoveredCard.visibility = View.VISIBLE
+                binding.txtDiscoveredUrl.text = discovered
+                binding.editServerUrl.setText(discovered)
+            } else {
+                binding.txtScanProgress.text = "Aucun serveur détecté automatiquement."
+                binding.scanProgressLayout.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private suspend fun findAnimanServerOnLan(): String? = withContext(Dispatchers.IO) {
+        val candidates = mutableListOf<String>()
+
+        // 1. Waydroid host, Emulator & Loopback
+        candidates.add("http://192.168.240.1:8080")
+        candidates.add("http://10.0.2.2:8080")
+        candidates.add("http://127.0.0.1:8080")
+        candidates.add("http://localhost:8080")
+
+        // 2. Discover local IP subnet
+        val localIps = getDeviceIpAddresses()
+        for (ip in localIps) {
+            val parts = ip.split(".")
+            if (parts.size == 4) {
+                val subnet = "${parts[0]}.${parts[1]}.${parts[2]}"
+                // Gateway first
+                candidates.add("http://$subnet.1:8080")
+                candidates.add("http://$subnet.1:8000")
+                // Search around device IP
+                val lastOctet = parts[3].toIntOrNull() ?: 50
+                for (offset in 1..25) {
+                    val target1 = lastOctet - offset
+                    if (target1 in 1..254) {
+                        candidates.add("http://$subnet.$target1:8080")
+                    }
+                    val target2 = lastOctet + offset
+                    if (target2 in 1..254) {
+                        candidates.add("http://$subnet.$target2:8080")
+                    }
+                }
+            }
+        }
+
+        // Test candidates concurrently in chunks
+        val uniqueCandidates = candidates.distinct()
+        for (chunk in uniqueCandidates.chunked(12)) {
+            val deferreds = chunk.map { url ->
+                async {
+                    if (testHttpReachability(url, timeoutMs = 500)) url else null
+                }
+            }
+            val results = deferreds.awaitAll()
+            val found = results.firstOrNull { it != null }
+            if (found != null) {
+                return@withContext found
+            }
+        }
+        null
+    }
+
+    private fun testHttpReachability(baseUrl: String, timeoutMs: Int): Boolean {
+        return try {
+            val testUrl = if (baseUrl.endsWith("/")) "${baseUrl}manifest.json" else "$baseUrl/manifest.json"
+            val conn = URL(testUrl).openConnection() as HttpURLConnection
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.requestMethod = "GET"
+            conn.instanceFollowRedirects = true
+            val code = conn.responseCode
+            code in 200..399
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun getDeviceIpAddresses(): List<String> {
+        val ips = mutableListOf<String>()
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (iface.isLoopback || !iface.isUp) continue
+                val addresses = iface.inetAddresses
+                while (addresses.hasMoreElements()) {
+                    val addr = addresses.nextElement()
+                    if (addr is Inet4Address && !addr.isLoopbackAddress) {
+                        ips.add(addr.hostAddress ?: "")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
+        }
+        return ips
     }
 
     private fun getSavedServerUrl(): String {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_SERVER_URL, DEFAULT_URL) ?: DEFAULT_URL
+        return prefs.getString(KEY_SERVER_URL, "http://localhost:8080") ?: "http://localhost:8080"
     }
 
     private fun saveServerUrl(url: String) {
@@ -177,6 +325,8 @@ class MainActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (customView != null) {
             binding.webView.webChromeClient?.onHideCustomView()
+        } else if (binding.errorLayout.visibility == View.VISIBLE && binding.webView.url != null) {
+            binding.errorLayout.visibility = View.GONE
         } else if (binding.webView.canGoBack()) {
             binding.webView.goBack()
         } else {
