@@ -20,8 +20,6 @@ class Settings:
         "https://animepahe.pw",
         "https://animepahe.com",
         "https://animepahe.org",
-        "https://animepahe.ru",
-        "https://animepahe.si",
     ]
     ANIMEPAHE_COOKIE: str = os.getenv("ANIMAN_ANIMEPAHE_COOKIE", "")
     ANIMEPAHE_USER_AGENT: str = os.getenv(

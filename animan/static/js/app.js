@@ -2618,7 +2618,7 @@ function handleTopbarSearchSubmit(event) {
 function initSearchAutocomplete() {
   const formatProxyImage = (url) => {
     if (!url) return '';
-    if ((url.includes('voir-anime') || url.includes('voembed') || url.includes('vidmoly') || url.includes('animepahe')) && !url.startsWith('/api/media/image-proxy')) {
+    if ((url.includes('voir-anime') || url.includes('voembed') || url.includes('vidmoly') || url.includes('animepahe') || url.includes('anime-sama') || url.includes('jetanime')) && !url.startsWith('/api/media/image-proxy')) {
       return `/api/media/image-proxy?url=${encodeURIComponent(url)}`;
     }
     return url;
@@ -2669,8 +2669,17 @@ function initSearchAutocomplete() {
       if (previewTitle) previewTitle.textContent = item.title || '';
       if (previewDesc) previewDesc.textContent = item.synopsis || item.description || (item.episodeInfo ? `Informations : ${item.episodeInfo}` : '');
 
+      const getSourceLabel = (srcKey) => {
+        if (!srcKey || srcKey === 'french-manga') return 'French-Manga';
+        if (srcKey === 'voir-anime') return 'VoirAnime';
+        if (srcKey === 'animepahe') return 'AnimePahe';
+        const tabEl = document.querySelector(`.palette-tab-chip[data-src="${srcKey}"]`);
+        if (tabEl) return tabEl.textContent.replace('📦', '').trim();
+        return srcKey.split('.').pop() || srcKey;
+      };
+
       const src = item.source || getActiveSource();
-      const sourceLabel = src === 'voir-anime' ? 'VoirAnime' : (src === 'animepahe' ? 'AnimePahe' : 'French-Manga');
+      const sourceLabel = getSourceLabel(src);
 
       if (previewMeta) {
         let metaHtml = `<span class="source-tag source-tag-${src}">${escapeHtml(sourceLabel)}</span>`;
@@ -2740,7 +2749,7 @@ function initSearchAutocomplete() {
           <span class="autocomplete-badge ${item.version.toUpperCase() === 'VF' ? 'autocomplete-badge-vf' : 'autocomplete-badge-vostfr'}">${escapeHtml(item.version)}</span>
         ` : '';
 
-        const sourceLabel = actualSource === 'voir-anime' ? 'VoirAnime' : (actualSource === 'animepahe' ? 'AnimePahe' : 'French-Manga');
+        const sourceLabel = getSourceLabel(actualSource);
 
         listHtml += `
           <a href="/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(actualSource)}"

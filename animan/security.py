@@ -45,6 +45,13 @@ ALLOWED_SCRAPING_DOMAINS = {
     "pahe.win",
     "owocdn.top",
     "kwikcdn.com",
+    # Extensions et hébergeurs populaires
+    "anime-sama.to",
+    "anime-sama.org",
+    "anime-sama.pw",
+    "jetanimes.com",
+    "animesz.xyz",
+    "animevostfr.tv",
 }
 
 def get_all_allowed_domains() -> set:

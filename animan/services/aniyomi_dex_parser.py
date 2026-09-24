@@ -233,6 +233,63 @@ class AniyomiDexParser:
     @staticmethod
     def _fill_heuristics(recipe: SourceRecipe):
         """Remplit les sélecteurs manquants par déduction intelligente."""
+        pkg_lower = (recipe.pkg or "").lower()
+        base_lower = (recipe.base_url or "").lower()
+
+        # Profils spécialisés pour les extensions populaires Aniyomi
+        if "animesama" in pkg_lower or "anime-sama" in base_lower:
+            recipe.search_selector = "#list_catalog > div, #list_catalog > div a, .catalog-card, #containerAjoutsAnimes > div"
+            recipe.popular_selector = recipe.search_selector
+            recipe.search_request_path = "/catalogue/?search={query}"
+            recipe.search_query_param = "search"
+            recipe.item_title_selector = ".card-title, h2, h3, img[alt]"
+            recipe.item_thumb_selector = "img.card-image, img[src], img[data-src]"
+            recipe.item_link_selector = "a[href]"
+        elif "animevostfr" in pkg_lower or "animevostfr" in base_lower:
+            recipe.search_selector = "div.ml-item, .film_list article"
+            recipe.popular_selector = recipe.search_selector
+            recipe.search_request_path = "/?s={query}"
+            recipe.item_title_selector = "span.mli-info > h2, h3, h2, .title"
+            recipe.item_thumb_selector = "div.thumb > img, img[src]"
+        elif "anisama" in pkg_lower or "animesz" in base_lower:
+            recipe.search_selector = ".film_list article, .film_list .film-item"
+            recipe.popular_selector = recipe.search_selector
+            recipe.search_request_path = "/filter?keyword={query}"
+            recipe.item_title_selector = ".dynamic-name, h3, h2, .title"
+            recipe.item_thumb_selector = ".film-poster-img, img[src]"
+        elif "jetanime" in pkg_lower or "jetanime" in base_lower:
+            recipe.search_selector = "div#archive-content > article > div.poster, div.search-page > div.result-item, article"
+            recipe.popular_selector = recipe.search_selector
+            recipe.search_request_path = "/?s={query}"
+        elif "voiranime" in pkg_lower or "voir-anime" in base_lower:
+            recipe.search_selector = "div.c-tabs-item__content, article"
+            recipe.popular_selector = recipe.search_selector
+            recipe.search_request_path = "/?s={query}&post_type=wp-manga"
+
+        # Détection générique depuis raw_strings si encore incomplet
+        if not recipe.search_selector or not recipe.popular_selector:
+            container_candidates = []
+            for s in recipe.raw_strings:
+                s_clean = s.strip()
+                if not s_clean or len(s_clean) < 3 or len(s_clean) > 80:
+                    continue
+                if s_clean.startswith(('http', '//', '(', 'L', '[L', '#EXT', '"', '%.', 'data:', 'android.')):
+                    continue
+                if re.search(r'[\(\)\{\}\*\+\?\$\\\^]', s_clean):
+                    continue
+                if any(k in s_clean for k in ['#list_catalog', 'containerAjouts', 'catalog-card', 'ml-item', 'film_list', 'archive-content', 'c-tabs-item', 'result-item', 'movie-poster']):
+                    container_candidates.append(s_clean)
+                elif s_clean.startswith(('#', '.', 'div', 'article')) and any(c in s_clean for c in ['#', '.', '>', ' ']):
+                    if any(w in s_clean for w in ['poster', 'card', 'item', 'content', 'article', 'thumb', 'entry']):
+                        container_candidates.append(s_clean)
+
+            if container_candidates:
+                chosen_selector = ", ".join(dict.fromkeys(container_candidates))
+                if not recipe.search_selector:
+                    recipe.search_selector = chosen_selector
+                if not recipe.popular_selector:
+                    recipe.popular_selector = chosen_selector
+
         if not recipe.search_selector and recipe.popular_selector:
             recipe.search_selector = recipe.popular_selector
         if not recipe.latest_selector and recipe.popular_selector:
@@ -240,18 +297,21 @@ class AniyomiDexParser:
 
         # Format de recherche
         if not recipe.search_request_path:
-            if recipe.search_query_param:
+            if "search" in recipe.raw_strings and "/catalogue/" in recipe.raw_strings:
+                recipe.search_request_path = "/catalogue/?search={query}"
+                recipe.search_query_param = "search"
+            elif recipe.search_query_param:
                 recipe.search_request_path = f"/?{recipe.search_query_param}={{query}}"
             else:
                 recipe.search_request_path = "/?s={query}"
 
         # Éléments enfants par défaut
         if not recipe.item_title_selector:
-            recipe.item_title_selector = "h3, h2, .title, .post-title, a.title, .entry-title"
+            recipe.item_title_selector = "h3, h2, .title, .post-title, a.title, .entry-title, .card-title, img[alt]"
         if not recipe.item_link_selector:
             recipe.item_link_selector = "a[href]"
         if not recipe.item_thumb_selector:
-            recipe.item_thumb_selector = "img[src], img[data-src], .poster img"
+            recipe.item_thumb_selector = "img[src], img[data-src], img[loading], .poster img"
         if not recipe.episode_link_selector:
             recipe.episode_link_selector = "a[href], option"
         if not recipe.episode_name_selector:

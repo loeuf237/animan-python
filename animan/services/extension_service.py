@@ -340,6 +340,10 @@ class ExtensionService:
                     try:
                         recipe_data = json.loads(ext["recipe_json"])
                         recipe = SourceRecipe.from_dict(recipe_data)
+                        AniyomiDexParser._fill_heuristics(recipe)
+                        updated_dict = recipe.to_dict()
+                        if updated_dict != recipe_data:
+                            cursor.execute("UPDATE imported_extensions SET recipe_json = ? WHERE id = ?;", (json.dumps(updated_dict), ext["id"]))
                         self._active_container_sources[ext["pkg"]] = AniyomiContainerSource(recipe)
                     except Exception as e:
                         logger.warning("[extensions] Error loading source %s: %s", ext["name"], e)

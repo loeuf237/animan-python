@@ -71,13 +71,15 @@
     <div class="results-grid" id="favorites-grid">
       {% for fav in favorites %}
       <article class="anime-card">
-        <a href="/anime?url={{ fav.url }}&source={{ fav.source or 'french-manga' }}" class="card-link">
+        <a href="/anime?url={{ fav.url }}&amp;source={{ fav.source or 'french-manga' }}" class="card-link">
           <div class="card-poster">
             {% if fav.imageUrl %}
             <img src="{{ fav.imageUrl | proxy_img }}" alt="{{ fav.title }}" loading="lazy"
                  onerror="this.style.display='none';this.nextElementSibling.style.display='flex';"/>
+            <div class="card-poster-placeholder" style="display:none;">Anime</div>
+            {% else %}
+            <div class="card-poster-placeholder" style="display:flex;">Anime</div>
             {% endif %}
-            <div class="card-poster-placeholder" style="{% if fav.imageUrl %}display:none;{% else %}display:flex;{% endif %}">Anime</div>
             <div class="card-overlay">
               <span class="fav-badge">{{ t('lib_fav_badge') }}</span>
               {% if fav.autoDownload %}

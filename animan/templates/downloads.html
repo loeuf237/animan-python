@@ -207,7 +207,7 @@
         </div>
         <div class="dl-task-actions" data-id="{{ task.id }}" data-status="{{ task.status.value }}" data-animename="{{ task.animeName }}" data-episodenumber="{{ task.episodeNumber }}"></div>
         <div class="dl-task-bottom-bar">
-          <div class="dl-task-bottom-fill {% if task.status.value == 'PAUSED' %}is-paused{% elif task.error %}is-error{% endif %}" style="width:{{ task.progress }}%"></div>
+          <div class="dl-task-bottom-fill {% if task.status.value == 'PAUSED' %}is-paused{% elif task.error %}is-error{% endif %}" data-progress="{{ task.progress }}"></div>
         </div>
       </div>
       {% endif %}
@@ -375,6 +375,9 @@ document.querySelectorAll('.dl-task-actions[data-id]').forEach(actEl => {
   const animeName = actEl.dataset.animename;
   const episodeNumber = actEl.dataset.episodenumber;
   actEl.innerHTML = renderTaskActions({ id, status, animeName, episodeNumber });
+});
+document.querySelectorAll('.dl-task-bottom-fill[data-progress]').forEach(el => {
+  el.style.width = (el.dataset.progress || 0) + '%';
 });
 
 document.getElementById('pause-all-btn')?.addEventListener('click', () =>

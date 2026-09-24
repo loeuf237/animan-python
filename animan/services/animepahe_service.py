@@ -33,6 +33,8 @@ class CurlClientWrapper:
     async def __aenter__(self):
         try:
             proxy = proxy_service.get_active_proxy()
+            if proxy and proxy.startswith("socks5://"):
+                proxy = "socks5h://" + proxy[len("socks5://"):]
             self.session = AsyncSession(impersonate="chrome124", proxy=proxy)
         except Exception as e:
             logger.debug("[animepahe] Error instantiating AsyncSession: %s", e)
@@ -52,12 +54,28 @@ class CurlClientWrapper:
             req_headers.update(headers)
         timeout = kwargs.get("timeout", self.timeout)
         if self.session:
-            return await self.session.get(
-                url,
-                headers=req_headers,
-                cookies=self.cookies,
-                timeout=timeout,
-            )
+            try:
+                return await self.session.get(
+                    url,
+                    headers=req_headers,
+                    cookies=self.cookies,
+                    timeout=timeout,
+                )
+            except Exception as e:
+                err_str = str(e).lower()
+                if "proxy" in err_str or "socks" in err_str or "(97)" in err_str or "(56)" in err_str:
+                    logger.warning("[animepahe] Proxy error (%s), retrying direct connection", e)
+                    try:
+                        async with AsyncSession(impersonate="chrome124") as direct_session:
+                            return await direct_session.get(
+                                url,
+                                headers=req_headers,
+                                cookies=self.cookies,
+                                timeout=timeout,
+                            )
+                    except Exception as direct_err:
+                        logger.debug("[animepahe] Direct connection also failed: %s", direct_err)
+                raise e
         async with httpx.AsyncClient(timeout=timeout, verify=settings.SSL_VERIFY, follow_redirects=True, proxy=proxy_service.get_active_proxy()) as client:
             return await client.get(url, headers=req_headers, cookies=self.cookies)
 
@@ -223,6 +241,8 @@ class AnimepaheService:
         }
         try:
             proxy = proxy_service.get_active_proxy()
+            if proxy and proxy.startswith("socks5://"):
+                proxy = "socks5h://" + proxy[len("socks5://"):]
             async with AsyncSession(impersonate="chrome124", proxy=proxy) as session:
                 resp = await session.get(url, headers=headers, cookies=cookies, timeout=10)
                 if resp.status_code == 200:
@@ -393,9 +413,11 @@ class AnimepaheService:
                 try:
                     async with self._get_async_client(base=base, timeout=8.0) as client:
                         resp = await client.get(target_url)
-                        if resp.status_code == 200 and len(resp.text) > 500:
+                        if resp.status_code == 200 and len(resp.text) > 500 and any(k in resp.text.lower() for k in ["animepahe", "title-wrapper", "anime-title", "og:url"]):
                             html = resp.text
-                            self.base_url = base
+                            if base != self.base_url:
+                                logger.info("[animepahe] Switched base url to %s", base)
+                                self.base_url = base
                             break
                 except Exception as e:
                     logger.debug("[animepahe] Échec chargement détail sur %s: %s", base, e)

@@ -123,6 +123,9 @@
           <button type="button" class="palette-tab-chip" data-src="french-manga" onclick="setPaletteSource('french-manga', this)">french-manga.net</button>
           <button type="button" class="palette-tab-chip" data-src="voir-anime" onclick="setPaletteSource('voir-anime', this)">voir-anime.to</button>
           <button type="button" class="palette-tab-chip" data-src="animepahe" onclick="setPaletteSource('animepahe', this)">animepahe.pw</button>
+          {% for ext in get_enabled_extensions() %}
+          <button type="button" class="palette-tab-chip" data-src="{{ ext.pkg }}" onclick="setPaletteSource('{{ ext.pkg }}', this)">📦 {{ ext.name }}</button>
+          {% endfor %}
         </div>
       </div>
 
