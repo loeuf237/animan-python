@@ -24,22 +24,10 @@ android {
         }
     }
 
-    signingConfigs {
-        create("release") {
-            val debugKey = File(System.getProperty("user.home"), ".android/debug.keystore")
-            if (debugKey.exists()) {
-                storeFile = debugKey
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
-            }
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false
