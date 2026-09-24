@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hors connexion - Animan</title>
+  <link rel="icon" type="image/png" href="/img/favicon.png"/>
+  <meta name="theme-color" content="#0e121d"/>
+  <style>
+    :root {
+      --bg: #0e121d;
+      --surface: #151b2b;
+      --surface-border: rgba(255, 255, 255, 0.08);
+      --accent: #9d6fff;
+      --accent-glow: rgba(157, 111, 255, 0.35);
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --radius: 14px;
+      --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-family);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+    }
+    .offline-card {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: var(--radius);
+      padding: 40px 32px;
+      max-width: 480px;
+      width: 100%;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 40px var(--accent-glow);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      animation: fadeIn 0.4s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .offline-icon-wrap {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      background: rgba(157, 111, 255, 0.12);
+      border: 2px solid rgba(157, 111, 255, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .offline-icon-wrap svg {
+      width: 44px;
+      height: 44px;
+      stroke-width: 2;
+    }
+    .brand-title {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    .brand-title span {
+      color: var(--accent);
+    }
+    .offline-subtitle {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .actions-group {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 13px 20px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #9d6fff, #7a41eb);
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(122, 65, 235, 0.4);
+    }
+    .btn-primary:hover {
+      opacity: 0.92;
+      transform: translateY(-1px);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text);
+      border: 1px solid var(--surface-border);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #f87171;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #f87171;
+    }
+  </style>
+</head>
+<body>
+  <div class="offline-card">
+    <div class="offline-icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <line x1="1" y1="1" x2="23" y2="23"></line>
+        <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+        <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+        <path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path>
+        <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+        <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+        <line x1="12" y1="20" x2="12.01" y2="20"></line>
+      </svg>
+    </div>
+
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      <span>Hors ligne</span>
+    </div>
+
+    <h1 class="brand-title">Ani<span>man</span></h1>
+
+    <p class="offline-subtitle">
+      Vous semblez être hors connexion. Les recherches en ligne et le streaming distant nécessitent un accès réseau.
+      Vos fichiers déjà téléchargés restent néanmoins accessibles localement.
+    </p>
+
+    <div class="actions-group">
+      <button class="btn btn-primary" onclick="window.location.reload()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+        <span>Réessayer la connexion</span>
+      </button>
+
+      <a href="/downloads" class="btn btn-secondary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+        <span>Accéder aux Téléchargements</span>
+      </a>
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('online', () => {
+      window.location.reload();
+    });
+  </script>
+</body>
+</html>

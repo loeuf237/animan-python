@@ -1,0 +1,78 @@
+import pytest
+from fastapi.testclient import TestClient
+from run import app
+from animan.database import init_db
+
+@pytest.fixture(scope="module")
+def client():
+    init_db()
+    with TestClient(app) as c:
+        yield c
+
+def test_pwa_manifest(client):
+    resp = client.get("/manifest.json")
+    assert resp.status_code == 200
+    assert "application/manifest+json" in resp.headers.get("content-type", "")
+
+    manifest = resp.json()
+    assert manifest["name"] == "Animan - Anime Downloader & Player"
+    assert manifest["short_name"] == "Animan"
+    assert manifest["start_url"] == "/?source=pwa"
+    assert manifest["display"] == "standalone"
+    assert manifest["theme_color"] == "#0e121d"
+    assert manifest["background_color"] == "#0e121d"
+
+    # Validate icons
+    icons = manifest.get("icons", [])
+    assert len(icons) >= 3
+    icon_sizes = {icon["sizes"] for icon in icons}
+    assert "192x192" in icon_sizes
+    assert "512x512" in icon_sizes
+
+    # Check maskable icon
+    has_maskable = any("maskable" in icon.get("purpose", "") for icon in icons)
+    assert has_maskable
+
+def test_pwa_service_worker(client):
+    resp = client.get("/sw.js")
+    assert resp.status_code == 200
+    assert resp.headers.get("service-worker-allowed") == "/"
+    assert "application/javascript" in resp.headers.get("content-type", "")
+
+    content = resp.text
+    # Ensure cache engine and safety exclusions are present
+    assert "animan-cache" in content
+    assert "/api/media/stream" in content
+    assert "m3u8" in content
+    assert "/offline.html" in content
+
+def test_pwa_offline_page(client):
+    resp = client.get("/offline.html")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert "hors connexion" in resp.text.lower() or "offline" in resp.text.lower()
+
+def test_pwa_static_assets(client):
+    # pwa.js
+    resp_pwa_js = client.get("/js/pwa.js")
+    assert resp_pwa_js.status_code == 200
+    assert "serviceWorker" in resp_pwa_js.text
+    assert "beforeinstallprompt" in resp_pwa_js.text
+
+    # Icons
+    for icon_name in ["icon-192.png", "icon-512.png", "icon-maskable.png"]:
+        resp_icon = client.get(f"/img/{icon_name}")
+        assert resp_icon.status_code == 200
+        assert resp_icon.headers.get("content-type") == "image/png"
+
+def test_pwa_integration_in_html_pages(client):
+    pages = ["/", "/downloads", "/library", "/history", "/settings"]
+    for path in pages:
+        resp = client.get(path)
+        assert resp.status_code == 200
+        html = resp.text
+        assert 'rel="manifest"' in html
+        assert 'href="/manifest.json"' in html
+        assert 'name="theme-color"' in html
+        assert 'name="apple-mobile-web-app-capable"' in html
+        assert '/js/pwa.js' in html

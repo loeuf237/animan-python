@@ -1,0 +1,77 @@
+{
+  "id": "/?source=pwa",
+  "name": "Animan - Anime Downloader & Player",
+  "short_name": "Animan",
+  "description": "Téléchargement et streaming haute performance d'animés en VF et VOSTFR",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e121d",
+  "theme_color": "#0e121d",
+  "lang": "fr",
+  "dir": "ltr",
+  "categories": [
+    "entertainment",
+    "multimedia",
+    "video"
+  ],
+  "icons": [
+    {
+      "src": "/img/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/img/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/img/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Téléchargements",
+      "short_name": "Downloads",
+      "description": "Gérer la file de téléchargements",
+      "url": "/downloads?source=pwa_shortcut",
+      "icons": [
+        {
+          "src": "/img/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Bibliothèque",
+      "short_name": "Library",
+      "description": "Accéder à vos animés favoris",
+      "url": "/library?source=pwa_shortcut",
+      "icons": [
+        {
+          "src": "/img/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Historique",
+      "short_name": "History",
+      "description": "Historique des épisodes visionnés",
+      "url": "/history?source=pwa_shortcut",
+      "icons": [
+        {
+          "src": "/img/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

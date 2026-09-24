@@ -6,6 +6,12 @@
   <link rel="stylesheet" href="/css/style.css?v=2.8"/>
   <link rel="icon" type="image/png" href="/img/favicon.png"/>
   <link rel="apple-touch-icon" href="/img/icon-192.png"/>
+  <link rel="manifest" href="/manifest.json"/>
+  <meta name="theme-color" content="#0e121d"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Animan"/>
+  <script src="/js/pwa.js" defer></script>
 </head>
 {% endmacro %}
 
@@ -66,6 +72,11 @@
       <!-- Sélecteur rapide de langue FR / EN -->
       <button class="icon-button lang-toggle-btn" id="lang-toggle-btn" type="button" onclick="toggleLanguage()" title="{{ t('lang_switch_title') }}">
         <span class="lang-label" style="font-size:12px;font-weight:800;letter-spacing:0.5px;">{{ 'EN' if current_lang() == 'fr' else 'FR' }}</span>
+      </button>
+
+      <!-- Bouton d'installation PWA (visible si prompt disponible) -->
+      <button class="icon-button pwa-install-trigger" id="pwa-install-topbar-btn" type="button" onclick="installPwaApp()" title="Installer l'application sur cet appareil" style="display:none;">
+        <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
       </button>
 
       <button class="icon-button" id="theme-toggle" type="button" title="{{ t('theme_toggle_title') }}">
@@ -174,5 +185,20 @@
       </div>
     </div>
   </div>
+
+  <!-- Bannière d'installation PWA discrète -->
+  <aside id="pwa-install-banner" class="pwa-install-banner" style="display:none;" aria-label="Installer Animan">
+    <div class="pwa-banner-content">
+      <img src="/img/icon-192.png" alt="Animan" class="pwa-banner-icon"/>
+      <div class="pwa-banner-text">
+        <strong>Installer Animan</strong>
+        <span>Profitez d'une expérience plein écran native et fluide</span>
+      </div>
+    </div>
+    <div class="pwa-banner-actions">
+      <button type="button" class="btn-primary" style="padding:7px 14px;font-size:13px;border-radius:8px;border:none;cursor:pointer;font-weight:600;" onclick="installPwaApp()">Installer</button>
+      <button type="button" class="btn-close-banner" onclick="dismissPwaBanner()" aria-label="Fermer" title="Fermer">✕</button>
+    </div>
+  </aside>
 </nav>
 {% endmacro %}

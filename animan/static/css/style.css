@@ -4265,5 +4265,112 @@ html[data-theme="light"] .tg-action-btn-close:hover {
   }
 }
 
+/* ==========================================================================
+   PWA (Progressive Web App) Install Banner & Standalone Mode
+   ========================================================================== */
+.pwa-install-banner {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  background: var(--panel-alpha);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(157, 111, 255, 0.2);
+  max-width: 440px;
+  animation: pwaSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pwaSlideUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.pwa-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.pwa-banner-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  flex-shrink: 0;
+}
+
+.pwa-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pwa-banner-text strong {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.pwa-banner-text span {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.pwa-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-close-banner {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 6px;
+  font-size: 14px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+
+.btn-close-banner:hover {
+  color: var(--text);
+  background: var(--panel-subtle);
+}
+
+@media (max-width: 768px) {
+  .pwa-install-banner {
+    bottom: 76px; /* Positioned right above bottom mobile nav */
+    left: 12px;
+    right: 12px;
+    max-width: none;
+  }
+}
+
+/* Standalone PWA UI polish */
+html.pwa-standalone {
+  /* Prevent pull-to-refresh on mobile apps when desired */
+  overscroll-behavior-y: contain;
+}
+
+html.pwa-standalone body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+
 
 

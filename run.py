@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -114,6 +114,34 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 app.mount("/css", StaticFiles(directory=str(static_dir / "css")), name="css")
 app.mount("/js", StaticFiles(directory=str(static_dir / "js")), name="js")
 app.mount("/img", StaticFiles(directory=str(static_dir / "img")), name="img")
+
+# Points d'accès PWA (Progressive Web App)
+@app.get("/manifest.json", include_in_schema=False)
+async def get_manifest():
+    return FileResponse(
+        static_dir / "manifest.json",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+@app.get("/sw.js", include_in_schema=False)
+async def get_service_worker():
+    return FileResponse(
+        static_dir / "sw.js",
+        media_type="application/javascript",
+        headers={
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+    )
+
+@app.get("/offline.html", include_in_schema=False)
+async def get_offline_page():
+    return FileResponse(
+        static_dir / "offline.html",
+        media_type="text/html",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 # Enregistrement des routeurs
 app.include_router(anime_router)
