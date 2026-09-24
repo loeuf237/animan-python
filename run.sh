@@ -14,5 +14,6 @@ for var in all_proxy ALL_PROXY socks_proxy SOCKS_PROXY; do
     fi
 done
 
+export ANIMAN_RELOAD="${ANIMAN_RELOAD:-true}"
 python3 run.py "$@"
 

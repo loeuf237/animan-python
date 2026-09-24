@@ -126,7 +126,7 @@ app.include_router(i18n_router)
 
 if __name__ == "__main__":
     import os
-    reload_enabled = os.getenv("ANIMAN_RELOAD", "false").lower() in ("1", "true", "yes")
+    reload_enabled = os.getenv("ANIMAN_RELOAD", "true").lower() in ("1", "true", "yes")
     uvicorn.run(
         "run:app" if reload_enabled else app,
         host=settings.HOST,
