@@ -187,13 +187,20 @@ async def search_api(
     enabled_exts = extension_service.get_enabled_container_sources()
 
     if norm_source == "all":
+        async def _safe_search_task(coro, timeout_sec: float = 6.0):
+            try:
+                return await asyncio.wait_for(coro, timeout=timeout_sec)
+            except Exception as e:
+                logger.debug("Source search task timed out or failed: %s", e)
+                return []
+
         tasks = [
-            scraping_service.search_anime(q),
-            voiranime_service.search_anime(q),
-            animepahe_service.search_anime(q),
+            _safe_search_task(scraping_service.search_anime(q)),
+            _safe_search_task(voiranime_service.search_anime(q)),
+            _safe_search_task(animepahe_service.search_anime(q)),
         ]
         for ext in enabled_exts:
-            tasks.append(ext.search_anime(q))
+            tasks.append(_safe_search_task(ext.search_anime(q)))
 
         all_res = await asyncio.gather(*tasks, return_exceptions=True)
         results: List[AnimeResult] = []
@@ -220,7 +227,17 @@ async def search_api(
                     item.source = ext_pkg
                 results.extend(ext_res)
 
-        return results
+        # Déduplication par URL
+        seen_urls = set()
+        deduped: List[AnimeResult] = []
+        for item in results:
+            if item.url and item.url in seen_urls:
+                continue
+            if item.url:
+                seen_urls.add(item.url)
+            deduped.append(item)
+
+        return deduped
     elif norm_source == "voir-anime":
         results = await voiranime_service.search_anime(q)
         for item in results:

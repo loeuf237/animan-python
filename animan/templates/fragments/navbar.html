@@ -125,7 +125,7 @@
           <button type="button" class="palette-tab-chip" data-src="animepahe" onclick="setPaletteSource('animepahe', this)">animepahe.pw</button>
           {% if get_enabled_extensions is defined %}
           {% for ext in get_enabled_extensions() %}
-          <button type="button" class="palette-tab-chip" data-src="{{ ext.pkg }}" onclick="setPaletteSource('{{ ext.pkg }}', this)">📦 {{ ext.name }}</button>
+          <button type="button" class="palette-tab-chip palette-ext-chip" data-src="{{ ext.pkg }}" title="{{ ext.name }}" onclick="setPaletteSource('{{ ext.pkg }}', this)">📦 {{ ext.name.replace('Aniyomi: ', '') }}</button>
           {% endfor %}
           {% endif %}
         </div>

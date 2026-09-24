@@ -2543,6 +2543,40 @@ function initShortcuts() {
 
 const searchMemoryCache = new Map();
 
+async function syncPaletteExtensionTabs() {
+  const tabsBar = document.getElementById('palette-source-tabs');
+  if (!tabsBar) return;
+  try {
+    const resp = await fetch('/api/extensions/list?enabled_only=true');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const exts = data.extensions || [];
+    const defaultSources = ['all', 'french-manga', 'voir-anime', 'animepahe'];
+
+    const existingChips = new Set();
+    tabsBar.querySelectorAll('.palette-tab-chip').forEach(el => {
+      if (el.dataset.src) existingChips.add(el.dataset.src);
+    });
+
+    exts.forEach(ext => {
+      if (!existingChips.has(ext.pkg) && !defaultSources.includes(ext.pkg)) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'palette-tab-chip palette-ext-chip';
+        btn.dataset.src = ext.pkg;
+        const cleanName = ext.name.replace(/^Aniyomi:\s*/i, '');
+        btn.textContent = `📦 ${cleanName}`;
+        btn.title = ext.name;
+        btn.onclick = () => setPaletteSource(ext.pkg, btn);
+        tabsBar.appendChild(btn);
+        existingChips.add(ext.pkg);
+      }
+    });
+  } catch (err) {
+    // Ignore network error silently
+  }
+}
+
 function openCommandPalette(initialQuery) {
   const modal = document.getElementById('command-palette-backdrop');
   const input = document.getElementById('palette-search-input');
@@ -2550,6 +2584,9 @@ function openCommandPalette(initialQuery) {
 
   modal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
+
+  // Synchronise dynamiquement les extensions actives
+  syncPaletteExtensionTabs();
 
   if (typeof initialQuery === 'string' && initialQuery.trim().length > 0) {
     input.value = initialQuery;
@@ -2640,6 +2677,25 @@ function initSearchAutocomplete() {
     let selectedIndex = 0;
     let currentResults = [];
 
+    // Fonctions d'étiquetage des sources (accessibles partout dans la palette)
+    const getSourceLabel = (srcKey) => {
+      if (!srcKey || srcKey === 'french-manga') return 'French-Manga';
+      if (srcKey === 'voir-anime') return 'VoirAnime';
+      if (srcKey === 'animepahe') return 'AnimePahe';
+      const tabEl = Array.from(document.querySelectorAll('.palette-tab-chip')).find(el => el.dataset.src === srcKey);
+      if (tabEl) return tabEl.textContent.replace('📦', '').trim();
+      const parts = srcKey.split('.');
+      const last = parts[parts.length - 1];
+      return last.charAt(0).toUpperCase() + last.slice(1);
+    };
+
+    const getSourceTagClass = (srcKey) => {
+      if (srcKey === 'voir-anime') return 'source-tag-voir-anime';
+      if (srcKey === 'animepahe') return 'source-tag-animepahe';
+      if (srcKey === 'french-manga') return 'source-tag-french-manga';
+      return 'source-tag-imported';
+    };
+
     const getActiveSource = () => {
       const activeTab = document.querySelector('.palette-tab-chip.active');
       return activeTab?.dataset.src || 'all';
@@ -2669,20 +2725,12 @@ function initSearchAutocomplete() {
       if (previewTitle) previewTitle.textContent = item.title || '';
       if (previewDesc) previewDesc.textContent = item.synopsis || item.description || (item.episodeInfo ? `Informations : ${item.episodeInfo}` : '');
 
-      const getSourceLabel = (srcKey) => {
-        if (!srcKey || srcKey === 'french-manga') return 'French-Manga';
-        if (srcKey === 'voir-anime') return 'VoirAnime';
-        if (srcKey === 'animepahe') return 'AnimePahe';
-        const tabEl = document.querySelector(`.palette-tab-chip[data-src="${srcKey}"]`);
-        if (tabEl) return tabEl.textContent.replace('📦', '').trim();
-        return srcKey.split('.').pop() || srcKey;
-      };
-
       const src = item.source || getActiveSource();
       const sourceLabel = getSourceLabel(src);
+      const sourceTagClass = getSourceTagClass(src);
 
       if (previewMeta) {
-        let metaHtml = `<span class="source-tag source-tag-${src}">${escapeHtml(sourceLabel)}</span>`;
+        let metaHtml = `<span class="source-tag ${sourceTagClass}">${escapeHtml(sourceLabel)}</span>`;
         if (item.version) {
           metaHtml += `<span class="autocomplete-badge ${item.version.toUpperCase() === 'VF' ? 'autocomplete-badge-vf' : 'autocomplete-badge-vostfr'}">${escapeHtml(item.version)}</span>`;
         }
@@ -2722,7 +2770,17 @@ function initSearchAutocomplete() {
       if (!results || results.length === 0) {
         if (emptyHint) emptyHint.style.display = 'none';
         if (columns) columns.style.display = 'none';
-        if (noResults) noResults.style.display = 'flex';
+        if (noResults) {
+          noResults.style.display = 'flex';
+          const query = input.value.trim();
+          noResults.innerHTML = `
+            <div style="font-size:32px;margin-bottom:8px;opacity:0.6;">🔍</div>
+            <div style="font-weight:600;font-size:15px;color:var(--text);">Aucun résultat trouvé pour "${escapeHtml(query)}"</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+              ${source !== 'all' ? 'Essayez de sélectionner l\'onglet <strong>Toutes (Multi)</strong> pour chercher sur tous les catalogues.' : 'Vérifiez l\'orthographe ou essayez un titre alternatif.'}
+            </div>
+          `;
+        }
         if (countText) countText.textContent = '0 résultat';
         return;
       }
@@ -2750,6 +2808,7 @@ function initSearchAutocomplete() {
         ` : '';
 
         const sourceLabel = getSourceLabel(actualSource);
+        const sourceTagClass = getSourceTagClass(actualSource);
 
         listHtml += `
           <a href="/anime?url=${encodeURIComponent(item.url)}&source=${encodeURIComponent(actualSource)}"
@@ -2759,7 +2818,7 @@ function initSearchAutocomplete() {
             <div class="autocomplete-info">
               <div class="autocomplete-title">${escapeHtml(item.title)}</div>
               <div class="autocomplete-sub">
-                <span class="source-tag source-tag-${actualSource}">${sourceLabel}</span>
+                <span class="source-tag ${sourceTagClass}">${sourceLabel}</span>
                 ${versionBadge}
                 ${item.episodeInfo ? `<span>• ${escapeHtml(item.episodeInfo)}</span>` : ''}
               </div>
