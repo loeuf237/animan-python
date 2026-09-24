@@ -18,7 +18,7 @@ Retrouvez tous les binaires compilés sur la page des [Releases GitHub](https://
 
 | Plateforme | Format | Lien direct | Description |
 | :--- | :---: | :--- | :--- |
-| **Android** | `.apk` | [📲 **Animan-v2.1.0.apk**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-v2.1.0.apk) *(~4.5 Mo)* | Application Android native, lecteur vidéo paysage immersif, gestionnaire de téléchargements système et sélecteur de serveur LAN. |
+| **Android** | `.apk` | [📲 **Animan-v2.1.0.apk**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-v2.1.0.apk) *(~48.7 Mo)* | Application Android **100% autonome** avec serveur Python (FastAPI/Uvicorn) embarqué via Chaquopy, lecteur immersif et téléchargements. |
 | **Windows** | `.exe` | [💻 **Animan-Windows-x64.zip**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-Windows-x64.zip) *(~34.8 Mo)* | Exécutable Windows autonome avec interface native WebView2 (Edge), sans installation de Python requise. |
 | **Web / Mobile** | `PWA` | [🌐 **Installer depuis le navigateur**](#-installation-pwa-progressive-web-app) | Installation instantanée plein écran sans barre d'adresse sur Chrome, Edge, Safari iOS et Android. |
 | **Linux / Serveur** | `Python` | [🐧 **Lancer via Python**](#-démarrage-local-python) | Démarrage classique via Uvicorn / script `run.py`. |
@@ -53,13 +53,13 @@ Retrouvez tous les binaires compilés sur la page des [Releases GitHub](https://
 
 ## 📱 Application Android (.apk)
 
-L'application Android native permet d'accéder à Animan partout sur votre smartphone ou tablette :
+L'application Android native intègre son propre runtime Python 3.11 embarqué via **Chaquopy** :
 
 1. Téléchargez le fichier [**Animan-v2.1.0.apk**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-v2.1.0.apk).
 2. Ouvrez le fichier sur votre appareil Android et acceptez l'installation.
 3. Lancez **Animan** :
-   - Par défaut, l'application recherche votre instance sur le réseau local ou émulateur.
-   - En cas d'instance distante ou hébergée sur votre PC (ex: `http://192.168.1.50:8000`), un écran élégant vous permet de renseigner l'adresse en un clic.
+   - **Mode 100% Autonome (par défaut)** : Le serveur backend FastAPI/Uvicorn démarre instantanément en tâche de fond sur votre téléphone (`http://127.0.0.1:8080`). Aucun PC, ni serveur externe n'est requis !
+   - **Mode Client / LAN (optionnel)** : Vous pouvez également vous connecter à un serveur Animan distant ou hébergé sur votre réseau local (ex: `http://192.168.1.50:8080`) via l'écran de configuration du serveur.
 4. **Téléchargements mobiles** : les épisodes sont directement téléchargés dans le dossier *Download* d'Android via le gestionnaire natif.
 
 ---
