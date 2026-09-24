@@ -326,22 +326,35 @@ def test_download_task_source_propagation():
     """Vérifie la propagation du champ source dans start_download et start_batch_download."""
     from animan.services.download_manager import download_manager
 
-    task = download_manager.start_download(
-        anime_name="Custom Anime",
-        episode_number=1,
-        download_page_url="https://ansembed.net/embed-123.html",
-        file_name="Custom Anime - Episode 1.mp4",
-        source="eu.kanade.tachiyomi.animeextension.fr.animesama"
-    )
-    assert task.source == "eu.kanade.tachiyomi.animeextension.fr.animesama"
+    with patch("animan.services.download_manager.library_service.save_task"), \
+         patch("animan.services.download_manager.library_service.save_tasks_batch"), \
+         patch.object(download_manager, "check_existing_file", return_value=None), \
+         patch.object(download_manager, "_trigger_process_queue"):
 
-    batch_tasks = download_manager.start_batch_download(
-        anime_name="Batch Anime",
-        episodes=[
-            {"number": 1, "url": "https://video.sibnet.ru/shell.php?videoid=999", "fileName": "Batch - 1.mp4"}
-        ],
-        source="eu.kanade.tachiyomi.animeextension.fr.animesama"
-    )
-    assert len(batch_tasks) == 1
-    assert batch_tasks[0].source == "eu.kanade.tachiyomi.animeextension.fr.animesama"
+        task = download_manager.start_download(
+            anime_name="Custom Anime",
+            episode_number=1,
+            download_page_url="https://ansembed.net/embed-123.html",
+            file_name="Custom Anime - Episode 1.mp4",
+            source="eu.kanade.tachiyomi.animeextension.fr.animesama"
+        )
+        assert task.source == "eu.kanade.tachiyomi.animeextension.fr.animesama"
+        download_manager.tasks.pop(task.id, None)
+        if task.id in download_manager.task_order:
+            download_manager.task_order.remove(task.id)
+
+        batch_tasks = download_manager.start_batch_download(
+            anime_name="Batch Anime",
+            episodes=[
+                {"number": 1, "url": "https://video.sibnet.ru/shell.php?videoid=999", "fileName": "Batch - 1.mp4"}
+            ],
+            source="eu.kanade.tachiyomi.animeextension.fr.animesama"
+        )
+        assert len(batch_tasks) == 1
+        assert batch_tasks[0].source == "eu.kanade.tachiyomi.animeextension.fr.animesama"
+        for bt in batch_tasks:
+            download_manager.tasks.pop(bt.id, None)
+            if bt.id in download_manager.task_order:
+                download_manager.task_order.remove(bt.id)
+
 

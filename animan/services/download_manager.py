@@ -569,11 +569,18 @@ class DownloadManagerService:
         # 7. Fallback universel yt-dlp
         try:
             import yt_dlp
+
+            class _YtdlQuietLogger:
+                def debug(self, msg): pass
+                def warning(self, msg): pass
+                def error(self, msg): pass
+
             def _extract_ydl():
                 ydl_opts = {
                     "quiet": True,
                     "no_warnings": True,
                     "skip_download": True,
+                    "logger": _YtdlQuietLogger(),
                 }
                 if referer:
                     ydl_opts["http_headers"] = {"Referer": referer}
@@ -624,10 +631,68 @@ class DownloadManagerService:
 
             try:
                 info = ResolvedVideoInfo()
-                is_voir_anime = "voir-anime" in download_page_url
-                is_animepahe = any(k in download_page_url for k in ["animepahe", "kwik.", "pahe."])
+                parsed_u = urlparse(download_page_url)
+                u_host = (parsed_u.hostname or "").lower()
+                is_known_embed = any(h in u_host for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload", "dood", "filemoon"])
+                is_imported = bool(source and source not in ("french-manga", "voir-anime", "animepahe")) or is_known_embed
 
-                if is_voir_anime:
+                matched_container = None
+                try:
+                    from animan.services.extension_service import extension_service
+                    if source and source.startswith("eu.kanade."):
+                        matched_container = extension_service.get_container_source_by_id(source)
+                    if not matched_container and u_host:
+                        for cs in extension_service.get_enabled_container_sources():
+                            if cs.base_url and u_host in cs.base_url.lower():
+                                matched_container = cs
+                                break
+                except Exception:
+                    pass
+
+                if matched_container:
+                    is_imported = True
+
+                is_voir_anime = not is_imported and (source == "voir-anime" or "voir-anime" in download_page_url)
+                is_animepahe = not is_imported and (source == "animepahe" or any(k in download_page_url for k in ["animepahe", "kwik.", "pahe."]))
+
+                if is_imported:
+                    target_url = download_page_url
+                    if matched_container and not is_known_embed:
+                        video_sources = await matched_container.get_episode_sources(download_page_url)
+                        qualities = {}
+                        target = None
+                        for s in video_sources:
+                            q_name = s.get("quality") or s.get("server") or "HD"
+                            qualities[q_name] = s.get("url", "")
+                            if preferred_quality and (preferred_quality.lower() in q_name.lower()):
+                                if not target:
+                                    target = s
+                        if not target and video_sources:
+                            target = video_sources[0]
+                        if target and target.get("url"):
+                            target_url = target.get("url", "")
+
+                    # Résolution du flux direct via resolve_imported_video_stream
+                    resolved = await self.resolve_imported_video_stream(
+                        target_url, preferred_quality=preferred_quality
+                    )
+                    if resolved and resolved.get("videoUrl"):
+                        dl_info = resolved
+                    else:
+                        dl_info = {
+                            "videoUrl": target_url,
+                            "serverType": "imported",
+                            "selectedQuality": preferred_quality or "HD",
+                            "videoQualities": json.dumps({"HD": target_url}),
+                        }
+                    info.server_type = dl_info.get("serverType", "imported")
+                    info.available_servers = [info.server_type]
+                    info.video_qualities_json = dl_info.get("videoQualities", "{}")
+                    info.selected_server = info.server_type
+                    info.selected_quality = dl_info.get("selectedQuality", "HD")
+                    if dl_info.get("size"):
+                        info.size = dl_info["size"]
+                elif is_voir_anime:
                     eff_server = preferred_server or self.voiranime_default_server
                     dl_info = await asyncio.to_thread(
                         voiranime_service.extract_download_info,
@@ -727,67 +792,8 @@ class DownloadManagerService:
                     if dl_info.get("size"):
                         info.size = dl_info["size"]
                 else:
-                    # Vérifier si l'URL correspond à une extension Aniyomi active ou un hébergeur d'embed vidéo
-                    matched_container = None
-                    try:
-                        from animan.services.extension_service import extension_service
-                        parsed_u = urlparse(download_page_url)
-                        u_host = (parsed_u.hostname or "").lower()
-                        if source and source.startswith("eu.kanade."):
-                            matched_container = extension_service.get_container_source_by_id(source)
-                        if not matched_container and u_host:
-                            for cs in extension_service.get_enabled_container_sources():
-                                if cs.base_url and u_host in cs.base_url.lower():
-                                    matched_container = cs
-                                    break
-                    except Exception:
-                        pass
-
-                    parsed_u = urlparse(download_page_url)
-                    u_host = (parsed_u.hostname or "").lower()
-                    is_known_embed = any(h in u_host for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload", "dood", "filemoon"])
-                    is_imported_source = bool(source and source not in ("french-manga", "voir-anime", "animepahe"))
-
-                    if is_known_embed or is_imported_source or matched_container:
-                        target_url = download_page_url
-                        if matched_container and not is_known_embed:
-                            video_sources = await matched_container.get_episode_sources(download_page_url)
-                            qualities = {}
-                            target = None
-                            for s in video_sources:
-                                q_name = s.get("quality") or s.get("server") or "HD"
-                                qualities[q_name] = s.get("url", "")
-                                if preferred_quality and (preferred_quality.lower() in q_name.lower()):
-                                    if not target:
-                                        target = s
-                            if not target and video_sources:
-                                target = video_sources[0]
-                            if target and target.get("url"):
-                                target_url = target.get("url", "")
-
-                        # Résolution du flux direct via resolve_imported_video_stream
-                        resolved = await self.resolve_imported_video_stream(
-                            target_url, preferred_quality=preferred_quality
-                        )
-                        if resolved and resolved.get("videoUrl"):
-                            dl_info = resolved
-                        else:
-                            dl_info = {
-                                "videoUrl": target_url,
-                                "serverType": "imported",
-                                "selectedQuality": preferred_quality or "HD",
-                                "videoQualities": json.dumps({"HD": target_url}),
-                            }
-                        info.server_type = dl_info.get("serverType", "imported")
-                        info.available_servers = [info.server_type]
-                        info.video_qualities_json = dl_info.get("videoQualities", "{}")
-                        info.selected_server = info.server_type
-                        info.selected_quality = dl_info.get("selectedQuality", "HD")
-                        if dl_info.get("size"):
-                            info.size = dl_info["size"]
-                    else:
-                        dl_info = await asyncio.to_thread(scraping_service.extract_download_info, download_page_url)
-                        info.server_type = "vidzy"
+                    dl_info = await asyncio.to_thread(scraping_service.extract_download_info, download_page_url)
+                    info.server_type = "vidzy"
 
                 info.direct_url = dl_info.get("videoUrl", "")
                 info.subtitle_url = dl_info.get("subtitleUrl", "")
@@ -1525,12 +1531,15 @@ class DownloadManagerService:
 
                 try:
                     direct_url = task.fileUrl
-                    is_voir_anime = ("voir-anime" in (direct_url or "").lower()) or ("voiranime" in (direct_url or "").lower())
-                    is_animepahe = any(k in (direct_url or "").lower() for k in ["animepahe", "kwik.", "pahe."])
+                    parsed_u = urlparse(direct_url or "")
+                    u_host = (parsed_u.hostname or "").lower()
+                    is_known_embed = any(h in u_host for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload", "dood", "filemoon"])
                     is_imported = (
                         (task.source and (task.source.startswith("eu.kanade.") or task.source not in ("french-manga", "voir-anime", "animepahe"))) or
-                        any(h in (direct_url or "").lower() for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload"])
+                        is_known_embed
                     )
+                    is_voir_anime = not is_imported and (("voir-anime" in (direct_url or "").lower()) or ("voiranime" in (direct_url or "").lower()) or task.source == "voir-anime")
+                    is_animepahe = not is_imported and (any(k in (direct_url or "").lower() for k in ["animepahe", "kwik.", "pahe."]) or task.source == "animepahe")
                     server_type = "vidzy"
                     chunks_json = "[]"
 
@@ -1545,6 +1554,45 @@ class DownloadManagerService:
                     if is_cached_valid and not need_resolve:
                         direct_url = task.directDownloadUrl
                         logger.info("Reusing cached direct URL for %s", task.fileName)
+                    elif is_imported:
+                        matched_container = None
+                        try:
+                            from animan.services.extension_service import extension_service
+                            if task.source and task.source.startswith("eu.kanade."):
+                                matched_container = extension_service.get_container_source_by_id(task.source)
+                            if not matched_container and u_host:
+                                for cs in extension_service.get_enabled_container_sources():
+                                    if cs.base_url and u_host in cs.base_url.lower():
+                                        matched_container = cs
+                                        break
+                        except Exception:
+                            pass
+
+                        target_url = direct_url
+                        if matched_container and not is_known_embed:
+                            video_sources = await matched_container.get_episode_sources(direct_url)
+                            target = None
+                            if task.selectedQuality and task.selectedQuality != "auto":
+                                for s in video_sources:
+                                    q_name = s.get("quality") or s.get("server") or ""
+                                    if task.selectedQuality.lower() in q_name.lower():
+                                        target = s
+                                        break
+                            if not target and video_sources:
+                                target = video_sources[0]
+                            if target and target.get("url"):
+                                target_url = target.get("url", "")
+
+                        resolved = await self.resolve_imported_video_stream(
+                            target_url, preferred_quality=task.selectedQuality
+                        )
+                        if not resolved or not resolved.get("videoUrl"):
+                            raise ValueError(f"Impossible de résoudre le flux vidéo de la source importée pour {task.fileName}")
+                        direct_url = resolved["videoUrl"]
+                        server_type = resolved.get("serverType", "imported")
+                        task.directDownloadUrl = direct_url
+                        if resolved.get("size") and task.totalBytes <= 0:
+                            task.totalBytes = resolved["size"]
                     elif is_voir_anime:
                         from animan.services.source_settings_service import source_settings_service
                         va_settings = source_settings_service.get_source_settings("voir-anime")
@@ -1616,17 +1664,6 @@ class DownloadManagerService:
                                 raise ValueError(f"Échec d'extraction du flux vidéo Kwik pour {task.fileName}")
                             direct_url = extracted
                         task.directDownloadUrl = direct_url
-                    elif is_imported:
-                        resolved = await self.resolve_imported_video_stream(
-                            direct_url, preferred_quality=task.selectedQuality
-                        )
-                        if not resolved or not resolved.get("videoUrl"):
-                            raise ValueError(f"Impossible de résoudre le flux vidéo de la source importée pour {task.fileName}")
-                        direct_url = resolved["videoUrl"]
-                        server_type = resolved.get("serverType", "imported")
-                        task.directDownloadUrl = direct_url
-                        if resolved.get("size") and task.totalBytes <= 0:
-                            task.totalBytes = resolved["size"]
                     elif direct_url and self._needs_scraping_resolution(direct_url):
                         info = await asyncio.to_thread(scraping_service.extract_download_info, direct_url)
                         direct_url = info.get("videoUrl", "")
