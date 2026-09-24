@@ -22,7 +22,7 @@ class MainActivity : AppCompatActivity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private val PREFS_NAME = "animan_prefs"
     private val KEY_SERVER_URL = "server_url"
-    private val DEFAULT_URL = "http://10.0.2.2:8000"
+    private val DEFAULT_URL = "http://localhost:8080"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
