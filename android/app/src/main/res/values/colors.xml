@@ -1,0 +1,9 @@
+<resources>
+    <color name="bg_dark">#0E121D</color>
+    <color name="surface_dark">#151B2B</color>
+    <color name="accent_purple">#9D6FFF</color>
+    <color name="accent_purple_dark">#7A41EB</color>
+    <color name="text_white">#F1F5F9</color>
+    <color name="text_muted">#94A3B8</color>
+    <color name="border_color">#263248</color>
+</resources>

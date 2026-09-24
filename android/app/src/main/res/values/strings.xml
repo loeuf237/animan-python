@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Animan</string>
+    <string name="server_url_hint">http://192.168.1.50:8000</string>
+    <string name="connect">Se connecter</string>
+    <string name="connection_error_title">Serveur non détecté</string>
+    <string name="connection_error_desc">Assurez-vous qu\'Animan est lancé sur votre PC ou serveur local sur le même réseau Wi-Fi.</string>
+    <string name="change_server">Configurer le serveur</string>
+    <string name="retry">Réessayer</string>
+    <string name="download_started">Téléchargement lancé</string>
+</resources>

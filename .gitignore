@@ -69,3 +69,11 @@ animan/ressources/
 CONVERSATION_HISTORY.md
 *CONVERSATION*.md
 *.deb
+
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
