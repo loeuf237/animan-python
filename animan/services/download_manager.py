@@ -251,8 +251,14 @@ class DownloadManagerService:
             headers["Referer"] = "https://streamtape.com/"
         elif any(h in u_lower for h in ["kwik", "animepahe", "pahe"]) or s_lower == "kwik":
             headers["Referer"] = "https://kwik.cx/"
-        elif any(h in u_lower for h in ["voembed", "vidmoly", "vmeas.cloud", "vmpx.online"]) or s_lower in ["mytv", "vidmoly", "voembed"]:
-            headers["Referer"] = "https://voembed.net/"
+        elif any(h in u_lower for h in ["voembed", "vidmoly", "vmeas.cloud", "vmpx.online", "ansembed"]) or s_lower in ["mytv", "vidmoly", "voembed", "ansembed"]:
+            headers["Referer"] = "https://ansembed.net/" if "ansembed" in u_lower else "https://voembed.net/"
+        elif "sibnet.ru" in u_lower or s_lower == "sibnet":
+            headers["Referer"] = "https://video.sibnet.ru/"
+        elif "sendvid.com" in u_lower or s_lower == "sendvid":
+            headers["Referer"] = "https://sendvid.com/"
+        elif "uqload" in u_lower or s_lower == "uqload":
+            headers["Referer"] = "https://uqload.is/"
         elif "mail.ru" in u_lower or s_lower in ["fhd1", "mailru"]:
             headers["Referer"] = "https://my.mail.ru/"
         elif any(h in u_lower for h in ["voe.sx", "johnfullwonder", "voe-un-block"]) or s_lower == "voe":
@@ -293,21 +299,28 @@ class DownloadManagerService:
                 timeout=8.0,
                 follow_redirects=True,
             ) as client:
-                resp = await client.head(url)
-                cl = resp.headers.get("Content-Length")
-                if cl and cl.isdigit() and int(cl) > 0:
-                    return int(cl)
+                try:
+                    resp = await client.head(url)
+                    if resp.status_code == 200:
+                        cl = resp.headers.get("Content-Length")
+                        if cl and cl.isdigit() and int(cl) > 1024:
+                            return int(cl)
+                except Exception:
+                    pass
 
-                # Essai Range: bytes=0-0
-                range_resp = await client.get(url, headers={"Range": "bytes=0-0"})
-                cr = range_resp.headers.get("Content-Range")
-                if cr and "/" in cr:
-                    total_str = cr.split("/")[-1].strip()
-                    if total_str.isdigit():
-                        return int(total_str)
-                cl2 = range_resp.headers.get("Content-Length")
-                if cl2 and cl2.isdigit() and int(cl2) > 0 and range_resp.status_code == 200:
-                    return int(cl2)
+                # Essai Range: bytes=0-0 pour les serveurs rejetant HEAD (ex: Sibnet)
+                try:
+                    range_resp = await client.get(url, headers={"Range": "bytes=0-0"})
+                    cr = range_resp.headers.get("Content-Range")
+                    if cr and "/" in cr:
+                        total_str = cr.split("/")[-1].strip()
+                        if total_str.isdigit():
+                            return int(total_str)
+                    cl2 = range_resp.headers.get("Content-Length")
+                    if cl2 and cl2.isdigit() and int(cl2) > 0 and range_resp.status_code == 200:
+                        return int(cl2)
+                except Exception:
+                    pass
         except Exception as e:
             logger.debug("Error in get_remote_file_size for %s: %s", url, e)
         return -1
@@ -406,16 +419,202 @@ class DownloadManagerService:
 
         return -1
 
+    async def resolve_imported_video_stream(
+        self,
+        url: str,
+        referer: Optional[str] = None,
+        preferred_quality: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Résout l'URL directe (m3u8 ou mp4) pour les sources importées et hébergeurs vidéo courants.
+        Prend en charge Vidmoly/Ansembed, Sibnet, Sendvid, Uqload, Streamtape, VOE et le repli yt-dlp.
+        """
+        if not url:
+            return None
+
+        parsed = urlparse(url)
+        u_host = (parsed.hostname or "").lower()
+
+        # 1. Vidmoly / Ansembed / Voembed / Vmeas
+        if any(h in u_host for h in ["ansembed", "vidmoly", "voembed", "vmeas", "vmpx"]):
+            try:
+                ref = referer or "https://ansembed.net/"
+                headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": ref}
+                async with self._create_async_client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        m = re.search(r'file:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', resp.text)
+                        if not m:
+                            m = re.search(r'sources:\s*\[\s*\{\s*file:\s*["\']([^"\']+)["\']', resp.text)
+                        if m:
+                            master_m3u8 = m.group(1)
+                            est_sz = await self.estimate_hls_size(master_m3u8, headers={"Referer": url})
+                            return {
+                                "videoUrl": master_m3u8,
+                                "serverType": "Vidmoly",
+                                "selectedQuality": preferred_quality or "HD",
+                                "videoQualities": json.dumps({"HD": master_m3u8}),
+                                "size": est_sz,
+                            }
+            except Exception as e:
+                logger.debug("Erreur resolve Vidmoly/Ansembed %s: %s", url, e)
+
+        # 2. Sibnet (video.sibnet.ru)
+        if "sibnet.ru" in u_host:
+            try:
+                ref = referer or "https://video.sibnet.ru/"
+                headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": ref}
+                async with self._create_async_client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        m = re.search(r'src:\s*["\'](/v/[^"\']+\.mp4[^"\']*)["\']', resp.text)
+                        if m:
+                            direct_mp4 = "https://video.sibnet.ru" + m.group(1)
+                            sz = await self.get_remote_file_size(direct_mp4, headers={"Referer": "https://video.sibnet.ru/"}, server_type="Sibnet")
+                            return {
+                                "videoUrl": direct_mp4,
+                                "serverType": "Sibnet",
+                                "selectedQuality": "HD",
+                                "videoQualities": json.dumps({"HD": direct_mp4}),
+                                "size": sz,
+                            }
+            except Exception as e:
+                logger.debug("Erreur resolve Sibnet %s: %s", url, e)
+
+        # 3. Sendvid (sendvid.com)
+        if "sendvid.com" in u_host:
+            try:
+                headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://sendvid.com/"}
+                async with self._create_async_client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        m = re.search(r'var\s+video_source\s*=\s*["\']([^"\']+)["\']', resp.text) or re.search(r'<source[^>]*src=["\']([^"\']+)["\']', resp.text)
+                        if m:
+                            direct_mp4 = m.group(1)
+                            if direct_mp4.startswith("//"):
+                                direct_mp4 = "https:" + direct_mp4
+                            sz = await self.get_remote_file_size(direct_mp4, headers={"Referer": "https://sendvid.com/"}, server_type="Sendvid")
+                            return {
+                                "videoUrl": direct_mp4,
+                                "serverType": "Sendvid",
+                                "selectedQuality": "HD",
+                                "videoQualities": json.dumps({"HD": direct_mp4}),
+                                "size": sz,
+                            }
+            except Exception as e:
+                logger.debug("Erreur resolve Sendvid %s: %s", url, e)
+
+        # 4. Uqload (uqload.is, uqload.co, etc.)
+        if "uqload" in u_host:
+            try:
+                headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://uqload.is/"}
+                async with self._create_async_client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        m = re.search(r'sources:\s*\[\s*["\']([^"\']+)["\']', resp.text)
+                        if m:
+                            direct_mp4 = m.group(1)
+                            sz = await self.get_remote_file_size(direct_mp4, headers={"Referer": "https://uqload.is/"}, server_type="Uqload")
+                            return {
+                                "videoUrl": direct_mp4,
+                                "serverType": "Uqload",
+                                "selectedQuality": "HD",
+                                "videoQualities": json.dumps({"HD": direct_mp4}),
+                                "size": sz,
+                            }
+            except Exception as e:
+                logger.debug("Erreur resolve Uqload %s: %s", url, e)
+
+        # 5. Streamtape
+        if "streamtape" in u_host or "stape" in u_host:
+            try:
+                headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://streamtape.com/"}
+                async with self._create_async_client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        direct = voiranime_service._extract_streamtape(resp.text, url)
+                        if direct:
+                            sz = await self.get_remote_file_size(direct, server_type="stape")
+                            return {
+                                "videoUrl": direct,
+                                "serverType": "Streamtape",
+                                "selectedQuality": "HD",
+                                "videoQualities": json.dumps({"HD": direct}),
+                                "size": sz,
+                            }
+            except Exception as e:
+                logger.debug("Erreur resolve Streamtape %s: %s", url, e)
+
+        # 6. VOE
+        if "voe" in u_host:
+            try:
+                headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://voe.sx/"}
+                async with self._create_async_client(headers=headers, timeout=10.0, follow_redirects=True) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        direct = voiranime_service._extract_voe(resp.text, url)
+                        if direct:
+                            is_hls = ".m3u8" in direct.lower()
+                            sz = await self.estimate_hls_size(direct, server_type="voe") if is_hls else await self.get_remote_file_size(direct, server_type="voe")
+                            return {
+                                "videoUrl": direct,
+                                "serverType": "VOE",
+                                "selectedQuality": "HD",
+                                "videoQualities": json.dumps({"HD": direct}),
+                                "size": sz,
+                            }
+            except Exception as e:
+                logger.debug("Erreur resolve VOE %s: %s", url, e)
+
+        # 7. Fallback universel yt-dlp
+        try:
+            import yt_dlp
+            def _extract_ydl():
+                ydl_opts = {
+                    "quiet": True,
+                    "no_warnings": True,
+                    "skip_download": True,
+                }
+                if referer:
+                    ydl_opts["http_headers"] = {"Referer": referer}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await asyncio.to_thread(_extract_ydl)
+            if info:
+                direct = info.get("url")
+                if not direct and info.get("formats"):
+                    valid_fmts = [f for f in info["formats"] if f.get("url")]
+                    if valid_fmts:
+                        direct = valid_fmts[-1]["url"]
+                if direct:
+                    is_hls = ".m3u8" in direct.lower() or info.get("protocol") == "m3u8_native"
+                    sz = info.get("filesize") or info.get("filesize_approx") or 0
+                    if sz <= 0:
+                        sz = await self.estimate_hls_size(direct) if is_hls else await self.get_remote_file_size(direct)
+                    return {
+                        "videoUrl": direct,
+                        "serverType": info.get("extractor", "ytdlp"),
+                        "selectedQuality": "HD",
+                        "videoQualities": json.dumps({"HD": direct}),
+                        "size": sz,
+                    }
+        except Exception as e:
+            logger.debug("Fallback yt-dlp failed for %s: %s", url, e)
+
+        return None
+
     async def get_or_resolve_episode_info(
         self,
         download_page_url: str,
         preferred_server: Optional[str] = None,
         preferred_quality: Optional[str] = None,
+        source: Optional[str] = None,
     ) -> Optional[ResolvedVideoInfo]:
         if not download_page_url:
             return None
         eff_server_key = preferred_server or self.voiranime_default_server
-        cache_key = f"{download_page_url}::{eff_server_key}::{preferred_quality or ''}"
+        cache_key = f"{download_page_url}::{source or ''}::{eff_server_key}::{preferred_quality or ''}"
         if cache_key in self.resolved_info_cache:
             return self.resolved_info_cache[cache_key]
 
@@ -528,13 +727,15 @@ class DownloadManagerService:
                     if dl_info.get("size"):
                         info.size = dl_info["size"]
                 else:
-                    # Vérifier si l'URL correspond à une extension Aniyomi active
+                    # Vérifier si l'URL correspond à une extension Aniyomi active ou un hébergeur d'embed vidéo
                     matched_container = None
                     try:
                         from animan.services.extension_service import extension_service
                         parsed_u = urlparse(download_page_url)
                         u_host = (parsed_u.hostname or "").lower()
-                        if u_host:
+                        if source and source.startswith("eu.kanade."):
+                            matched_container = extension_service.get_container_source_by_id(source)
+                        if not matched_container and u_host:
                             for cs in extension_service.get_enabled_container_sources():
                                 if cs.base_url and u_host in cs.base_url.lower():
                                     matched_container = cs
@@ -542,30 +743,48 @@ class DownloadManagerService:
                     except Exception:
                         pass
 
-                    if matched_container:
-                        video_sources = await matched_container.get_episode_sources(download_page_url)
-                        qualities = {}
-                        target = None
-                        for s in video_sources:
-                            q_name = s.quality or s.server
-                            qualities[q_name] = s.url
-                            if preferred_quality and (preferred_quality.lower() in q_name.lower()):
-                                if not target:
-                                    target = s
-                        if not target and video_sources:
-                            target = video_sources[0]
+                    parsed_u = urlparse(download_page_url)
+                    u_host = (parsed_u.hostname or "").lower()
+                    is_known_embed = any(h in u_host for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload", "dood", "filemoon"])
+                    is_imported_source = bool(source and source not in ("french-manga", "voir-anime", "animepahe"))
 
-                        dl_info = {
-                            "videoUrl": target.url if target else "",
-                            "serverType": target.server if target else "aniyomi",
-                            "selectedQuality": target.quality if target else "HD",
-                            "videoQualities": json.dumps(qualities),
-                        }
-                        info.server_type = dl_info["serverType"]
-                        info.available_servers = [s.server for s in video_sources]
-                        info.video_qualities_json = dl_info["videoQualities"]
+                    if is_known_embed or is_imported_source or matched_container:
+                        target_url = download_page_url
+                        if matched_container and not is_known_embed:
+                            video_sources = await matched_container.get_episode_sources(download_page_url)
+                            qualities = {}
+                            target = None
+                            for s in video_sources:
+                                q_name = s.get("quality") or s.get("server") or "HD"
+                                qualities[q_name] = s.get("url", "")
+                                if preferred_quality and (preferred_quality.lower() in q_name.lower()):
+                                    if not target:
+                                        target = s
+                            if not target and video_sources:
+                                target = video_sources[0]
+                            if target and target.get("url"):
+                                target_url = target.get("url", "")
+
+                        # Résolution du flux direct via resolve_imported_video_stream
+                        resolved = await self.resolve_imported_video_stream(
+                            target_url, preferred_quality=preferred_quality
+                        )
+                        if resolved and resolved.get("videoUrl"):
+                            dl_info = resolved
+                        else:
+                            dl_info = {
+                                "videoUrl": target_url,
+                                "serverType": "imported",
+                                "selectedQuality": preferred_quality or "HD",
+                                "videoQualities": json.dumps({"HD": target_url}),
+                            }
+                        info.server_type = dl_info.get("serverType", "imported")
+                        info.available_servers = [info.server_type]
+                        info.video_qualities_json = dl_info.get("videoQualities", "{}")
                         info.selected_server = info.server_type
-                        info.selected_quality = dl_info["selectedQuality"]
+                        info.selected_quality = dl_info.get("selectedQuality", "HD")
+                        if dl_info.get("size"):
+                            info.size = dl_info["size"]
                     else:
                         dl_info = await asyncio.to_thread(scraping_service.extract_download_info, download_page_url)
                         info.server_type = "vidzy"
@@ -612,8 +831,9 @@ class DownloadManagerService:
         download_subtitles: bool = False,
         selected_server: Optional[str] = None,
         selected_quality: Optional[str] = None,
+        source: str = "french-manga",
     ) -> DownloadTask:
-        cache_key = f"{download_page_url}::{selected_server or ''}::{selected_quality or ''}"
+        cache_key = f"{download_page_url}::{source}::{selected_server or ''}::{selected_quality or ''}"
         cached = self.resolved_info_cache.get(cache_key)
         if not cached and not (selected_server or selected_quality):
             cached = self.resolved_info_cache.get(download_page_url)
@@ -655,6 +875,7 @@ class DownloadManagerService:
             totalBytes=initial_total_bytes,
             selectedServer=selected_server,
             selectedQuality=selected_quality,
+            source=source,
         )
 
         self.tasks[task.id] = task
@@ -667,7 +888,7 @@ class DownloadManagerService:
         self.broadcast_update(task)
         return task
 
-    def start_batch_download(self, anime_name: str, episodes: List[Dict[str, Any]]) -> List[DownloadTask]:
+    def start_batch_download(self, anime_name: str, episodes: List[Dict[str, Any]], source: str = "french-manga") -> List[DownloadTask]:
         started = []
         new_tasks = []
 
@@ -683,6 +904,7 @@ class DownloadManagerService:
             url = ep.get("url", "")
             if not url:
                 continue
+            ep_source = ep.get("source") or source
             name = ep.get("fileName", f"{anime_name} - Episode {ep_num}.mp4")
             sub_url = ep.get("subtitleUrl")
             dl_subs = str(ep.get("downloadSubtitles", "false")).lower() == "true"
@@ -757,6 +979,7 @@ class DownloadManagerService:
                 totalBytes=initial_total_bytes,
                 selectedServer=sel_server,
                 selectedQuality=sel_quality,
+                source=ep_source,
             )
 
             self.tasks[task.id] = task
@@ -1304,6 +1527,10 @@ class DownloadManagerService:
                     direct_url = task.fileUrl
                     is_voir_anime = ("voir-anime" in (direct_url or "").lower()) or ("voiranime" in (direct_url or "").lower())
                     is_animepahe = any(k in (direct_url or "").lower() for k in ["animepahe", "kwik.", "pahe."])
+                    is_imported = (
+                        (task.source and (task.source.startswith("eu.kanade.") or task.source not in ("french-manga", "voir-anime", "animepahe"))) or
+                        any(h in (direct_url or "").lower() for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload"])
+                    )
                     server_type = "vidzy"
                     chunks_json = "[]"
 
@@ -1389,6 +1616,17 @@ class DownloadManagerService:
                                 raise ValueError(f"Échec d'extraction du flux vidéo Kwik pour {task.fileName}")
                             direct_url = extracted
                         task.directDownloadUrl = direct_url
+                    elif is_imported:
+                        resolved = await self.resolve_imported_video_stream(
+                            direct_url, preferred_quality=task.selectedQuality
+                        )
+                        if not resolved or not resolved.get("videoUrl"):
+                            raise ValueError(f"Impossible de résoudre le flux vidéo de la source importée pour {task.fileName}")
+                        direct_url = resolved["videoUrl"]
+                        server_type = resolved.get("serverType", "imported")
+                        task.directDownloadUrl = direct_url
+                        if resolved.get("size") and task.totalBytes <= 0:
+                            task.totalBytes = resolved["size"]
                     elif direct_url and self._needs_scraping_resolution(direct_url):
                         info = await asyncio.to_thread(scraping_service.extract_download_info, direct_url)
                         direct_url = info.get("videoUrl", "")
@@ -1612,20 +1850,7 @@ class DownloadManagerService:
             if part_path.exists():
                 existing_len = part_path.stat().st_size
 
-        if any(k in direct_url for k in ["kwik", "animepahe", "pahe"]):
-            referer = "https://kwik.cx/"
-        elif any(k in direct_url for k in ["streamtape", "tapecontent"]):
-            referer = "https://streamtape.com/"
-        elif "vidzy" in direct_url:
-            referer = "https://vidzy.org/"
-        elif "voir" in direct_url:
-            referer = "https://voir-anime.to/"
-        else:
-            referer = "https://french-manga.net/"
-        headers = {
-            "User-Agent": proxy_service.get_user_agent(),
-            "Referer": referer,
-        }
+        headers = self.get_headers_for_url(direct_url, getattr(task, "selectedServer", None))
         proxy = proxy_service.get_random_proxy()
 
         timeout = httpx.Timeout(connect=20.0, read=60.0, write=30.0, pool=None)
@@ -1945,10 +2170,7 @@ class DownloadManagerService:
         segments_dir = output_path.parent / f".{output_path.stem}_segments"
         segments_dir.mkdir(parents=True, exist_ok=True)
 
-        headers = {
-            "User-Agent": proxy_service.get_user_agent(),
-            "Referer": "https://voembed.net/",
-        }
+        headers = self.get_headers_for_url(m3u8_url, getattr(task, "selectedServer", None))
         proxy = proxy_service.get_random_proxy()
 
         timeout = httpx.Timeout(connect=20.0, read=45.0, write=30.0, pool=30.0)
@@ -2471,12 +2693,14 @@ class DownloadManagerService:
     def _needs_scraping_resolution(self, url: str) -> bool:
         if not url:
             return False
-        if re.search(r"\.(mp4|mkv|avi|webm)(\?.*)?$", url):
+        if re.search(r"\.(mp4|mkv|avi|webm|m3u8)(\?.*)?$", url):
+            return False
+        if any(h in url.lower() for h in ["ansembed", "vidmoly", "sibnet", "sendvid", "uqload", "streamtape", "stape", "voe", "myvi", "mp4upload"]):
             return False
         if "vidzy.live" in url or "luluvdo.com" in url or "french-manga.net" in url:
             return True
         if "vidzy.cc" in url and any(x in url for x in ["/e/", "/d/", "embed-"]):
             return True
-        return not bool(re.search(r"\.(mp4|mkv|avi|webm|ts|m4v)(\?.*)?$", url))
+        return not bool(re.search(r"\.(mp4|mkv|avi|webm|ts|m4v|m3u8)(\?.*)?$", url))
 
 download_manager = DownloadManagerService()

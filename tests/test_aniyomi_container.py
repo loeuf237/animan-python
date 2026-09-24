@@ -210,3 +210,138 @@ def test_api_extensions_routes(client):
     data = resp_list.json()
     assert "extensions" in data
     assert isinstance(data["extensions"], list)
+
+@pytest.mark.asyncio
+async def test_hanime_search_and_detail():
+    """Vérifie la recherche et les détails pour l'extension Hanime.tv via le catalogue API."""
+    from animan.services.aniyomi_container import AniyomiContainerSource, _get_hanime_catalog
+    recipe = SourceRecipe(
+        pkg="eu.kanade.tachiyomi.animeextension.en.hanime",
+        name="Hanime",
+        base_url="https://hanime.tv"
+    )
+    source = AniyomiContainerSource(recipe)
+
+    mock_catalog = [
+        {
+            "id": 1234,
+            "name": "Overflow Season 1",
+            "slug": "overflow-season-1",
+            "search_titles": "Overflow Season 1 hentai",
+            "poster_url": "https://hanime-cdn.com/images/posters/overflow.jpg",
+            "description": "<p>A nice bath experience.</p>",
+            "tags": ["romance", "comedy"],
+            "created_at_unix": 1600000000
+        },
+        {
+            "id": 5678,
+            "name": "Another Show",
+            "slug": "another-show",
+            "search_titles": "Another Show hentai",
+            "poster_url": "https://hanime-cdn.com/images/posters/another.jpg",
+            "description": "Another synopsis",
+            "tags": ["action"],
+            "created_at_unix": 1500000000
+        }
+    ]
+
+    with patch("animan.services.aniyomi_container._get_hanime_catalog", new_callable=AsyncMock) as mock_get_cat:
+        mock_get_cat.return_value = mock_catalog
+
+        # Recherche
+        results = await source.search_anime("overflow")
+        assert len(results) == 1
+        assert results[0].title == "Overflow Season 1"
+        assert results[0].url == "https://hanime.tv/videos/hentai/overflow-season-1"
+        assert results[0].imageUrl == "https://hanime-cdn.com/images/posters/overflow.jpg"
+        assert results[0].source == "eu.kanade.tachiyomi.animeextension.en.hanime"
+
+        # Dernières sorties
+        latest = await source.get_latest_releases()
+        assert len(latest) == 2
+        assert latest[0].title == "Overflow Season 1"
+
+        # Détails
+        detail = await source.get_anime_detail("https://hanime.tv/videos/hentai/overflow-season-1")
+        assert detail is not None
+        assert detail.title == "Overflow Season 1"
+        assert detail.synopsis == "A nice bath experience."
+        assert len(detail.episodes) == 1
+        assert detail.episodes[0].downloadPageUrl == "https://hanime.tv/videos/hentai/overflow-season-1"
+
+@pytest.mark.asyncio
+async def test_resolve_imported_video_stream():
+    """Vérifie la résolution de flux directs pour les hébergeurs embed vidéo (Vidmoly, Sibnet)."""
+    from animan.services.download_manager import download_manager
+
+    # Test Vidmoly/Ansembed
+    mock_html_vidmoly = """
+    <html><body><script>
+    var player = jwplayer("vplayer").setup({
+        sources: [{ file: "https://cdn.example.com/hls/master.m3u8" }]
+    });
+    </script></body></html>
+    """
+    with patch.object(download_manager, "_create_async_client") as mock_client_ctx:
+        mock_resp = AsyncMock()
+        mock_resp.status_code = 200
+        mock_resp.text = mock_html_vidmoly
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_ctx.return_value.__aenter__.return_value = mock_client
+
+        with patch.object(download_manager, "estimate_hls_size", new_callable=AsyncMock) as mock_est:
+            mock_est.return_value = 150_000_000
+            res = await download_manager.resolve_imported_video_stream("https://ansembed.net/embed-test.html")
+            assert res is not None
+            assert res["videoUrl"] == "https://cdn.example.com/hls/master.m3u8"
+            assert res["serverType"] == "Vidmoly"
+            assert res["size"] == 150_000_000
+
+    # Test Sibnet
+    mock_html_sibnet = """
+    <html><body>
+    <script>
+    player.src([ { type: "video/mp4", src: "/v/abcdef12345/123456.mp4" } ]);
+    </script>
+    </body></html>
+    """
+    with patch.object(download_manager, "_create_async_client") as mock_client_ctx:
+        mock_resp = AsyncMock()
+        mock_resp.status_code = 200
+        mock_resp.text = mock_html_sibnet
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_ctx.return_value.__aenter__.return_value = mock_client
+
+        with patch.object(download_manager, "get_remote_file_size", new_callable=AsyncMock) as mock_sz:
+            mock_sz.return_value = 250_000_000
+            res = await download_manager.resolve_imported_video_stream("https://video.sibnet.ru/shell.php?videoid=123456")
+            assert res is not None
+            assert res["videoUrl"] == "https://video.sibnet.ru/v/abcdef12345/123456.mp4"
+            assert res["serverType"] == "Sibnet"
+            assert res["size"] == 250_000_000
+
+def test_download_task_source_propagation():
+    """Vérifie la propagation du champ source dans start_download et start_batch_download."""
+    from animan.services.download_manager import download_manager
+
+    task = download_manager.start_download(
+        anime_name="Custom Anime",
+        episode_number=1,
+        download_page_url="https://ansembed.net/embed-123.html",
+        file_name="Custom Anime - Episode 1.mp4",
+        source="eu.kanade.tachiyomi.animeextension.fr.animesama"
+    )
+    assert task.source == "eu.kanade.tachiyomi.animeextension.fr.animesama"
+
+    batch_tasks = download_manager.start_batch_download(
+        anime_name="Batch Anime",
+        episodes=[
+            {"number": 1, "url": "https://video.sibnet.ru/shell.php?videoid=999", "fileName": "Batch - 1.mp4"}
+        ],
+        source="eu.kanade.tachiyomi.animeextension.fr.animesama"
+    )
+    assert len(batch_tasks) == 1
+    assert batch_tasks[0].source == "eu.kanade.tachiyomi.animeextension.fr.animesama"
+

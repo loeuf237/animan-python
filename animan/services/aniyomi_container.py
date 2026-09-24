@@ -14,6 +14,38 @@ from animan.services.proxy_service import proxy_service
 
 logger = logging.getLogger("animan.container")
 
+_hanime_catalog_cache: List[Dict[str, Any]] = []
+_hanime_catalog_time: float = 0.0
+
+async def _get_hanime_catalog() -> List[Dict[str, Any]]:
+    global _hanime_catalog_cache, _hanime_catalog_time
+    now = asyncio.get_event_loop().time()
+    if _hanime_catalog_cache and (now - _hanime_catalog_time) < 3600:
+        return _hanime_catalog_cache
+
+    url = "https://guest.freeanimehentai.net/api/v11/search_hvs"
+    headers = {
+        "User-Agent": settings.DEFAULT_USER_AGENT,
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://hanime.tv",
+        "Referer": "https://hanime.tv/",
+    }
+    proxy = proxy_service.get_active_proxy()
+    try:
+        async with httpx.AsyncClient(timeout=12.0, verify=settings.SSL_VERIFY, proxy=proxy) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                items = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                if items:
+                    _hanime_catalog_cache = items
+                    _hanime_catalog_time = now
+                    return _hanime_catalog_cache
+    except Exception as e:
+        logger.warning("Erreur lors de la récupération du catalogue Hanime: %s", e)
+
+    return _hanime_catalog_cache
+
 
 def _clean_selector(sel: Optional[str]) -> str:
     if not sel:
@@ -130,6 +162,38 @@ class AniyomiContainerSource:
         if not clean_q or not self.base_url:
             return []
 
+        # Support spécifique Hanime.tv via API de catalogue Astro
+        if "hanime" in (self.pkg or "").lower() or "hanime" in self.base_url.lower():
+            catalog = await _get_hanime_catalog()
+            q_lower = clean_q.lower()
+            results: List[AnimeResult] = []
+            for item in catalog:
+                name = item.get("name", "")
+                slug = item.get("slug", "")
+                search_titles = str(item.get("search_titles", ""))
+                tags = [str(t).lower() for t in item.get("tags", [])]
+                if (q_lower in name.lower() or
+                    q_lower in slug.lower() or
+                    q_lower in search_titles.lower() or
+                    any(q_lower == t for t in tags)):
+                    img_url = item.get("poster_url") or item.get("cover_url", "")
+                    results.append(
+                        AnimeResult(
+                            id=str(item.get("id")) if item.get("id") else str(hash(slug))[-8:],
+                            title=name,
+                            imageUrl=img_url,
+                            url=f"https://hanime.tv/videos/hentai/{slug}",
+                            version="EN",
+                            type="Anime",
+                            episodeInfo=item.get("brand") or self.name,
+                            source=self.source_id,
+                        )
+                    )
+                    if len(results) >= 50:
+                        break
+            logger.info("[container:%s] Hanime search: trouvé %d résultat(s)", self.name, len(results))
+            return results
+
         logger.info("[container:%s] Recherche: '%s'", self.name, clean_q)
         results: List[AnimeResult] = []
 
@@ -233,6 +297,27 @@ class AniyomiContainerSource:
         if not self.base_url:
             return []
 
+        # Support spécifique Hanime.tv
+        if "hanime" in (self.pkg or "").lower() or "hanime" in self.base_url.lower():
+            catalog = await _get_hanime_catalog()
+            sorted_items = sorted(catalog, key=lambda x: x.get("created_at_unix", 0) or x.get("released_at_unix", 0), reverse=True)
+            results = []
+            for item in sorted_items[:24]:
+                slug = item.get("slug", "")
+                results.append(
+                    AnimeResult(
+                        id=str(item.get("id")) if item.get("id") else str(hash(slug))[-8:],
+                        title=item.get("name", "Sans titre"),
+                        imageUrl=item.get("poster_url") or item.get("cover_url", ""),
+                        url=f"https://hanime.tv/videos/hentai/{slug}",
+                        version="EN",
+                        type="Anime",
+                        episodeInfo="Récents",
+                        source=self.source_id,
+                    )
+                )
+            return results
+
         rel_path = self.recipe.latest_request_path or self.recipe.popular_request_path or "/"
         target_url = urljoin(self.base_url, rel_path)
         html = await self._fetch_html(target_url)
@@ -276,6 +361,45 @@ class AniyomiContainerSource:
     async def get_anime_detail(self, anime_url: str) -> Optional[AnimeDetail]:
         if not is_safe_url(anime_url):
             return None
+
+        # Support spécifique Hanime.tv
+        if "hanime" in (self.pkg or "").lower() or "hanime" in self.base_url.lower():
+            catalog = await _get_hanime_catalog()
+            slug = anime_url.rstrip("/").split("/")[-1]
+            found_item = None
+            for item in catalog:
+                if item.get("slug") == slug:
+                    found_item = item
+                    break
+            if found_item:
+                title = found_item.get("name", "Anime")
+                img_url = found_item.get("poster_url") or found_item.get("cover_url", "")
+                raw_desc = found_item.get("description", "")
+                desc = re.sub(r'<[^>]+>', '', raw_desc).strip()
+                genres = found_item.get("tags", [])
+                episodes = [
+                    Episode(
+                        number=1,
+                        title=title,
+                        url=anime_url,
+                        downloadPageUrl=anime_url,
+                        playerUrl=anime_url,
+                        thumbnailUrl=img_url,
+                        version="EN",
+                        animeId=str(found_item.get("id", ""))[-8:],
+                    )
+                ]
+                return AnimeDetail(
+                    id=str(found_item.get("id", hash(anime_url)))[-8:],
+                    title=title,
+                    imageUrl=img_url,
+                    synopsis=desc,
+                    genres=genres[:6] if isinstance(genres, list) else [],
+                    episodes=episodes,
+                    source=self.source_id,
+                    url=anime_url,
+                    version="EN",
+                )
 
         html = await self._fetch_html(anime_url)
         if not html:
@@ -404,6 +528,33 @@ class AniyomiContainerSource:
         if not is_safe_url(play_url):
             return []
 
+        # Si l'URL de lecture est déjà un lien d'intégration vidéo direct (Vidmoly, Sibnet, Sendvid, Uqload, Streamtape, VOE, etc.)
+        domain = urlparse(play_url).netloc.lower()
+        known_embed_hosts = {
+            "ansembed": "Vidmoly",
+            "vidmoly": "Vidmoly",
+            "sibnet": "Sibnet",
+            "sendvid": "Sendvid",
+            "uqload": "Uqload",
+            "streamtape": "Streamtape",
+            "stape": "Streamtape",
+            "voe": "VOE",
+            "myvi": "Myvi",
+            "mp4upload": "Mp4Upload",
+            "dood": "Doodstream",
+            "filemoon": "Filemoon",
+            "kwik": "Kwik",
+        }
+        for k_domain, s_name in known_embed_hosts.items():
+            if k_domain in domain:
+                return [{
+                    "name": f"{self.name} - {s_name}",
+                    "server": s_name,
+                    "url": play_url,
+                    "quality": "HD",
+                    "format": "embed",
+                }]
+
         html = await self._fetch_html(play_url)
         if not html:
             return []
@@ -423,29 +574,43 @@ class AniyomiContainerSource:
 
             # Identification du nom de l'hébergeur
             host_name = "Lecteur Externe"
-            domain = urlparse(iframe_url).netloc.lower()
-            if "vidmoly" in domain:
-                host_name = "Vidmoly"
-            elif "streamtape" in domain or "stape" in domain:
-                host_name = "Streamtape"
-            elif "uqload" in domain:
-                host_name = "Uqload"
-            elif "sendvid" in domain:
-                host_name = "Sendvid"
-            elif "sibnet" in domain:
-                host_name = "Sibnet"
-            elif "voe" in domain:
-                host_name = "VOE"
-            elif "kwik" in domain:
-                host_name = "Kwik"
+            i_domain = urlparse(iframe_url).netloc.lower()
+            for k_domain, s_name in known_embed_hosts.items():
+                if k_domain in i_domain:
+                    host_name = s_name
+                    break
             else:
-                host_name = domain.replace("www.", "").split(".")[0].capitalize()
+                host_name = i_domain.replace("www.", "").split(".")[0].capitalize()
 
             sources.append({
                 "name": f"{self.name} - {host_name}",
+                "server": host_name,
                 "url": iframe_url,
                 "quality": "HD",
                 "format": "iframe",
             })
 
+        # 3. Si aucun iframe trouvé mais que la page contient des flux vidéo / sources directs
+        if not sources:
+            m_m3u8 = re.findall(r'sources:\s*\[\s*\{\s*file:\s*["\']([^"\']+)["\']', html) or re.findall(r'file:\s*["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', html)
+            for m_url in set(m_m3u8):
+                sources.append({
+                    "name": f"{self.name} - HLS",
+                    "server": "HLS",
+                    "url": m_url,
+                    "quality": "HD",
+                    "format": "hls",
+                })
+            m_mp4 = re.findall(r'<video[^>]*src=["\']([^"\']+\.mp4[^"\']*)["\']', html) or re.findall(r'<source[^>]*src=["\']([^"\']+\.mp4[^"\']*)["\']', html)
+            for mp4_url in set(m_mp4):
+                full_mp4 = urljoin(self.base_url, mp4_url)
+                sources.append({
+                    "name": f"{self.name} - MP4",
+                    "server": "Direct",
+                    "url": full_mp4,
+                    "quality": "HD",
+                    "format": "mp4",
+                })
+
         return sources
+

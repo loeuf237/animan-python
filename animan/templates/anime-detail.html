@@ -284,6 +284,7 @@
            data-subtitle="{{ ep.subtitleUrl or '' }}"
            data-player="{{ ep.playerUrl }}"
            data-downloaded="{{ 'true' if is_dl else 'false' }}"
+           data-source="{{ source or 'french-manga' }}"
            onclick="playEpisode(this.querySelector('.btn-play-ep') || this)">
 
         <div class="tachiyomi-ep-left">

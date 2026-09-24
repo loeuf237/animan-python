@@ -867,7 +867,7 @@ async function downloadEpisode(btn) {
   const origContent = btn.innerHTML;
   btn.innerHTML = '<span class="spinner-sm"></span>';
   try {
-    await startDownloadRequest(animeName, epNum, url, fileName, subtitleUrl, null, 0, downloadSubtitles, selectedServer, selectedQuality);
+    await startDownloadRequest(animeName, epNum, url, fileName, subtitleUrl, null, 0, downloadSubtitles, selectedServer, selectedQuality, source);
   } finally {
     setTimeout(() => {
       btn.disabled = false;
@@ -1014,8 +1014,9 @@ function toggleBatchSubtitles(checked) {
   });
 }
 
-async function startDownloadRequest(animeName, episodeNumber, url, fileName, subtitleUrl, scheduledTime, speedLimit, downloadSubtitles, selectedServer, selectedQuality) {
-  const body = { animeName, episodeNumber, url, fileName, downloadSubtitles };
+async function startDownloadRequest(animeName, episodeNumber, url, fileName, subtitleUrl, scheduledTime, speedLimit, downloadSubtitles, selectedServer, selectedQuality, source) {
+  const currentSource = source || (typeof SOURCE !== 'undefined' ? SOURCE : 'french-manga');
+  const body = { animeName, episodeNumber, url, fileName, downloadSubtitles, source: currentSource };
   if (subtitleUrl) body.subtitleUrl = subtitleUrl;
   if (scheduledTime) body.scheduledTime = scheduledTime;
   if (speedLimit) body.speedLimit = String(speedLimit);
@@ -1086,7 +1087,8 @@ async function downloadSelected() {
       downloadSubtitles: String(row.querySelector('.subtitle-check')?.checked || false),
       scheduledTime,
       selectedServer: epServer && epServer !== 'auto' ? epServer : null,
-      selectedQuality: epQuality && epQuality !== 'auto' ? epQuality : null
+      selectedQuality: epQuality && epQuality !== 'auto' ? epQuality : null,
+      source: row.dataset.source || source
     };
   });
 
@@ -1110,7 +1112,7 @@ async function downloadSelected() {
     const resp = await fetch('/api/download/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ animeName, episodes })
+      body: JSON.stringify({ animeName, source, episodes })
     });
     const data = await resp.json();
     if (data.success) {

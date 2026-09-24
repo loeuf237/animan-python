@@ -49,6 +49,7 @@ async def start_download(request: Request):
     download_subtitles = str(body.get("downloadSubtitles", "false")).lower() == "true"
     selected_server = body.get("selectedServer")
     selected_quality = body.get("selectedQuality")
+    source = body.get("source", "french-manga")
 
     scheduled_time_str = body.get("scheduledTime")
     scheduled_time = None
@@ -71,7 +72,7 @@ async def start_download(request: Request):
     # Vérification doublon
     existing = download_manager.check_existing_file(anime_name, file_name, episode_number)
     if existing:
-        info = await download_manager.get_or_resolve_episode_info(url, preferred_server=selected_server, preferred_quality=selected_quality)
+        info = await download_manager.get_or_resolve_episode_info(url, preferred_server=selected_server, preferred_quality=selected_quality, source=source)
         if info and info.size > 0 and existing.stat().st_size == info.size:
             return JSONResponse(
                 status_code=400,
@@ -93,6 +94,7 @@ async def start_download(request: Request):
         download_subtitles=download_subtitles,
         selected_server=selected_server,
         selected_quality=selected_quality,
+        source=source,
     )
 
     msg = (
@@ -117,11 +119,16 @@ async def set_global_speed_limit(request: Request):
 async def start_batch_download(request: Request):
     body = await request.json()
     anime_name = body.get("animeName", "Unknown")
+    source = body.get("source", "french-manga")
     episodes = body.get("episodes", [])
     if not episodes:
         return JSONResponse(status_code=400, content={"error": "Aucun épisode sélectionné"})
 
-    tasks = download_manager.start_batch_download(anime_name, episodes)
+    for ep in episodes:
+        if "source" not in ep:
+            ep["source"] = source
+
+    tasks = download_manager.start_batch_download(anime_name, episodes, source=source)
     return {
         "success": True,
         "count": len(tasks),
@@ -290,10 +297,11 @@ async def get_episode_size(
     url: str = Query(...),
     server: Optional[str] = Query(None),
     quality: Optional[str] = Query(None),
+    source: Optional[str] = Query(None),
 ):
     try:
         info = await download_manager.get_or_resolve_episode_info(
-            url, preferred_server=server, preferred_quality=quality
+            url, preferred_server=server, preferred_quality=quality, source=source
         )
         if info:
             qualities_dict = {}
