@@ -1,0 +1,82 @@
+name: Build and Release Windows (.exe)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag de la release (ex: v2.1.0)'
+        required: true
+        default: 'v2.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller "pywebview[edgechromium]" yt-dlp
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller animan.spec
+
+      - name: Archive build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/Animan/* -DestinationPath dist/Animan-Windows-x64.zip
+
+      - name: Determine Tag Name
+        id: vars
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ github.event.inputs.tag_name }}"
+          } else {
+            $tag = "${{ github.ref_name }}"
+          }
+          echo "tag=$tag" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release and Upload Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: Animan ${{ steps.vars.outputs.tag }} (Windows x64)
+          body: |
+            ## Animan - Version Windows x64 Autonome
+            
+            Cette version contient l'exécutable Windows complet et autonome d'**Animan**.
+            
+            ### Instructions d'installation :
+            1. Téléchargez `Animan-Windows-x64.zip` ci-dessous.
+            2. Décompressez l'archive dans le dossier de votre choix (ex: `C:\Animan`).
+            3. Double-cliquez sur `Animan.exe` pour lancer l'application.
+            
+            ### Nouveautés incluses :
+            - Interface native Edge WebView2 fluide sans terminal.
+            - Hub d'extracteurs vidéo modulaires (Axe 1 : Vidmoly, Sibnet, Sendvid, Streamtape, VOE, Uqload, etc.).
+            - Adaptateurs spécifiques intégrés (Axe 2 : Hanime Astro SPA, Anime-Sama JS).
+            - Base de données SQLite locale, historique de téléchargement et support Plex.
+          files: dist/Animan-Windows-x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

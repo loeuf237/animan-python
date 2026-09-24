@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 HOME_DIR = Path.home()
@@ -60,7 +61,10 @@ class Settings:
     LOG_LANGUAGE: str = os.getenv("ANIMAN_LOG_LANGUAGE", "en")
 
     # Project directories
-    BASE_DIR: Path = Path(__file__).resolve().parent
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        BASE_DIR: Path = Path(sys._MEIPASS) / "animan"
+    else:
+        BASE_DIR: Path = Path(__file__).resolve().parent
     TEMPLATES_DIR: Path = BASE_DIR / "templates"
     STATIC_DIR: Path = BASE_DIR / "static"
     CACHE_DIR: Path = Path(os.getenv("ANIMAN_CACHE_DIR", str(DEFAULT_CACHE_DIR)))
