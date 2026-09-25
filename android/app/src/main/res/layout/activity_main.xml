@@ -73,7 +73,7 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <!-- Écran moderne de configuration et détection du serveur -->
+    <!-- Écran de contrôle du serveur Animan -->
     <ScrollView
         android:id="@+id/errorLayout"
         android:layout_width="match_parent"
@@ -97,6 +97,7 @@
                 android:background="@color/surface_dark"
                 android:elevation="4dp">
 
+                <!-- En-tête -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -120,7 +121,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Connexion Animan"
+                            android:text="Animan Standalone"
                             android:textColor="@color/text_white"
                             android:textSize="19sp"
                             android:textStyle="bold" />
@@ -128,7 +129,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Réseau local Wi-Fi"
+                            android:text="Serveur Python Embarqué"
                             android:textColor="@color/accent_purple"
                             android:textSize="12sp"
                             android:textStyle="bold" />
@@ -138,140 +139,174 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="L'application Android se connecte à votre instance locale d'Animan sur le même réseau Wi-Fi."
+                    android:text="Animan exécute nativement son propre serveur backend Python (FastAPI / Uvicorn / SQLite) sur votre appareil."
                     android:textColor="@color/text_muted"
                     android:textSize="13sp"
                     android:lineSpacingExtra="2dp" />
 
-                <!-- Carte de serveur découvert automatiquement -->
+                <!-- Message d'état / erreur -->
+                <TextView
+                    android:id="@+id/txtErrorDetails"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:padding="12dp"
+                    android:background="@color/bg_dark"
+                    android:textColor="#F87171"
+                    android:textSize="12sp"
+                    android:lineSpacingExtra="2dp"
+                    android:visibility="gone" />
+
+                <!-- Bouton principal : relancer le serveur local -->
+                <Button
+                    android:id="@+id/btnStartLocalServer"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="16dp"
+                    android:backgroundTint="@color/accent_purple"
+                    android:text="🚀 Démarrer le serveur local"
+                    android:textColor="@color/text_white"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <!-- Bouton pour afficher les options distantes -->
+                <Button
+                    android:id="@+id/btnToggleRemote"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="⚙️ Options avancées : Serveur distant (Wi-Fi)"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp" />
+
+                <!-- Section distante masquée par défaut -->
                 <LinearLayout
-                    android:id="@+id/discoveredCard"
+                    android:id="@+id/remoteServerSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:layout_marginTop="16dp"
-                    android:padding="14dp"
-                    android:background="@color/bg_dark"
+                    android:layout_marginTop="8dp"
                     android:visibility="gone">
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="⚡ Serveur détecté sur votre réseau !"
-                        android:textColor="@color/accent_purple"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/txtDiscoveredUrl"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="http://192.168.1.34:8080"
-                        android:textColor="@color/text_white"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <Button
-                        android:id="@+id/btnConnectDiscovered"
+                    <!-- Carte de serveur découvert automatiquement -->
+                    <LinearLayout
+                        android:id="@+id/discoveredCard"
                         android:layout_width="match_parent"
-                        android:layout_height="42dp"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
                         android:layout_marginTop="10dp"
-                        android:backgroundTint="@color/accent_purple"
-                        android:text="Se connecter à ce serveur"
+                        android:padding="14dp"
+                        android:background="@color/bg_dark"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="⚡ Serveur détecté sur votre réseau !"
+                            android:textColor="@color/accent_purple"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/txtDiscoveredUrl"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="http://192.168.1.34:8080"
+                            android:textColor="@color/text_white"
+                            android:textSize="15sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btnConnectDiscovered"
+                            android:layout_width="match_parent"
+                            android:layout_height="42dp"
+                            android:layout_marginTop="10dp"
+                            android:backgroundTint="@color/accent_purple"
+                            android:text="Se connecter à ce serveur"
+                            android:textColor="@color/text_white"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- Indicateur de recherche auto -->
+                    <LinearLayout
+                        android:id="@+id/scanProgressLayout"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginTop="14dp"
+                        android:visibility="gone">
+
+                        <ProgressBar
+                            android:layout_width="20dp"
+                            android:layout_height="20dp"
+                            android:indeterminateTint="@color/accent_purple" />
+
+                        <TextView
+                            android:id="@+id/txtScanProgress"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="10dp"
+                            android:text="Recherche automatique sur le Wi-Fi..."
+                            android:textColor="@color/text_muted"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:text="Adresse IP ou URL du serveur distant :"
                         android:textColor="@color/text_white"
                         android:textSize="13sp"
                         android:textStyle="bold" />
-                </LinearLayout>
 
-                <!-- Indicateur de recherche auto -->
-                <LinearLayout
-                    android:id="@+id/scanProgressLayout"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginTop="14dp"
-                    android:visibility="gone">
-
-                    <ProgressBar
-                        android:layout_width="20dp"
-                        android:layout_height="20dp"
-                        android:indeterminateTint="@color/accent_purple" />
-
-                    <TextView
-                        android:id="@+id/txtScanProgress"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp"
-                        android:text="Recherche automatique du PC sur le Wi-Fi..."
-                        android:textColor="@color/text_muted"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:text="Adresse IP ou URL du serveur :"
-                    android:textColor="@color/text_white"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <EditText
-                    android:id="@+id/editServerUrl"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:layout_marginTop="6dp"
-                    android:background="@color/bg_dark"
-                    android:hint="ex: http://192.168.1.42:8080"
-                    android:inputType="textUri"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:textColor="@color/text_white"
-                    android:textColorHint="@color/text_muted"
-                    android:textSize="14sp" />
-
-                <!-- Boutons d'action -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:layout_marginTop="14dp">
-
-                    <Button
-                        android:id="@+id/btnConnect"
-                        android:layout_width="0dp"
-                        android:layout_height="46dp"
-                        android:layout_weight="1"
-                        android:backgroundTint="@color/accent_purple"
-                        android:text="Se connecter"
+                    <EditText
+                        android:id="@+id/editServerUrl"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="6dp"
+                        android:background="@color/bg_dark"
+                        android:hint="ex: http://192.168.1.42:8080"
+                        android:inputType="textUri"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
                         android:textColor="@color/text_white"
-                        android:textSize="14sp"
-                        android:textStyle="bold" />
+                        android:textColorHint="@color/text_muted"
+                        android:textSize="14sp" />
 
-                    <Button
-                        android:id="@+id/btnScanLan"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="46dp"
-                        android:layout_marginStart="8dp"
-                        android:text="Scanner"
-                        android:textColor="@color/accent_purple"
-                        android:textSize="13sp" />
+                    <!-- Boutons d'action -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="14dp">
+
+                        <Button
+                            android:id="@+id/btnConnect"
+                            android:layout_width="0dp"
+                            android:layout_height="46dp"
+                            android:layout_weight="1"
+                            android:backgroundTint="@color/accent_purple"
+                            android:text="Se connecter"
+                            android:textColor="@color/text_white"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btnScanLan"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="46dp"
+                            android:layout_marginStart="8dp"
+                            android:text="Scanner"
+                            android:textColor="@color/accent_purple"
+                            android:textSize="13sp" />
+                    </LinearLayout>
                 </LinearLayout>
-
-                <!-- Astuce d'aide -->
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:padding="12dp"
-                    android:background="@color/bg_dark"
-                    android:text="💡 Astuce : Sur votre PC, lancez Animan avec 'python3 run.py' (ou Animan.exe). L'adresse IP locale s'affiche automatiquement dans le terminal."
-                    android:textColor="@color/text_muted"
-                    android:textSize="12sp"
-                    android:lineSpacingExtra="2dp" />
 
             </LinearLayout>
         </LinearLayout>

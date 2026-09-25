@@ -3,10 +3,31 @@ import sys
 from pathlib import Path
 
 HOME_DIR = Path.home()
-DEFAULT_DOWNLOAD_DIR = str(HOME_DIR / "Downloads" / "Animan")
-DEFAULT_DB_DIR = HOME_DIR / ".animan" / "db"
-DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
-DEFAULT_CACHE_DIR = HOME_DIR / ".animan" / "cache"
+
+# Détection de l'environnement Android
+IS_ANDROID = hasattr(sys, "getandroidapilevel") or "ANDROID_ROOT" in os.environ or "chaquopy" in sys.modules
+
+if IS_ANDROID:
+    _data_dir = os.getenv("ANIMAN_DATA_DIR")
+    if not _data_dir:
+        try:
+            from com.chaquo.python import Python
+            _app = Python.getPlatform().getApplication()
+            _data_dir = str(_app.getFilesDir().getAbsolutePath())
+        except Exception:
+            _data_dir = None
+    if not _data_dir:
+        _data_dir = "/data/data/com.animan.app/files"
+    APP_STORAGE_DIR = Path(_data_dir)
+    DEFAULT_DOWNLOAD_DIR = "/storage/emulated/0/Download/Animan"
+    DEFAULT_DB_DIR = APP_STORAGE_DIR / "db"
+    DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
+    DEFAULT_CACHE_DIR = APP_STORAGE_DIR / "cache"
+else:
+    DEFAULT_DOWNLOAD_DIR = str(HOME_DIR / "Downloads" / "Animan")
+    DEFAULT_DB_DIR = HOME_DIR / ".animan" / "db"
+    DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
+    DEFAULT_CACHE_DIR = HOME_DIR / ".animan" / "cache"
 
 class Settings:
     PORT: int = int(os.getenv("ANIMAN_PORT", "8080"))
@@ -71,8 +92,10 @@ class Settings:
 
 settings = Settings()
 
-# Ensure directories exist
-Path(settings.DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
-DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
-settings.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure directories exist safely
+for _dir_path in [settings.DOWNLOAD_DIR, str(DEFAULT_DB_DIR), str(settings.CACHE_DIR)]:
+    try:
+        Path(_dir_path).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 

@@ -163,9 +163,18 @@ app.include_router(i18n_router)
 
 _embedded_server = None
 
-def start_embedded_server(host: str = "127.0.0.1", port: int = 8080):
+def start_embedded_server(host: str = "0.0.0.0", port: int = 8080, data_dir: str = None):
     """Point d'entrée pour les environnements embarqués (Android / Chaquopy, etc.)."""
     global _embedded_server
+    import os
+    from pathlib import Path
+    if data_dir:
+        os.environ["ANIMAN_DATA_DIR"] = str(data_dir)
+        try:
+            Path(data_dir, "db").mkdir(parents=True, exist_ok=True)
+            Path(data_dir, "cache").mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
     import uvicorn
     logger.info("Démarrage du serveur embarqué Animan sur %s:%d...", host, port)
     config = uvicorn.Config(

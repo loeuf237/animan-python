@@ -33,6 +33,8 @@ class MainActivity : AppCompatActivity() {
     private val KEY_SERVER_URL = "server_url"
     private var probeJob: Job? = null
     private var scanJob: Job? = null
+    @Volatile private var embeddedServerError: String? = null
+    @Volatile private var isServerStarting: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,9 +47,9 @@ class MainActivity : AppCompatActivity() {
         val savedUrl = getSavedServerUrl()
         if (savedUrl.contains("127.0.0.1") || savedUrl.contains("localhost")) {
             startEmbeddedPythonServer()
-            connectWithProbe(savedUrl, maxRetries = 15)
+            connectWithProbe(savedUrl, maxRetries = 35)
         } else {
-            connectWithProbe(savedUrl, maxRetries = 3)
+            connectWithProbe(savedUrl, maxRetries = 5)
         }
     }
 
@@ -160,6 +162,24 @@ class MainActivity : AppCompatActivity() {
             showErrorScreen()
         }
 
+        binding.btnStartLocalServer.setOnClickListener {
+            embeddedServerError = null
+            isServerStarting = false
+            saveServerUrl("http://127.0.0.1:8080")
+            startEmbeddedPythonServer()
+            connectWithProbe("http://127.0.0.1:8080", maxRetries = 35)
+        }
+
+        binding.btnToggleRemote.setOnClickListener {
+            val isVisible = binding.remoteServerSection.visibility == View.VISIBLE
+            binding.remoteServerSection.visibility = if (isVisible) View.GONE else View.VISIBLE
+            binding.btnToggleRemote.text = if (isVisible) {
+                "⚙️ Options avancées : Serveur distant (Wi-Fi) ▼"
+            } else {
+                "⚙️ Masquer les options distantes ▲"
+            }
+        }
+
         binding.btnConnect.setOnClickListener {
             var inputUrl = binding.editServerUrl.text.toString().trim()
             if (inputUrl.isNotEmpty()) {
@@ -185,39 +205,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startEmbeddedPythonServer() {
+        if (isServerStarting) return
+        isServerStarting = true
+        embeddedServerError = null
         thread(isDaemon = true, name = "AnimanEmbeddedServer") {
             try {
                 if (!Python.isStarted()) {
                     Python.start(AndroidPlatform(applicationContext))
                 }
                 val py = Python.getInstance()
+                val filesDir = applicationContext.filesDir.absolutePath
+                val cacheDir = applicationContext.cacheDir.absolutePath
+                try {
+                    val osModule = py.getModule("os")
+                    osModule["environ"]?.callAttr("__setitem__", "ANIMAN_DATA_DIR", filesDir)
+                    osModule["environ"]?.callAttr("__setitem__", "ANIMAN_CACHE_DIR", cacheDir)
+                    osModule["environ"]?.callAttr("__setitem__", "HOME", filesDir)
+                } catch (t: Throwable) {
+                    android.util.Log.w("AnimanApp", "Impossible de pré-configurer os.environ: ${t.message}")
+                }
                 val runModule = py.getModule("run")
-                runModule.callAttr("start_embedded_server", "127.0.0.1", 8080)
-            } catch (e: Exception) {
+                runModule.callAttr("start_embedded_server", "0.0.0.0", 8080, filesDir)
+            } catch (e: Throwable) {
+                isServerStarting = false
+                embeddedServerError = e.localizedMessage ?: e.toString()
                 android.util.Log.e("AnimanApp", "Erreur serveur Python embarqué: ${e.message}", e)
             }
         }
     }
 
-    private fun connectWithProbe(url: String, maxRetries: Int = 15) {
+    private fun connectWithProbe(url: String, maxRetries: Int = 35) {
         probeJob?.cancel()
         binding.errorLayout.visibility = View.GONE
         binding.loadingLayout.visibility = View.VISIBLE
-        binding.txtLoadingStatus.text = if (url.contains("127.0.0.1") || url.contains("localhost")) {
-            "Démarrage du serveur local Animan..."
-        } else {
-            "Connexion à $url..."
-        }
+        val isLocal = url.contains("127.0.0.1") || url.contains("localhost")
 
         probeJob = lifecycleScope.launch {
             var isReachable = false
             for (attempt in 1..maxRetries) {
+                if (isLocal) {
+                    binding.txtLoadingStatus.text = if (attempt <= 10) {
+                        "Initialisation de l'environnement Python ($attempt/$maxRetries)..."
+                    } else {
+                        "Démarrage du serveur local Animan ($attempt/$maxRetries)..."
+                    }
+                } else {
+                    binding.txtLoadingStatus.text = "Connexion à $url ($attempt/$maxRetries)..."
+                }
+
                 isReachable = withContext(Dispatchers.IO) {
-                    testHttpReachability(url, timeoutMs = 800)
+                    testHttpReachability(url, timeoutMs = 1500)
                 }
                 if (isReachable) break
+
+                if (embeddedServerError != null) {
+                    break
+                }
+
                 if (attempt < maxRetries) {
-                    delay(700)
+                    delay(800)
                 }
             }
 
@@ -226,14 +272,22 @@ class MainActivity : AppCompatActivity() {
             } else {
                 binding.loadingLayout.visibility = View.GONE
                 showErrorScreen()
-                // Launch background auto-discovery
-                startLanAutoDiscovery()
+                if (!isLocal) {
+                    startLanAutoDiscovery()
+                }
             }
         }
     }
 
     private fun showErrorScreen() {
         binding.errorLayout.visibility = View.VISIBLE
+        if (embeddedServerError != null) {
+            binding.txtErrorDetails.visibility = View.VISIBLE
+            binding.txtErrorDetails.text = "Erreur serveur embarqué :\n$embeddedServerError"
+        } else {
+            binding.txtErrorDetails.visibility = View.VISIBLE
+            binding.txtErrorDetails.text = "Le serveur Python embarqué n'a pas répondu à temps.\nCliquez sur « Démarrer le serveur local » pour relancer l'instance native."
+        }
         binding.editServerUrl.setText(getSavedServerUrl())
     }
 
@@ -312,7 +366,13 @@ class MainActivity : AppCompatActivity() {
     private fun testHttpReachability(baseUrl: String, timeoutMs: Int): Boolean {
         return try {
             val testUrl = if (baseUrl.endsWith("/")) "${baseUrl}manifest.json" else "$baseUrl/manifest.json"
-            val conn = URL(testUrl).openConnection() as HttpURLConnection
+            val urlObj = URL(testUrl)
+            val isLocal = baseUrl.contains("127.0.0.1") || baseUrl.contains("localhost")
+            val conn = if (isLocal) {
+                urlObj.openConnection(java.net.Proxy.NO_PROXY) as HttpURLConnection
+            } else {
+                urlObj.openConnection() as HttpURLConnection
+            }
             conn.connectTimeout = timeoutMs
             conn.readTimeout = timeoutMs
             conn.requestMethod = "GET"

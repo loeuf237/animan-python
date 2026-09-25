@@ -64,6 +64,7 @@ dependencies {
 chaquopy {
     defaultConfig {
         version = "3.11"
+        extractPackages("animan")
         pip {
             options("--timeout", "120")
             install("pydantic<2.0.0")
