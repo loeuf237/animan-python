@@ -4,24 +4,26 @@
 [![Tests](https://img.shields.io/badge/Tests-178%20passed-34d399.svg)](tests/)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.12%20%7C%203.14-38bdf8.svg)](https://www.python.org/)
 [![PWA](https://img.shields.io/badge/PWA-Ready-f59e0b.svg)](animan/static/manifest.json)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Linux%20%7C%20Web-a855f7.svg)](#-téléchargements--applications)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Web-a855f7.svg)](#-téléchargements--applications)
 
-**Animan** est une application moderne et haute performance de streaming et de téléchargement d'animés (VF et VOSTFR), développée avec **FastAPI**, **Python 3** et une interface **Web / PWA / Native**.
+**Animan** est une application moderne et haute performance de streaming et de téléchargement d'animés (VF et VOSTFR), développée avec **FastAPI**, **Python 3** et une interface **Web / Desktop / PWA**.
 
-Disponible sous forme d'**application Android (.apk)**, d'**exécutable de bureau Windows (.exe)**, de **Progressive Web App (PWA)** ou de **serveur local Python**.
+Disponible sous forme d'**exécutable de bureau autonome pour Windows (.exe)**, d'application fenêtrée native pour **macOS & Linux** (`desktop.py`), ou de **Progressive Web App (PWA)** multiplateforme.
 
 ---
 
 ## 📥 Téléchargements & Applications
 
-Retrouvez tous les binaires compilés sur la page des [Releases GitHub](https://github.com/loeuf237/animan-python/releases/latest) :
+Retrouvez les versions compilées sur la page des [Releases GitHub](https://github.com/loeuf237/animan-python/releases/latest) :
 
-| Plateforme | Format | Lien direct | Description |
+| Plateforme | Format | Mode d'accès | Description |
 | :--- | :---: | :--- | :--- |
-| **Android** | `.apk` | [📲 **Animan-v2.1.0.apk**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-v2.1.0.apk) *(~48.7 Mo)* | Application Android **100% autonome** avec serveur Python (FastAPI/Uvicorn) embarqué via Chaquopy, lecteur immersif et téléchargements. |
-| **Windows** | `.exe` | [💻 **Animan-Windows-x64.zip**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-Windows-x64.zip) *(~34.8 Mo)* | Exécutable Windows autonome avec interface native WebView2 (Edge), sans installation de Python requise. |
+| **Windows** | `.exe` | [💻 **Animan-Windows-x64.zip**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-Windows-x64.zip) *(~35 Mo)* | Exécutable Windows autonome avec interface native WebView2 (Edge), sans installation de Python requise. |
+| **Linux** | `Desktop / Web` | [🐧 **Lancer via desktop.py**](#-lancement-sur-linux--macos) | Fenêtre native WebKitGTK ou serveur local via Python 3. |
+| **macOS** | `Desktop / Web` | [🍎 **Lancer via desktop.py**](#-lancement-sur-linux--macos) | Fenêtre native Cocoa / WebKit ou serveur local via Python 3. |
 | **Web / Mobile** | `PWA` | [🌐 **Installer depuis le navigateur**](#-installation-pwa-progressive-web-app) | Installation instantanée plein écran sans barre d'adresse sur Chrome, Edge, Safari iOS et Android. |
-| **Linux / Serveur** | `Python` | [🐧 **Lancer via Python**](#-démarrage-local-python) | Démarrage classique via Uvicorn / script `run.py`. |
+
+> ℹ️ *Note : L'ancienne version APK Android expérimentale est temporairement suspendue et fait l'objet d'une réécriture native complète sous Flutter.*
 
 ---
 
@@ -41,26 +43,13 @@ Retrouvez tous les binaires compilés sur la page des [Releases GitHub](https://
 
 ### 🎥 Streaming & Expérience Vidéo
 - Lecteur vidéo moderne (Plyr) avec prise en charge complète du seeking (`HTTP 206 Partial Content`).
-- Basculement automatique en plein écran paysage sur mobile et tablette.
-- Sélection des pistes de sous-titres et résolutions disponibles.
+- Interface 100% responsive et adaptative (Desktop, Tablettes, Mobiles).
+- Mode paysage immersif automatique et sélection des sous-titres/qualités.
 
 ### 📚 Bibliothèque & Synchronisation
 - Favoris, progression de visionnage par épisode et historique persistant sous SQLite.
-- Mode sombre AMOLED moderne et responsive inspiré des interfaces Mihon / Aniyomi.
+- Mode sombre AMOLED moderne inspiré des interfaces Mihon / Aniyomi.
 - Suivi en temps réel de la progression via **Server-Sent Events (SSE)**.
-
----
-
-## 📱 Application Android (.apk)
-
-L'application Android native intègre son propre runtime Python 3.11 embarqué via **Chaquopy** :
-
-1. Téléchargez le fichier [**Animan-v2.1.0.apk**](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-v2.1.0.apk).
-2. Ouvrez le fichier sur votre appareil Android et acceptez l'installation.
-3. Lancez **Animan** :
-   - **Mode 100% Autonome (par défaut)** : Le serveur backend FastAPI/Uvicorn démarre instantanément en tâche de fond sur votre téléphone (`http://127.0.0.1:8080`). Aucun PC, ni serveur externe n'est requis !
-   - **Mode Client / LAN (optionnel)** : Vous pouvez également vous connecter à un serveur Animan distant ou hébergé sur votre réseau local (ex: `http://192.168.1.50:8080`) via l'écran de configuration du serveur.
-4. **Téléchargements mobiles** : les épisodes sont directement téléchargés dans le dossier *Download* d'Android via le gestionnaire natif.
 
 ---
 
@@ -72,6 +61,25 @@ L'exécutable autonome Windows ne nécessite aucun environnement de développeme
 2. Décompressez l'archive dans un dossier de votre choix (ex: `C:\Animan`).
 3. Double-cliquez sur `Animan.exe`.
 4. L'application démarre automatiquement le serveur local en arrière-plan et ouvre une fenêtre native fluide via **Microsoft Edge WebView2**.
+
+---
+
+## 🍎 / 🐧 Lancement sur Linux & macOS
+
+Animan propose deux modes de fonctionnement natifs sur Linux et macOS :
+
+### 1. Mode Application Fenêtrée (Recommandé)
+Pour lancer Animan dans une fenêtre native indépendante (sans passer par un navigateur) :
+```bash
+python3 desktop.py
+```
+*Utilise WebKitGTK sous Linux et WebKit Cocoa sous macOS pour un rendu natif fluide sans terminal visible.*
+
+### 2. Mode Serveur Web / Headless
+```bash
+python3 run.py
+```
+Puis accédez à `http://localhost:8080` depuis n'importe quel navigateur sur votre machine ou réseau local.
 
 ---
 
