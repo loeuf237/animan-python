@@ -1033,6 +1033,7 @@ async function startDownloadRequest(animeName, episodeNumber, url, fileName, sub
     if (data.success) {
       showToast((data.message || 'Téléchargement lancé !') + ' <a href="/downloads" class="toast-link">Voir la file</a>', 'success');
       refreshDownloadBadge();
+      window.location.href = '/downloads';
 
       // Update episode row badge if on anime-detail page
       const row = document.querySelector(`.episode-item[data-num="${episodeNumber}"]`);
@@ -1117,6 +1118,7 @@ async function downloadSelected() {
     const data = await resp.json();
     if (data.success) {
       showToast(`${episodes.length} épisode(s) ajouté(s) aux téléchargements ! <a href="/downloads" class="toast-link">Voir la file</a>`, 'success');
+      window.location.href = '/downloads';
 
       // Mark rows with queued badge
       checked.forEach(cb => {
@@ -1556,6 +1558,7 @@ function initSSE() {
 function getTaskCategory(status) {
   if (['DOWNLOADING', 'RETRYING', 'PAUSED', 'MUXING'].includes(status)) return 'active';
   if (['PENDING', 'SCHEDULED'].includes(status)) return 'queue';
+  if (['FAILED', 'CANCELLED', 'ERROR'].includes(status)) return 'errors';
   return 'done';
 }
 
@@ -1566,6 +1569,40 @@ function renderTaskRowInner(task, queueIndex = 1) {
   const epNum = (task.episodeNumber !== undefined && task.episodeNumber !== null && task.episodeNumber !== '' && String(task.episodeNumber) !== 'undefined') ? task.episodeNumber : '';
   const subtitle = 'Épisode ' + epNum + (task.fileName ? ' - ' + task.fileName : '');
   const progress = Number(task.progress || 0);
+
+  if (cat === 'errors') {
+    const isEn = getCurrentLang() === 'en';
+    const errTitle = escapeHtml(task.error || (isEn ? 'Download error' : 'Erreur lors du téléchargement'));
+    return `
+      <div class="dl-main">
+        <div class="dl-cover" style="background:rgba(239,68,68,0.15);color:var(--red);font-weight:700;">${escapeHtml(initial)}</div>
+        <div>
+          <span class="dl-task-name">${escapeHtml(animeName)}</span>
+          <span class="dl-subtitle">${escapeHtml(subtitle)}</span>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+        <span class="dl-error-badge-compact" title="${errTitle}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+          ${task.status === 'FAILED' ? (isEn ? 'Failed' : 'Échec') : (isEn ? 'Cancelled' : 'Annulé')}
+        </span>
+        ${task.error ? `<span style="font-size:11px;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(task.error)}">${escapeHtml(task.error)}</span>` : ''}
+      </div>
+      <span class="dl-size">${escapeHtml(task.totalSize || '0 B')}</span>
+      <span class="dl-progress-text" style="color:var(--red);">${progress.toFixed(1)}%</span>
+      <div class="dl-task-actions" data-id="${escapeHtml(task.id)}" data-status="${escapeHtml(task.status)}" data-animename="${escapeHtml(animeName)}" data-episodenumber="${escapeHtml(String(epNum))}">
+        <button class="btn btn-sm btn-primary" type="button" onclick="redownloadTask('${escapeHtml(task.id)}')" title="${isEn ? 'Retry' : 'Réessayer'}" style="display:inline-flex;align-items:center;gap:4px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+          <span>${isEn ? 'Retry' : 'Réessayer'}</span>
+        </button>
+        <button class="btn btn-sm btn-danger-outline" type="button" onclick="removeTask('${escapeHtml(task.id)}')" title="${isEn ? 'Remove' : 'Supprimer'}">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
+        </button>
+      </div>
+      <div class="dl-task-bottom-bar">
+        <div class="dl-task-bottom-fill is-error" style="width:100%"></div>
+      </div>`;
+  }
 
   if (cat === 'queue') {
     let sizeContent = escapeHtml(task.totalSize || '0 B');
@@ -1700,7 +1737,7 @@ function renderTaskRowInner(task, queueIndex = 1) {
 function createTaskRow(task) {
   const row = document.createElement('div');
   const cat = getTaskCategory(task.status);
-  row.className = 'dl-task-row' + (cat === 'queue' ? ' queue-row' : (cat === 'done' ? ' completed-row' : ''));
+  row.className = 'dl-task-row' + (cat === 'queue' ? ' queue-row' : (cat === 'done' ? ' completed-row' : (cat === 'errors' ? ' error-row' : '')));
   row.id = 'task-' + task.id;
   row.dataset.id = task.id;
   row.dataset.category = cat;
@@ -1716,13 +1753,13 @@ function createTaskRow(task) {
 function updateTaskRow(task) {
   let row = document.getElementById('task-' + task.id);
   const newCat = getTaskCategory(task.status);
-  const targetParentId = newCat === 'active' ? 'download-list' : (newCat === 'queue' ? 'queue-list' : 'completed-list');
+  const targetParentId = newCat === 'active' ? 'download-list' : (newCat === 'queue' ? 'queue-list' : (newCat === 'errors' ? 'error-list' : 'completed-list'));
   const targetParent = document.getElementById(targetParentId);
   if (!targetParent) return;
 
   if (!row) {
     row = createTaskRow(task);
-    if (newCat === 'done') {
+    if (newCat === 'done' || newCat === 'errors') {
       targetParent.prepend(row);
     } else {
       targetParent.appendChild(row);
@@ -1733,20 +1770,20 @@ function updateTaskRow(task) {
     return;
   }
 
-  const oldCat = row.dataset.category || (row.classList.contains('queue-row') ? 'queue' : (row.classList.contains('completed-row') ? 'done' : 'active'));
+  const oldCat = row.dataset.category || (row.classList.contains('queue-row') ? 'queue' : (row.classList.contains('error-row') ? 'errors' : (row.classList.contains('completed-row') ? 'done' : 'active')));
   if (oldCat !== newCat) {
     row.dataset.category = newCat;
     row.dataset.status = task.status;
     row.dataset.speedBytes = task.speedBytes || 0;
     row.dataset.totalBytes = task.totalBytes || 0;
     row.dataset.downloadedBytes = task.downloadedBytes || 0;
-    row.className = 'dl-task-row' + (newCat === 'queue' ? ' queue-row' : (newCat === 'done' ? ' completed-row' : ''));
+    row.className = 'dl-task-row' + (newCat === 'queue' ? ' queue-row' : (newCat === 'done' ? ' completed-row' : (newCat === 'errors' ? ' error-row' : '')));
     if (newCat === 'queue') {
       row.setAttribute('draggable', 'true');
       targetParent.appendChild(row);
     } else {
       row.removeAttribute('draggable');
-      if (newCat === 'done') {
+      if (newCat === 'done' || newCat === 'errors') {
         targetParent.prepend(row);
       } else {
         targetParent.appendChild(row);
@@ -2077,11 +2114,13 @@ function refreshDownloadStats() {
   const activeRows = document.querySelectorAll('#download-list .dl-task-row');
   const queueRows = document.querySelectorAll('#queue-list .dl-task-row');
   const doneRows = document.querySelectorAll('#completed-list .dl-task-row');
+  const errorRows = document.querySelectorAll('#error-list .dl-task-row');
 
   const activeCount = activeRows.length;
   const queuedCount = queueRows.length;
   const doneCount = doneRows.length;
-  const totalCount = activeCount + queuedCount + doneCount;
+  const errorCount = errorRows.length;
+  const totalCount = activeCount + queuedCount + doneCount + errorCount;
 
   // Aggregate speed across active rows
   let totalSpeedBytes = 0;
@@ -2100,24 +2139,31 @@ function refreshDownloadStats() {
   setText('stat-active', activeCount);
   setText('stat-queued', queuedCount);
   setText('stat-speed', formatBytesSpeed(totalSpeedBytes));
+  setText('stat-errors', errorCount);
+  const statCardErrors = document.getElementById('stat-card-errors');
+  if (statCardErrors) statCardErrors.style.display = errorCount > 0 ? 'block' : 'none';
+
   setText('download-count-badge', activeCount + queuedCount);
   setText('mob-download-badge', activeCount + queuedCount);
 
   // Tab badges
   setText('tab-badge-queue', activeCount + queuedCount);
   setText('tab-badge-done', doneCount);
+  setText('tab-badge-errors', errorCount);
   setText('tab-badge-all', totalCount);
 
   // Empty state placeholders
   const activeEmptyNote = document.getElementById('active-empty-note');
   const queueEmptyNote = document.getElementById('queue-empty-note');
   const doneEmptyNote = document.getElementById('done-empty-note');
+  const errorEmptyNote = document.getElementById('error-empty-note');
   const globalEmpty = document.getElementById('dl-empty');
   const downloadHint = document.querySelector('.download-hint');
 
   if (activeEmptyNote) activeEmptyNote.style.display = activeCount === 0 ? 'block' : 'none';
   if (queueEmptyNote) queueEmptyNote.style.display = queuedCount === 0 ? 'block' : 'none';
   if (doneEmptyNote) doneEmptyNote.style.display = doneCount === 0 ? 'block' : 'none';
+  if (errorEmptyNote) errorEmptyNote.style.display = errorCount === 0 ? 'block' : 'none';
 
   if (globalEmpty) {
     globalEmpty.style.display = totalCount === 0 ? 'flex' : 'none';
@@ -2125,9 +2171,24 @@ function refreshDownloadStats() {
 
   if (downloadHint) {
     const activeFilter = document.querySelector('.tab-btn.active')?.dataset.downloadFilter || 'queue';
-    downloadHint.style.display = (activeFilter !== 'done' && queuedCount > 1) ? 'flex' : 'none';
+    downloadHint.style.display = (activeFilter !== 'done' && activeFilter !== 'errors' && queuedCount > 1) ? 'flex' : 'none';
   }
 }
+
+window.cleanAllErrors = async function() {
+  try {
+    const errorRows = document.querySelectorAll('#error-list .dl-task-row');
+    if (!errorRows.length) return;
+    for (const row of errorRows) {
+      const id = row.dataset.id;
+      if (id) await fetch('/api/download/' + id + '/remove', { method: 'DELETE' });
+    }
+    showToast(getCurrentLang() === 'en' ? 'Errors cleared' : 'Erreurs nettoyées', 'success');
+    setTimeout(() => window.location.reload(), 300);
+  } catch(e) {
+    showToast(getCurrentLang() === 'en' ? 'Failed to clear errors' : 'Erreur lors du nettoyage', 'error');
+  }
+};
 
 function refreshDownloadBadge() {
   const desktopBadge = document.getElementById('download-count-badge');

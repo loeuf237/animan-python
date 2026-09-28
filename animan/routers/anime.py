@@ -1,10 +1,10 @@
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
-from fastapi import APIRouter, Request, Query
-from fastapi.responses import HTMLResponse
-from animan.models.anime import AnimeResult
+from fastapi import APIRouter, Request, Query, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from animan.models.anime import AnimeResult, AnimeDetail
 from animan.security import is_safe_url
 from animan.services.library_service import library_service
 from animan.services.scraping_service import scraping_service
@@ -265,33 +265,13 @@ async def search_api(
             item.source = "french-manga"
         return results
 
-@router.get("/anime", response_class=HTMLResponse)
-async def anime_detail(
-    request: Request,
-    url: str = Query(..., alias="url"),
-    source: str = Query("french-manga", alias="source")
-):
-    logger.info("Anime detail requested [%s]: %s", source, url)
-    if not is_safe_url(url):
-        logger.warning("SSRF blocked on anime detail: %s", url)
-        favorites = library_service.get_all_favorites()
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context={
-                "error": "URL d'animé invalide ou non sécurisée.",
-                "favorites": favorites,
-                "results": None,
-                "latestFrenchManga": [],
-                "latestVoirAnime": [],
-                "latestAnimePahe": [],
-            }
-        )
+async def fetch_enriched_anime_detail(url: str, source: str = "french-manga") -> Optional[Dict[str, Any]]:
+    """Récupère et enrichit la fiche complète d'un animé (TMDB, épisodes, favoris, progression)."""
+    if not url or not is_safe_url(url):
+        return None
 
-    # Détection automatique et correction de la source d'après l'URL
     detected_source = detect_source_from_url(url, fallback=source)
     if detected_source != source:
-        logger.info("URL source corrected: [%s -> %s] for %s", source, detected_source, url)
         source = detected_source
 
     container_source = extension_service.get_container_source_by_id(source)
@@ -304,11 +284,10 @@ async def anime_detail(
     else:
         detail = await scraping_service.get_anime_detail(url)
 
-    # Si le scraper n'a retourné aucun épisode ou a échoué, tentative de repli pour les sources natives
+    # Repli automatique si résultats vides
     if not detail or not detail.episodes:
         if source not in ("animepahe",) and not container_source:
             alt_source = "voir-anime" if source != "voir-anime" else "french-manga"
-            logger.info("Incomplete or empty sheet with %s, attempting fallback to %s: %s", source, alt_source, url)
             if alt_source == "voir-anime":
                 alt_detail = await voiranime_service.get_anime_detail(url)
             else:
@@ -318,12 +297,65 @@ async def anime_detail(
                 source = alt_source
 
     if not detail:
+        return None
+
+    detail.source = source
+    detail = await tmdb_service.enrich_anime_detail(detail)
+    downloaded_set = library_service.get_downloaded_episodes_set(url)
+    watched_set = library_service.get_watched_episodes_set(url)
+    fav = library_service.get_favorite(url)
+    is_favorite = fav is not None
+    auto_download = fav.autoDownload if fav else False
+
+    episodes_data = []
+    for ep in detail.episodes:
+        num = ep.number
+        is_dl = (num in downloaded_set) or (str(num) in downloaded_set)
+        is_watched = (num in watched_set) or (str(num) in watched_set)
+        local_task = library_service.find_downloaded_episode(
+            anime_name=detail.title,
+            episode_number=num,
+            version=ep.version or detail.version or "",
+            episode_url=ep.downloadPageUrl or ep.playerUrl or "",
+        )
+        task_id = local_task.id if local_task else None
+        ep_dict = ep.model_dump()
+        ep_dict["isDownloaded"] = is_dl
+        ep_dict["isWatched"] = is_watched
+        ep_dict["downloadTaskId"] = task_id
+        episodes_data.append(ep_dict)
+
+    anime_dump = detail.model_dump()
+    anime_dump["episodes"] = episodes_data
+
+    return {
+        "detail_obj": detail,
+        "anime": anime_dump,
+        "source": source,
+        "isFavorite": is_favorite,
+        "autoDownload": auto_download,
+        "downloadedEpisodes": list(downloaded_set),
+        "watchedEpisodes": list(watched_set),
+        "totalEpisodes": len(episodes_data),
+        "downloadedCount": sum(1 for e in episodes_data if e["isDownloaded"]),
+        "watchedCount": sum(1 for e in episodes_data if e["isWatched"]),
+    }
+
+@router.get("/anime", response_class=HTMLResponse)
+async def anime_detail(
+    request: Request,
+    url: str = Query(..., alias="url"),
+    source: str = Query("french-manga", alias="source")
+):
+    logger.info("Anime detail requested [%s]: %s", source, url)
+    if not is_safe_url(url):
+        logger.warning("[anime_detail] SSRF blocked for URL: %s", url)
         favorites = library_service.get_all_favorites()
         return templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
-                "error": "Impossible de charger cet anime.",
+                "error": "URL d'animé invalide ou non sécurisée",
                 "favorites": favorites,
                 "results": None,
                 "latestFrenchManga": [],
@@ -332,24 +364,146 @@ async def anime_detail(
             }
         )
 
-    detail.source = source
-    detail = await tmdb_service.enrich_anime_detail(detail)
-    downloaded_episodes = library_service.get_downloaded_episodes_set(url)
-    watched_episodes = library_service.get_watched_episodes_set(url)
-    fav = library_service.get_favorite(url)
-    is_favorite = fav is not None
-    auto_download = fav.autoDownload if fav else False
+    res = await fetch_enriched_anime_detail(url, source)
+    if not res:
+        favorites = library_service.get_all_favorites()
+        return templates.TemplateResponse(
+            request=request,
+            name="index.html",
+            context={
+                "error": "Impossible de charger cet anime ou source non supportée.",
+                "favorites": favorites,
+                "results": None,
+                "latestFrenchManga": [],
+                "latestVoirAnime": [],
+                "latestAnimePahe": [],
+            }
+        )
 
     return templates.TemplateResponse(
         request=request,
         name="anime-detail.html",
         context={
-            "anime": detail,
-            "source": source,
-            "isFavorite": is_favorite,
-            "autoDownload": auto_download,
-            "downloadedEpisodes": downloaded_episodes,
-            "watchedEpisodes": watched_episodes,
+            "anime": res["detail_obj"],
+            "source": res["source"],
+            "isFavorite": res["isFavorite"],
+            "autoDownload": res["autoDownload"],
+            "downloadedEpisodes": set(res["downloadedEpisodes"]),
+            "watchedEpisodes": set(res["watchedEpisodes"]),
         }
     )
+
+@router.get("/api/anime/detail")
+@router.get("/api/anime")
+async def api_anime_detail(
+    url: str = Query(..., alias="url"),
+    source: str = Query("french-manga", alias="source")
+):
+    """Retourne la fiche anime complète avec épisodes et métadonnées en JSON pur."""
+    if not is_safe_url(url):
+        raise HTTPException(status_code=400, detail="URL d'animé invalide ou non sécurisée")
+    res = await fetch_enriched_anime_detail(url, source)
+    if not res:
+        raise HTTPException(status_code=404, detail="Anime introuvable ou URL invalide")
+
+    output = dict(res)
+    output.pop("detail_obj", None)
+    return {"success": True, **output}
+
+@router.get("/api/home/feed")
+async def api_home_feed():
+    """
+    Flux d'accueil consolidé pour le frontend SPA :
+    - Dernières sorties des sources natives et extensions
+    - Favoris de l'utilisateur
+    - Historique récent
+    - Extensions actives
+    """
+    enabled_extensions = extension_service.get_enabled_container_sources()
+
+    async def _safe_fetch(coro, default=None, timeout: float = 6.0):
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except Exception as e:
+            logger.debug("[home_feed] Source fetch error: %s", e)
+            return default if default is not None else []
+
+    fm_task = _safe_fetch(scraping_service.get_latest_releases())
+    va_task = _safe_fetch(voiranime_service.get_latest_releases())
+    ap_task = _safe_fetch(animepahe_service.get_latest_releases())
+
+    ext_tasks = []
+    for ext in enabled_extensions[:4]:
+        if hasattr(ext, "get_latest_releases"):
+            ext_tasks.append(_safe_fetch(ext.get_latest_releases(), default=[]))
+        else:
+            ext_tasks.append(asyncio.sleep(0, result=[]))
+
+    all_res = await asyncio.gather(fm_task, va_task, ap_task, *ext_tasks, return_exceptions=True)
+    latest_fm = all_res[0] if not isinstance(all_res[0], Exception) else []
+    latest_va = all_res[1] if not isinstance(all_res[1], Exception) else []
+    latest_ap = all_res[2] if not isinstance(all_res[2], Exception) else []
+
+    ext_releases = {}
+    for idx, ext in enumerate(enabled_extensions[:4]):
+        res = all_res[3 + idx]
+        if not isinstance(res, Exception) and res:
+            ext_releases[ext.pkg] = {
+                "name": ext.name,
+                "releases": [r.model_dump() for r in res[:24]],
+            }
+
+    favorites = [f.to_dict() for f in library_service.get_all_favorites()]
+    history_items = [t.to_task().to_dict() for t in library_service.get_history()[:15]]
+
+    releases_map = {
+        "french-manga": [r.model_dump() for r in latest_fm],
+        "voir-anime": [r.model_dump() for r in latest_va],
+        "animepahe": [r.model_dump() for r in latest_ap],
+    }
+    for pkg, ext_info in ext_releases.items():
+        releases_map[pkg] = ext_info["releases"]
+
+    return {
+        "success": True,
+        "latestReleases": releases_map,
+        "latestFrenchManga": [r.model_dump() for r in latest_fm],
+        "latestVoirAnime": [r.model_dump() for r in latest_va],
+        "latestAnimePahe": [r.model_dump() for r in latest_ap],
+        "extensionsReleases": ext_releases,
+        "favorites": favorites,
+        "recentHistory": history_items,
+        "enabledExtensions": [
+            {
+                "id": ext.pkg,
+                "pkg": ext.pkg,
+                "name": ext.name,
+                "lang": getattr(ext, "lang", "fr"),
+                "baseUrl": getattr(ext, "base_url", ""),
+            }
+            for ext in enabled_extensions
+        ],
+    }
+
+@router.get("/api/sources/{source_id}/feed")
+async def api_source_feed(source_id: str):
+    """Retourne les dernières sorties / le catalogue d'une source spécifique."""
+    s_clean = source_id.lower().strip()
+    if s_clean == "french-manga":
+        releases = await scraping_service.get_latest_releases()
+        return {"success": True, "source": "french-manga", "releases": [r.model_dump() for r in releases]}
+    elif s_clean == "voir-anime":
+        releases = await voiranime_service.get_latest_releases()
+        return {"success": True, "source": "voir-anime", "releases": [r.model_dump() for r in releases]}
+    elif s_clean == "animepahe":
+        releases = await animepahe_service.get_latest_releases()
+        return {"success": True, "source": "animepahe", "releases": [r.model_dump() for r in releases]}
+
+    container = extension_service.get_container_source_by_id(source_id)
+    if container and hasattr(container, "get_latest_releases"):
+        releases = await container.get_latest_releases()
+        return {"success": True, "source": container.name, "releases": [r.model_dump() for r in releases]}
+
+    return JSONResponse(status_code=404, content={"success": False, "error": f"Source '{source_id}' introuvable"})
+
 

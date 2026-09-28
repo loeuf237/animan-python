@@ -1,0 +1,433 @@
+import type {
+  AnimeDetailResponse,
+  AnimeResult,
+  DownloadTask,
+  ExtensionSource,
+  FavoriteItem,
+  HistoryItem,
+  HomeFeedResponse,
+  VideoStreamInfo,
+} from '@/types';
+
+class ApiError extends Error {
+  status: number;
+  data: any;
+
+  constructor(message: string, status: number, data: any) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+  headers.set('Accept', 'application/json');
+
+  const config: RequestInit = {
+    ...options,
+    headers,
+  };
+
+  const response = await fetch(endpoint, config);
+
+  if (!response.ok) {
+    let errorDetail = response.statusText;
+    let data = null;
+    try {
+      data = await response.json();
+      if (data && data.detail) {
+        errorDetail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      } else if (data && data.error) {
+        errorDetail = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+      }
+    } catch {
+      // Body not JSON
+    }
+    throw new ApiError(errorDetail, response.status, data);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export const api = {
+  // --- Feed & Home ---
+  async getHomeFeed(): Promise<HomeFeedResponse> {
+    return request<HomeFeedResponse>('/api/home/feed');
+  },
+
+  async getLatestReleases(source?: string): Promise<{ source?: string; releases: AnimeResult[] } | Record<string, AnimeResult[]>> {
+    const q = source ? `?source=${encodeURIComponent(source)}` : '';
+    return request(`/api/releases/latest${q}`);
+  },
+
+  async getSourceFeed(sourceId: string, page: number = 1): Promise<{ source: string; releases: AnimeResult[]; page: number }> {
+    return request(`/api/sources/${encodeURIComponent(sourceId)}/feed?page=${page}`);
+  },
+
+  // --- Search & Details ---
+  async searchAnime(query: string, source: string = 'all'): Promise<AnimeResult[]> {
+    const q = `?q=${encodeURIComponent(query)}&source=${encodeURIComponent(source)}`;
+    return request<AnimeResult[]>(`/api/search${q}`);
+  },
+
+  async getAnimeDetail(url: string, source: string = 'french-manga'): Promise<AnimeDetailResponse> {
+    const q = `?url=${encodeURIComponent(url)}&source=${encodeURIComponent(source)}`;
+    return request<AnimeDetailResponse>(`/api/anime/detail${q}`);
+  },
+
+  // --- Library & Favorites ---
+  async getFavorites(): Promise<FavoriteItem[]> {
+    return request<FavoriteItem[]>('/api/favorites');
+  },
+
+  async addFavorite(payload: {
+    url: string;
+    title: string;
+    imageUrl: string;
+    source: string;
+    autoDownload?: boolean;
+  }): Promise<{ success: boolean; id: number }> {
+    return request('/api/favorites', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async removeFavorite(url: string): Promise<{ success: boolean }> {
+    return request('/api/favorites', {
+      method: 'DELETE',
+      body: JSON.stringify({ url }),
+    });
+  },
+
+  async toggleAutoDownload(url: string, autoDownload: boolean): Promise<{ success: boolean }> {
+    return request('/api/favorites/auto-download', {
+      method: 'PATCH',
+      body: JSON.stringify({ url, autoDownload }),
+    });
+  },
+
+  async clearAllFavorites(): Promise<{ success: boolean }> {
+    return request('/api/favorites/all', { method: 'DELETE' });
+  },
+
+  // --- Watch Progress ---
+  async markEpisodeWatched(payload: {
+    animeUrl: string;
+    animeName?: string;
+    episodeNumber: string | number;
+    version?: string;
+    watched: boolean;
+  }): Promise<{ success: boolean }> {
+    return request('/api/progress/watched', {
+      method: 'POST',
+      body: JSON.stringify({
+        animeUrl: payload.animeUrl,
+        animeName: payload.animeName || '',
+        episodeNumber: parseInt(String(payload.episodeNumber), 10) || 0,
+        version: payload.version || '',
+      }),
+    });
+  },
+
+  async getProgress(animeUrl: string): Promise<any[]> {
+    return request(`/api/progress?animeUrl=${encodeURIComponent(animeUrl)}`);
+  },
+
+  async getDownloadedEpisodes(animeUrl: string): Promise<string[]> {
+    return request(`/api/progress/downloaded?animeUrl=${encodeURIComponent(animeUrl)}`);
+  },
+
+  // --- History ---
+  async getHistory(animeName?: string): Promise<HistoryItem[]> {
+    const q = animeName ? `?animeName=${encodeURIComponent(animeName)}` : '';
+    return request(`/api/history${q}`);
+  },
+
+  async deleteHistoryEntry(taskId: string | number): Promise<{ success: boolean }> {
+    return request(`/api/history/${taskId}`, { method: 'DELETE' });
+  },
+
+  async clearHistory(): Promise<{ success: boolean }> {
+    return request('/api/history', { method: 'DELETE' });
+  },
+
+  // --- Downloads ---
+  async getDownloadTasks(): Promise<DownloadTask[]> {
+    const res = await request<any>('/api/download/status');
+    if (Array.isArray(res)) return res;
+    if (res && Array.isArray(res.tasks)) return res.tasks;
+    return [];
+  },
+
+  async startEpisodeDownload(payload: {
+    animeName: string;
+    episodeNumber: number | string;
+    url: string;
+    fileName?: string;
+    subtitleUrl?: string;
+    downloadSubtitles?: boolean;
+    source?: string;
+    selectedServer?: string;
+    selectedQuality?: string;
+    scheduledTime?: string;
+    speedLimit?: number | string;
+  }): Promise<{ success: boolean; taskId?: number | string; message?: string }> {
+    return request('/api/download', {
+      method: 'POST',
+      body: JSON.stringify({
+        animeName: payload.animeName,
+        episodeNumber: parseInt(String(payload.episodeNumber), 10) || 0,
+        url: payload.url,
+        fileName: payload.fileName,
+        subtitleUrl: payload.subtitleUrl,
+        downloadSubtitles: Boolean(payload.downloadSubtitles),
+        source: payload.source || 'french-manga',
+        selectedServer: payload.selectedServer,
+        selectedQuality: payload.selectedQuality,
+        scheduledTime: payload.scheduledTime,
+        speedLimit: payload.speedLimit,
+      }),
+    });
+  },
+
+  async startBatchDownload(payload: {
+    animeName: string;
+    source: string;
+    episodes: {
+      number: number | string;
+      url: string;
+      title?: string;
+      fileName?: string;
+      subtitleUrl?: string;
+      downloadSubtitles?: boolean;
+    }[];
+    preferredServer?: string;
+    preferredQuality?: string;
+  }): Promise<{ success: boolean; count?: number; started?: number; queued?: number; message?: string }> {
+    return request('/api/download/batch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async pauseDownload(taskId: number | string): Promise<{ success: boolean }> {
+    return request(`/api/download/${taskId}/pause`, { method: 'POST' });
+  },
+
+  async resumeDownload(taskId: number | string): Promise<{ success: boolean }> {
+    return request(`/api/download/${taskId}/resume`, { method: 'POST' });
+  },
+
+  async cancelDownload(taskId: number | string): Promise<{ success: boolean }> {
+    return request(`/api/download/${taskId}`, { method: 'DELETE' });
+  },
+
+  async removeDownloadTask(taskId: number | string): Promise<{ success: boolean }> {
+    return request(`/api/download/${taskId}/remove`, { method: 'DELETE' });
+  },
+
+  async redownloadTask(taskId: number | string): Promise<{ success: boolean; message?: string; task?: any }> {
+    return request(`/api/download/${taskId}/redownload`, { method: 'POST' });
+  },
+
+  async verifyTask(taskId: number | string): Promise<{
+    success: boolean;
+    valid?: boolean;
+    status?: string;
+    duration?: number;
+    formattedDuration?: string;
+    formattedSize?: string;
+    error?: string;
+  }> {
+    return request(`/api/download/${taskId}/verify`, { method: 'POST' });
+  },
+
+  async verifyAllTasks(): Promise<{ success: boolean; total?: number; valid?: number; invalid?: number }> {
+    return request('/api/download/verify-all', { method: 'POST' });
+  },
+
+  async moveTaskToTop(taskId: number | string): Promise<{ success: boolean }> {
+    return request(`/api/download/${taskId}/move-to-top`, { method: 'POST' });
+  },
+
+  async moveSeriesToTop(animeName: string): Promise<{ success: boolean; message?: string }> {
+    return request('/api/download/move-series-to-top', {
+      method: 'POST',
+      body: JSON.stringify({ animeName }),
+    });
+  },
+
+  async reorderTasks(orderedIds: (string | number)[]): Promise<{ success: boolean }> {
+    return request('/api/download/reorder', {
+      method: 'POST',
+      body: JSON.stringify(orderedIds),
+    });
+  },
+
+  async setTaskSpeedLimit(taskId: number | string, limitBytes: number): Promise<{ success: boolean }> {
+    return request(`/api/download/${taskId}/speed-limit`, {
+      method: 'POST',
+      body: JSON.stringify({ limit: limitBytes }),
+    });
+  },
+
+  async pauseAllDownloads(): Promise<{ success: boolean }> {
+    return request('/api/download/pause-all', { method: 'POST' });
+  },
+
+  async resumeAllDownloads(): Promise<{ success: boolean }> {
+    return request('/api/download/resume-all', { method: 'POST' });
+  },
+
+  async cancelAllDownloads(): Promise<{ success: boolean }> {
+    return request('/api/download/cancel-all', { method: 'POST' });
+  },
+
+  async cleanCompletedDownloads(): Promise<{ success: boolean }> {
+    return request('/api/download/clean', { method: 'POST' });
+  },
+
+  // --- Settings ---
+  async getDownloadSettings(): Promise<any> {
+    return request('/api/download/settings');
+  },
+
+  async saveDownloadSettings(settings: any): Promise<any> {
+    return request('/api/download/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  },
+
+  async getProxySettings(): Promise<any> {
+    return request('/api/proxy/settings');
+  },
+
+  async saveProxySettings(settings: any): Promise<any> {
+    return request('/api/proxy/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  },
+
+  async testProxy(proxyUrl?: string): Promise<{ success: boolean; latencyMs?: number; ip?: string; error?: string }> {
+    return request('/api/proxy/test', {
+      method: 'POST',
+      body: JSON.stringify({ proxyUrl: proxyUrl || '' }),
+    });
+  },
+
+  async getSourcesSettings(): Promise<any> {
+    return request('/api/sources/settings');
+  },
+
+  async saveSourcesSettings(settings: any): Promise<any> {
+    return request('/api/sources/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  },
+
+  async getStorageInfo(): Promise<{
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    usedPercent: number;
+    downloadDir: string;
+  }> {
+    return request('/api/system/storage');
+  },
+
+  // --- i18n ---
+  async getTranslations(lang?: string): Promise<{
+    language: string;
+    supported: string[];
+    translations: Record<string, string>;
+    all?: Record<string, Record<string, string>>;
+  }> {
+    const q = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+    return request(`/api/i18n${q}`);
+  },
+
+  async setLanguage(language: string): Promise<{ success: boolean; language: string }> {
+    return request('/api/i18n/set-language', {
+      method: 'POST',
+      body: JSON.stringify({ language }),
+    });
+  },
+
+  // --- Streaming & Media Resolution ---
+  async resolveVideoStream(params: {
+    animeName: string;
+    episodeNumber: number | string;
+    episodeUrl: string;
+    animeUrl?: string;
+    version?: string;
+    source?: string;
+    server?: string;
+    quality?: string;
+  }): Promise<VideoStreamInfo> {
+    const search = new URLSearchParams();
+    search.set('animeName', params.animeName);
+    search.set('episodeNumber', String(params.episodeNumber));
+    search.set('episodeUrl', params.episodeUrl);
+    if (params.animeUrl) search.set('animeUrl', params.animeUrl);
+    if (params.version) search.set('version', params.version);
+    if (params.source) search.set('source', params.source);
+    if (params.server && params.server !== 'auto') search.set('server', params.server);
+    if (params.quality && params.quality !== 'auto') search.set('quality', params.quality);
+    return request<VideoStreamInfo>(`/api/media/stream/resolve?${search.toString()}`);
+  },
+
+  async getEpisodeServers(episodeUrl: string, source: string): Promise<{ servers: string[]; qualities?: string[] }> {
+    const search = new URLSearchParams();
+    search.set('episode_url', episodeUrl);
+    search.set('source', source);
+    return request(`/api/episode/servers?${search.toString()}`);
+  },
+
+  async getEpisodeSize(episodeUrl: string, source: string, server?: string): Promise<{ size: number; formattedSize: string }> {
+    const search = new URLSearchParams();
+    search.set('episode_url', episodeUrl);
+    search.set('source', source);
+    if (server) search.set('server', server);
+    return request(`/api/episode/size?${search.toString()}`);
+  },
+
+  // --- Extensions ---
+  async getExtensions(q?: string, lang?: string): Promise<{
+    active_repo?: any;
+    count?: number;
+    extensions?: ExtensionSource[];
+    installed?: ExtensionSource[];
+  }> {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (lang && lang !== 'all') params.set('lang', lang);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return request(`/api/extensions/list${qs}`);
+  },
+
+  async toggleExtension(extId: number | string, enabled: boolean): Promise<{ success: boolean; is_enabled?: boolean }> {
+    const numId = typeof extId === 'number' ? extId : parseInt(String(extId), 10);
+    return request(`/api/extensions/${isNaN(numId) ? extId : numId}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+  },
+
+  async importExtensionRepo(url: string): Promise<{ success: boolean; repo_name?: string; count?: number }> {
+    return request('/api/extensions/import-repo', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  },
+};
+
+export { ApiError };

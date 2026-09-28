@@ -3,7 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import os
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -67,6 +69,32 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Configuration CORS pour autoriser les clients frontend découplés (SPA Vite, mobile, LAN)
+_cors_origins_env = os.getenv("ANIMAN_CORS_ORIGINS", "")
+_allowed_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+if _cors_origins_env:
+    for _o in _cors_origins_env.split(","):
+        _clean_o = _o.strip()
+        if _clean_o and _clean_o not in _allowed_origins:
+            _allowed_origins.append(_clean_o)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins if "*" not in _allowed_origins else ["*"],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Range", "Content-Length", "Accept-Ranges"],
+)
+
 @app.middleware("http")
 async def i18n_middleware(request: Request, call_next):
     lang = request.query_params.get("lang")
@@ -91,15 +119,29 @@ async def i18n_middleware(request: Request, call_next):
 @app.middleware("http")
 async def security_headers_and_csrf_middleware(request: Request, call_next):
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-        sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
-        if sec_fetch_site == "cross-site":
-            logger.warning("CSRF blocked: cross-site sec-fetch-site for %s %s", request.method, request.url.path)
-            return JSONResponse(status_code=403, content={"error": "Cross-site request blocked"})
-
         origin = request.headers.get("origin")
         referer = request.headers.get("referer")
         source_url = origin or referer
-        if source_url:
+        is_cors_allowed = False
+
+        if origin:
+            try:
+                from urllib.parse import urlparse
+                parsed_origin = urlparse(origin)
+                o_host = (parsed_origin.hostname or "").lower()
+                if o_host in ("localhost", "127.0.0.1", "0.0.0.0", "testserver"):
+                    is_cors_allowed = True
+                elif origin in _allowed_origins:
+                    is_cors_allowed = True
+            except Exception:
+                pass
+
+        sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
+        if sec_fetch_site == "cross-site" and not is_cors_allowed:
+            logger.warning("CSRF blocked: cross-site sec-fetch-site for %s %s", request.method, request.url.path)
+            return JSONResponse(status_code=403, content={"error": "Cross-site request blocked"})
+
+        if source_url and not is_cors_allowed:
             try:
                 from urllib.parse import urlparse
                 parsed_source = urlparse(source_url)
@@ -161,6 +203,24 @@ app.include_router(extensions_router)
 app.include_router(sources_router)
 app.include_router(i18n_router)
 
+# Support SPA Vue 3 découplée (Mode hybride / production unifiée)
+frontend_dist = Path(__file__).parent / "frontend" / "dist"
+if (frontend_dist / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist / "assets")), name="spa_assets")
+
+@app.get("/spa", include_in_schema=False)
+@app.get("/spa/{full_path:path}", include_in_schema=False)
+@app.get("/app", include_in_schema=False)
+@app.get("/app/{full_path:path}", include_in_schema=False)
+async def serve_spa_page():
+    index_file = frontend_dist / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    return JSONResponse(
+        status_code=404,
+        content={"error": "Build SPA non trouvé. Exécutez 'npm run build' dans frontend/."}
+    )
+
 _embedded_server = None
 
 def start_embedded_server(host: str = "0.0.0.0", port: int = 8080, data_dir: str = None):
@@ -204,7 +264,7 @@ if __name__ == "__main__":
         port=settings.PORT,
         log_level="info",
         reload=reload_enabled,
-        reload_dirs=["animan"] if reload_enabled else None,
+        reload_dirs=["animan", "."] if reload_enabled else None,
         timeout_keep_alive=30,
     )
 

@@ -396,14 +396,37 @@ class DownloadManagerService:
         if not url:
             return None
 
-        res = await extractor_registry.extract(url, referer=referer, preferred_quality=preferred_quality)
+        clean_url = url.split("#")[0].strip()
+
+        # 1. Si l'URL est déjà un flux vidéo direct (mp4, m3u8, webm, mkv)
+        if re.search(r"\.(mp4|m3u8|webm|mkv)(\?.*)?$", clean_url, re.IGNORECASE):
+            is_hls = ".m3u8" in clean_url.lower()
+            headers = self.get_headers_for_url(clean_url, "imported")
+            if referer:
+                headers["Referer"] = referer
+            sz = (
+                await self.estimate_hls_size(clean_url, headers=headers)
+                if is_hls
+                else await self.get_remote_file_size(clean_url, headers=headers, server_type="imported")
+            )
+            return {
+                "videoUrl": clean_url,
+                "serverType": "direct",
+                "selectedQuality": preferred_quality or "HD",
+                "videoQualities": json.dumps({"HD": clean_url}),
+                "size": sz,
+                "headers": headers,
+            }
+
+        # 2. Délégation aux extracteurs dédiés
+        res = await extractor_registry.extract(clean_url, referer=referer, preferred_quality=preferred_quality)
         if res and res.video_url:
             info = res.to_download_info()
             if info.get("size", -1) <= 0:
                 is_hls = ".m3u8" in info["videoUrl"].lower()
                 headers = info.get("headers") or self.get_headers_for_url(info["videoUrl"], info["serverType"])
                 sz = (
-                    await self.estimate_hls_size(info["videoUrl"], headers=headers)
+                    await self.estimate_hls_size(info["videoUrl"], headers=headers, server_type=info["serverType"])
                     if is_hls
                     else await self.get_remote_file_size(info["videoUrl"], headers=headers, server_type=info["serverType"])
                 )
@@ -434,13 +457,14 @@ class DownloadManagerService:
                 info = ResolvedVideoInfo()
                 parsed_u = urlparse(download_page_url)
                 u_host = (parsed_u.hostname or "").lower()
-                is_known_embed = extractor_registry.is_known_embed(download_page_url)
+                clean_page_url = download_page_url.split("#")[0].strip()
+                is_known_embed = extractor_registry.is_known_embed(clean_page_url)
                 is_imported = bool(source and source not in ("french-manga", "voir-anime", "animepahe")) or is_known_embed
 
                 matched_container = None
                 try:
                     from animan.services.extension_service import extension_service
-                    if source and source.startswith("eu.kanade."):
+                    if source and source not in ("french-manga", "voir-anime", "animepahe"):
                         matched_container = extension_service.get_container_source_by_id(source)
                     if not matched_container and u_host:
                         for cs in extension_service.get_enabled_container_sources():
@@ -458,37 +482,79 @@ class DownloadManagerService:
 
                 if is_imported:
                     target_url = download_page_url
+                    avail_servers = []
+                    qualities = {}
+                    video_sources = []
                     if matched_container and not is_known_embed:
-                        video_sources = await matched_container.get_episode_sources(download_page_url)
-                        qualities = {}
+                        try:
+                            video_sources = await matched_container.get_episode_sources(download_page_url)
+                        except Exception as e:
+                            logger.debug("[download_manager] Error getting episode sources: %s", e)
+                            video_sources = []
+
+                        if video_sources:
+                            for vs in video_sources:
+                                s_name = vs.get("server") or vs.get("name")
+                                if s_name and s_name not in avail_servers:
+                                    avail_servers.append(s_name)
+                                qualities[s_name or "Serveur"] = vs.get("url", "")
+
                         target = None
-                        for s in video_sources:
-                            q_name = s.get("quality") or s.get("server") or "HD"
-                            qualities[q_name] = s.get("url", "")
-                            if preferred_quality and (preferred_quality.lower() in q_name.lower()):
-                                if not target:
+                        if preferred_server and preferred_server != "auto":
+                            for s in video_sources:
+                                s_srv = s.get("server") or s.get("name") or ""
+                                if preferred_server.lower() in s_srv.lower():
                                     target = s
+                                    break
+                        if not target and preferred_quality and preferred_quality != "auto":
+                            for s in video_sources:
+                                q_name = s.get("quality") or s.get("server") or ""
+                                if preferred_quality.lower() in q_name.lower():
+                                    target = s
+                                    break
                         if not target and video_sources:
                             target = video_sources[0]
                         if target and target.get("url"):
                             target_url = target.get("url", "")
 
-                    # Résolution du flux direct via resolve_imported_video_stream
-                    resolved = await self.resolve_imported_video_stream(
-                        target_url, preferred_quality=preferred_quality
-                    )
+                    # Résolution du flux direct via resolve_imported_video_stream avec repli
+                    resolved = None
+                    candidate_urls = []
+                    if target and target.get("url"):
+                        candidate_urls.append(target.get("url"))
+                    if video_sources:
+                        for s in video_sources:
+                            u_ = s.get("url")
+                            if u_ and u_ not in candidate_urls:
+                                candidate_urls.append(u_)
+
+                    for cand_u in (candidate_urls or [target_url]):
+                        try:
+                            cand_res = await self.resolve_imported_video_stream(
+                                cand_u, preferred_quality=preferred_quality
+                            )
+                            if cand_res and cand_res.get("videoUrl"):
+                                resolved = cand_res
+                                break
+                        except Exception:
+                            pass
+
                     if resolved and resolved.get("videoUrl"):
                         dl_info = resolved
                     else:
+                        clean_direct = target_url.split("#")[0]
                         dl_info = {
-                            "videoUrl": target_url,
+                            "videoUrl": clean_direct,
                             "serverType": "imported",
                             "selectedQuality": preferred_quality or "HD",
-                            "videoQualities": json.dumps({"HD": target_url}),
+                            "videoQualities": json.dumps({"HD": clean_direct}),
                         }
                     info.server_type = dl_info.get("serverType", "imported")
-                    info.available_servers = [info.server_type]
-                    info.video_qualities_json = dl_info.get("videoQualities", "{}")
+                    info.available_servers = avail_servers if avail_servers else [info.server_type]
+                    if qualities:
+                        info.video_qualities_json = json.dumps(qualities)
+                    else:
+                        info.video_qualities_json = dl_info.get("videoQualities", "{}")
                     info.selected_server = info.server_type
                     info.selected_quality = dl_info.get("selectedQuality", "HD")
                     if dl_info.get("size"):
@@ -1332,11 +1398,12 @@ class DownloadManagerService:
 
                 try:
                     direct_url = task.fileUrl
-                    parsed_u = urlparse(direct_url or "")
+                    clean_direct = (direct_url or "").split("#")[0].strip()
+                    parsed_u = urlparse(clean_direct)
                     u_host = (parsed_u.hostname or "").lower()
-                    is_known_embed = extractor_registry.is_known_embed(direct_url or "")
+                    is_known_embed = extractor_registry.is_known_embed(clean_direct)
                     is_imported = (
-                        (task.source and (task.source.startswith("eu.kanade.") or task.source not in ("french-manga", "voir-anime", "animepahe"))) or
+                        (task.source and (task.source not in ("french-manga", "voir-anime", "animepahe"))) or
                         is_known_embed
                     )
                     is_voir_anime = not is_imported and (("voir-anime" in (direct_url or "").lower()) or ("voiranime" in (direct_url or "").lower()) or task.source == "voir-anime")
@@ -1359,7 +1426,7 @@ class DownloadManagerService:
                         matched_container = None
                         try:
                             from animan.services.extension_service import extension_service
-                            if task.source and task.source.startswith("eu.kanade."):
+                            if task.source and task.source not in ("french-manga", "voir-anime", "animepahe"):
                                 matched_container = extension_service.get_container_source_by_id(task.source)
                             if not matched_container and u_host:
                                 for cs in extension_service.get_enabled_container_sources():
@@ -1373,7 +1440,13 @@ class DownloadManagerService:
                         if matched_container and not is_known_embed:
                             video_sources = await matched_container.get_episode_sources(direct_url)
                             target = None
-                            if task.selectedQuality and task.selectedQuality != "auto":
+                            if task.selectedServer and task.selectedServer != "auto":
+                                for s in video_sources:
+                                    s_srv = s.get("server") or s.get("name") or ""
+                                    if task.selectedServer.lower() in s_srv.lower():
+                                        target = s
+                                        break
+                            if not target and task.selectedQuality and task.selectedQuality != "auto":
                                 for s in video_sources:
                                     q_name = s.get("quality") or s.get("server") or ""
                                     if task.selectedQuality.lower() in q_name.lower():
@@ -1384,13 +1457,41 @@ class DownloadManagerService:
                             if target and target.get("url"):
                                 target_url = target.get("url", "")
 
-                        resolved = await self.resolve_imported_video_stream(
-                            target_url, preferred_quality=task.selectedQuality
-                        )
+                        resolved = None
+                        candidate_urls = []
+                        if target and target.get("url"):
+                            candidate_urls.append(target.get("url"))
+                        if video_sources:
+                            for vs in video_sources:
+                                v_u = vs.get("url")
+                                if v_u and v_u not in candidate_urls:
+                                    candidate_urls.append(v_u)
+
+                        for cand_u in (candidate_urls or [target_url]):
+                            try:
+                                cand_res = await self.resolve_imported_video_stream(
+                                    cand_u, preferred_quality=task.selectedQuality
+                                )
+                                if cand_res and cand_res.get("videoUrl"):
+                                    resolved = cand_res
+                                    break
+                            except Exception:
+                                pass
+
                         if not resolved or not resolved.get("videoUrl"):
-                            raise ValueError(f"Impossible de résoudre le flux vidéo de la source importée pour {task.fileName}")
+                            clean_t = target_url.split("#")[0].strip()
+                            if re.search(r"\.(mp4|m3u8|webm|mkv)(\?.*)?$", clean_t, re.IGNORECASE):
+                                resolved = {
+                                    "videoUrl": clean_t,
+                                    "serverType": "direct",
+                                    "selectedQuality": task.selectedQuality or "HD",
+                                }
+                            else:
+                                raise ValueError(f"Impossible de résoudre le flux vidéo de la source importée pour {task.fileName}")
+
                         direct_url = resolved["videoUrl"]
                         server_type = resolved.get("serverType", "imported")
+                        task.selectedServer = server_type
                         task.directDownloadUrl = direct_url
                         if resolved.get("size") and task.totalBytes <= 0:
                             task.totalBytes = resolved["size"]

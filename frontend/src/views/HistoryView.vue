@@ -1,0 +1,175 @@
+<template>
+  <div class="history-container">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Historique de Visionnage & Téléchargements</h1>
+        <p class="page-sub">Retrouvez vos animés récemment visionnés et vos téléchargements passés.</p>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button
+          v-if="historyItems.length > 0"
+          class="btn btn-danger"
+          @click="clearAllHistory"
+        >
+          Effacer l'historique
+        </button>
+        <button class="btn btn-primary" @click="fetchHistory">
+          Actualiser
+        </button>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div v-if="!isLoading && historyItems.length === 0" class="empty-state">
+      <h3>Aucun historique enregistré</h3>
+      <p>Vos épisodes regardés ou téléchargés apparaîtront ici.</p>
+      <router-link to="/" class="btn btn-primary" style="margin-top: 14px;">Retour à l'accueil</router-link>
+    </div>
+
+    <!-- History List -->
+    <div v-else class="history-list animate-fade-in">
+      <div
+        v-for="item in historyItems"
+        :key="item.id"
+        class="history-card"
+      >
+        <div class="history-info">
+          <strong class="history-anime">{{ item.animeName || item.animeTitle || 'Animé' }}</strong>
+          <div class="history-meta">
+            <span class="badge badge-source">Épisode {{ item.episodeNumber }}</span>
+            <span v-if="item.source" style="color: var(--muted); font-size: 13px;">Source : {{ item.source }}</span>
+            <span v-if="item.createdAt || item.updatedAt" style="color: var(--faint); font-size: 12px;">
+              {{ formatDate(item.createdAt || item.updatedAt) }}
+            </span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <span class="badge" :class="item.status === 'completed' ? 'badge-success' : ''">
+            {{ item.status || 'Terminé' }}
+          </span>
+
+          <button
+            class="icon-button"
+            title="Supprimer cette entrée"
+            @click="deleteEntry(item.id)"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { api } from '@/api/client';
+import type { HistoryItem } from '@/types';
+
+const historyItems = ref<HistoryItem[]>([]);
+const isLoading = ref(false);
+
+async function fetchHistory() {
+  isLoading.value = true;
+  try {
+    const res = await api.getHistory();
+    if (Array.isArray(res)) {
+      historyItems.value = res;
+    }
+  } catch (e) {
+    console.error('[HistoryView] Error fetching history:', e);
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+async function deleteEntry(id?: string | number) {
+  if (!id) return;
+  await api.deleteHistoryEntry(id);
+  historyItems.value = historyItems.value.filter((h) => h.id !== id);
+}
+
+async function clearAllHistory() {
+  if (confirm("Voulez-vous vraiment effacer l'ensemble de l'historique ?")) {
+    await api.clearHistory();
+    historyItems.value = [];
+  }
+}
+
+function formatDate(isoStr?: string): string {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return isoStr;
+  }
+}
+
+onMounted(() => {
+  fetchHistory();
+});
+</script>
+
+<style scoped>
+.history-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  transition: all var(--transition);
+}
+
+.history-card:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-strong);
+}
+
+.history-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.history-anime {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-align: center;
+}
+</style>

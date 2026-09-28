@@ -17,6 +17,7 @@ from animan.services.voiranime_service import voiranime_service
 from animan.services.scraping_service import scraping_service
 from animan.services.animepahe_service import animepahe_service
 from animan.services.extension_service import extension_service
+from animan.services.extractors import extractor_registry
 
 import hashlib
 
@@ -233,13 +234,68 @@ async def resolve_stream(
                 pass
 
     if container_source:
-        container_sources = await container_source.get_episode_sources(episodeUrl)
+        try:
+            container_sources = await container_source.get_episode_sources(episodeUrl)
+        except Exception as e:
+            logger.warning("[media] Error getting episode sources from container: %s", e)
+            container_sources = []
+
         if container_sources:
-            for vs in container_sources:
-                qualities_dict[vs.quality or vs.server] = vs.url
-            video_url = container_sources[0].url
-            server_type = container_sources[0].server
-            selected_quality = container_sources[0].quality
+            for idx, vs in enumerate(container_sources):
+                srv_name = vs.get("server") if isinstance(vs, dict) else getattr(vs, "server", None)
+                q_name = vs.get("quality") if isinstance(vs, dict) else getattr(vs, "quality", None)
+                label = srv_name or q_name or f"Serveur {idx + 1}"
+                v_url = vs.get("url") if isinstance(vs, dict) else getattr(vs, "url", "")
+                if label not in qualities_dict:
+                    qualities_dict[label] = v_url
+
+            # Priorité au serveur demandé s'il est spécifié
+            candidates = list(container_sources)
+            if server and server != "auto":
+                matched = [
+                    cs for cs in container_sources
+                    if (cs.get("server") if isinstance(cs, dict) else getattr(cs, "server", "")).lower() == server.lower()
+                    or (cs.get("name") if isinstance(cs, dict) else getattr(cs, "name", "")).lower() == server.lower()
+                ]
+                if matched:
+                    candidates = matched + [cs for cs in container_sources if cs not in matched]
+
+            for cand in candidates:
+                cand_url = cand.get("url") if isinstance(cand, dict) else getattr(cand, "url", "")
+                cand_srv = cand.get("server") if isinstance(cand, dict) else getattr(cand, "server", "imported")
+                cand_q = cand.get("quality") if isinstance(cand, dict) else getattr(cand, "quality", "HD")
+
+                if not cand_url:
+                    continue
+
+                try:
+                    resolved = await download_manager.resolve_imported_video_stream(
+                        cand_url,
+                        referer=episodeUrl,
+                        preferred_quality=quality or cand_q,
+                    )
+                    if resolved and resolved.get("videoUrl"):
+                        video_url = resolved["videoUrl"]
+                        server_type = resolved.get("serverType") or cand_srv
+                        selected_quality = resolved.get("selectedQuality") or cand_q or "HD"
+                        break
+                except Exception as ex:
+                    logger.debug("[media] Error resolving candidate %s: %s", cand_url, ex)
+
+        # Si toujours non résolu, tenter directement sur episodeUrl
+        if not video_url and episodeUrl:
+            try:
+                resolved = await download_manager.resolve_imported_video_stream(
+                    episodeUrl,
+                    referer=episodeUrl,
+                    preferred_quality=quality,
+                )
+                if resolved and resolved.get("videoUrl"):
+                    video_url = resolved["videoUrl"]
+                    server_type = resolved.get("serverType") or (container_source.name if container_source else "imported")
+                    selected_quality = resolved.get("selectedQuality") or "HD"
+            except Exception as ex:
+                logger.debug("[media] Error resolving direct episodeUrl fallback: %s", ex)
     elif source == "voir-anime":
         pref_srv = server if (server and server != "auto") else None
         pref_q = quality if (quality and quality != "auto") else None
@@ -305,7 +361,7 @@ async def resolve_stream(
                     target_kwik_url = target_src.get("url", "")
                     if target_kwik_url:
                         video_url = await animepahe_service.extract_kwik_stream(target_kwik_url) or ""
-    else:
+    elif source == "french-manga" or "french-manga" in episodeUrl:
         # french-manga
         info = scraping_service.extract_download_info(episodeUrl)
         video_url = info.get("videoUrl") or info.get("directUrl") or ""
@@ -319,6 +375,20 @@ async def resolve_stream(
                 "src": f"/api/media/subtitle-proxy?url={urllib.parse.quote(sub_url)}",
                 "default": True,
             })
+    else:
+        # Source générique ou importée non matchée par id
+        try:
+            resolved = await download_manager.resolve_imported_video_stream(
+                episodeUrl,
+                referer=episodeUrl,
+                preferred_quality=quality,
+            )
+            if resolved and resolved.get("videoUrl"):
+                video_url = resolved["videoUrl"]
+                server_type = resolved.get("serverType") or "imported"
+                selected_quality = resolved.get("selectedQuality") or "HD"
+        except Exception as ex:
+            logger.debug("[media] Generic resolve error: %s", ex)
 
     if not video_url:
         logger.warning("No direct video stream found for remote episode: %s", episodeUrl)
@@ -336,6 +406,17 @@ async def resolve_stream(
     # Si le flux provient de Kwik / Owocdn HLS, le router via le proxy HLS local
     if video_url and (".m3u8" in video_url.lower()) and any(d in video_url for d in ["owocdn.top", "kwik"]):
         video_url = f"/api/media/hls-proxy/playlist.m3u8?url={urllib.parse.quote(video_url)}"
+    elif (
+        video_url
+        and video_url.startswith("http")
+        and not video_url.lower().endswith(".m3u8")
+        and ".m3u8" not in video_url.lower()
+        and source != "animepahe"
+        and not (source == "voir-anime" and server_type == "myTV")
+    ):
+        # Router les flux vidéo distants (MP4, WebM...) via le proxy de streaming pour injecter les bons referers et headers
+        # et garantir le fonctionnement fluide des Range requests (seeking) sans blocage CORS / 403
+        video_url = f"/api/media/stream-proxy?url={urllib.parse.quote(video_url)}&server={urllib.parse.quote(server_type or 'imported')}"
 
     return {
         "success": True,
@@ -677,4 +758,122 @@ async def hls_proxy_segment(
     except Exception as e:
         logger.error("Error in hls_proxy_segment: %s", e)
         raise HTTPException(status_code=502, detail="Erreur proxying segment")
+
+
+@router.api_route("/api/media/stream-proxy", methods=["GET", "HEAD", "OPTIONS"])
+async def stream_proxy(
+    request: Request,
+    url: str = Query(...),
+    server: Optional[str] = Query(None),
+    referer: Optional[str] = Query(None),
+    range: Optional[str] = Header(None),
+):
+    """
+    Proxy universel de flux vidéo distant :
+    - Injecte les en-têtes requis (Referer, User-Agent) via extractor_registry
+    - Gère les requêtes HTTP Range pour le scrubbing / seeking fluide dans le lecteur
+    - Évite les blocages CORS et 403 Forbidden des hébergeurs vidéo (Sibnet, Sendvid, Vidmoly, etc.)
+    """
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": "Range, Content-Range, Accept-Ranges, Content-Type",
+                "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+            },
+        )
+
+    if not url or not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL de flux vidéo invalide")
+
+    if not is_safe_url(url):
+        logger.warning("SSRF blocked on stream-proxy: %s", url)
+        raise HTTPException(status_code=400, detail="URL non autorisée ou non sécurisée")
+
+    upstream_headers = extractor_registry.get_headers_for_url(url, server)
+    if referer:
+        upstream_headers["Referer"] = referer
+    if range:
+        upstream_headers["Range"] = range
+
+    proxy = proxy_service.get_active_proxy()
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=15.0, read=60.0, write=15.0, pool=60.0),
+        follow_redirects=True,
+        verify=settings.SSL_VERIFY,
+        proxy=proxy,
+    )
+
+    if request.method == "HEAD":
+        try:
+            head_resp = await client.head(url, headers=upstream_headers)
+            if head_resp.status_code not in (200, 206):
+                # Certains hébergeurs (ex: Sibnet) refusent HEAD -> repli Range: bytes=0-0
+                head_resp = await client.get(url, headers={**upstream_headers, "Range": "bytes=0-0"})
+        except Exception as e:
+            logger.debug("[stream-proxy] HEAD failed for %s, trying GET range: %s", url, e)
+            head_resp = await client.get(url, headers={**upstream_headers, "Range": "bytes=0-0"})
+        finally:
+            await client.aclose()
+
+        resp_headers = {
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Content-Range, Accept-Ranges, Content-Type",
+            "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+        }
+        if "content-range" in head_resp.headers:
+            resp_headers["Content-Range"] = head_resp.headers["content-range"]
+        if "content-length" in head_resp.headers:
+            resp_headers["Content-Length"] = head_resp.headers["content-length"]
+        c_type = head_resp.headers.get("content-type") or "video/mp4"
+        return Response(status_code=head_resp.status_code, headers=resp_headers, media_type=c_type)
+
+    try:
+        req = client.build_request("GET", url, headers=upstream_headers)
+        upstream_resp = await client.send(req, stream=True)
+
+        if upstream_resp.status_code not in (200, 206):
+            status = upstream_resp.status_code
+            await upstream_resp.aclose()
+            await client.aclose()
+            raise HTTPException(status_code=status, detail="Erreur du serveur d'hébergement vidéo")
+
+        async def stream_generator():
+            try:
+                async for chunk in upstream_resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+            finally:
+                await upstream_resp.aclose()
+                await client.aclose()
+
+        resp_headers = {
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Content-Range, Accept-Ranges, Content-Type",
+            "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+        }
+        if "content-range" in upstream_resp.headers:
+            resp_headers["Content-Range"] = upstream_resp.headers["content-range"]
+        if "content-length" in upstream_resp.headers:
+            resp_headers["Content-Length"] = upstream_resp.headers["content-length"]
+        c_type = upstream_resp.headers.get("content-type") or "video/mp4"
+
+        return StreamingResponse(
+            stream_generator(),
+            status_code=upstream_resp.status_code,
+            media_type=c_type,
+            headers=resp_headers,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await client.aclose()
+        logger.error("[stream-proxy] Error streaming %s: %s", url, e)
+        raise HTTPException(status_code=502, detail="Erreur proxying flux vidéo")
+
 

@@ -62,6 +62,10 @@
         <span>{{ t('dl_stat_speed') }}</span>
         <i class="mini-spark"></i>
       </div>
+      <div class="stat-card stat-red" id="stat-card-errors" style="display:none; cursor:pointer;" onclick="document.querySelector('[data-download-filter=\'errors\']')?.click()">
+        <strong id="stat-errors">0</strong>
+        <span>{{ t('dl_stat_errors') }}</span>
+      </div>
     </div>
   </section>
 
@@ -69,6 +73,7 @@
     <div class="download-tabs">
       <button class="tab-btn active" type="button" data-download-filter="queue" onclick="filterDownloadView(this)">{{ t('dl_tab_queue') }} <span class="tab-badge" id="tab-badge-queue">0</span></button>
       <button class="tab-btn" type="button" data-download-filter="done" onclick="filterDownloadView(this)">{{ t('dl_tab_done') }} <span class="tab-badge" id="tab-badge-done">0</span></button>
+      <button class="tab-btn" type="button" data-download-filter="errors" onclick="filterDownloadView(this)">{{ t('dl_tab_errors') }} <span class="tab-badge" id="tab-badge-errors" style="background:rgba(239,68,68,0.2);color:var(--red);">0</span></button>
       <button class="tab-btn" type="button" data-download-filter="all" onclick="filterDownloadView(this)">{{ t('dl_tab_all') }} <span class="tab-badge" id="tab-badge-all">0</span></button>
     </div>
     <div class="download-actions">
@@ -269,7 +274,7 @@
     </div>
     <div class="dl-list" id="completed-list">
       {% for task in tasks %}
-      {% if task.status.value in ['COMPLETED', 'FAILED', 'CANCELLED'] %}
+      {% if task.status.value == 'COMPLETED' %}
       <div id="task-{{ task.id }}"
            class="dl-task-row completed-row"
            data-id="{{ task.id }}"
@@ -284,19 +289,9 @@
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
-          {% if task.status.value == 'FAILED' %}
-          <span class="dl-error-badge-compact" title="{{ task.error or ('Download error' if current_lang() == 'en' else 'Erreur lors du téléchargement') }}">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
-            {% if current_lang() == 'en' %}Failed{% else %}Échec{% endif %}
-            <button type="button" class="dl-error-retry-btn" title="{% if current_lang() == 'en' %}Retry immediately{% else %}Réessayer immédiatement{% endif %}" onclick="event.stopPropagation(); redownloadTask('{{ task.id }}')">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
-            </button>
+          <span class="status-badge dl-task-status badge-ok">
+            {{ t('status_completed') }}
           </span>
-          {% else %}
-          <span class="status-badge dl-task-status {% if task.status.value == 'COMPLETED' %}badge-ok{% else %}badge-other{% endif %}">
-            {{ task.status.value }}
-          </span>
-          {% endif %}
           <span class="status-badge dl-verif-badge {% if task.verificationStatus == 'VALID' %}badge-ok{% elif task.verificationStatus in ['MISSING', 'CORRUPTED', 'EMPTY'] %}badge-err{% else %}badge-other{% endif %}"
                 style="font-size:10px; padding: 2px 6px;"
                 title="{{ task.verificationError or '' }}">
@@ -321,6 +316,62 @@
       {% endfor %}
     </div>
     <div class="dl-empty-note" id="done-empty-note" style="display:none;">{{ t('dl_empty_done') }}</div>
+  </section>
+
+  <section class="fade-in" data-download-group="errors" style="display:none;">
+    <div class="download-section-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h2 class="download-section-title" style="margin-bottom:0;">
+        <span class="section-marker" style="background:var(--red);"></span>
+        {{ t('dl_section_errors') }}
+      </h2>
+      <button class="btn btn-sm btn-danger-outline" type="button" onclick="cleanAllErrors()" title="{{ t('dl_btn_clean') }}">
+        <svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;vertical-align:middle;margin-right:4px;"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
+        {{ t('dl_btn_clean') }}
+      </button>
+    </div>
+    <div class="dl-list" id="error-list">
+      {% for task in tasks %}
+      {% if task.status.value in ['FAILED', 'CANCELLED'] %}
+      <div id="task-{{ task.id }}"
+           class="dl-task-row error-row"
+           data-id="{{ task.id }}"
+           data-category="errors"
+           data-status="{{ task.status.value }}">
+        <div class="dl-main">
+          <div class="dl-cover" style="background:rgba(239,68,68,0.15);color:var(--red);font-weight:700;">{{ task.animeName[:1] }}</div>
+          <div>
+            <span class="dl-task-name">{{ task.animeName }}</span>
+            <span class="dl-subtitle">{% if current_lang() == 'en' %}Episode{% else %}Épisode{% endif %} {{ task.episodeNumber }} - {{ task.fileName }}</span>
+          </div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+          <span class="dl-error-badge-compact" title="{{ task.error or ('Download error' if current_lang() == 'en' else 'Erreur lors du téléchargement') }}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+            {{ t('status_failed') if task.status.value == 'FAILED' else t('status_cancelled') }}
+          </span>
+          {% if task.error %}
+          <span style="font-size:11px;color:var(--muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ task.error }}">{{ task.error }}</span>
+          {% endif %}
+        </div>
+        <span class="dl-size">{{ task.formattedTotalSize }}</span>
+        <span class="dl-progress-text" style="color:var(--red);">{{ "%.1f"|format(task.progress) }}%</span>
+        <div class="dl-task-actions" data-id="{{ task.id }}" data-status="{{ task.status.value }}" data-animename="{{ task.animeName }}" data-episodenumber="{{ task.episodeNumber }}">
+          <button class="btn btn-sm btn-primary" type="button" onclick="redownloadTask('{{ task.id }}')" title="{{ t('dl_action_retry') }}" style="display:inline-flex;align-items:center;gap:4px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+            <span>{{ t('dl_action_retry') }}</span>
+          </button>
+          <button class="btn btn-sm btn-danger-outline" type="button" onclick="deleteTaskDirect('{{ task.id }}')" title="{{ t('dl_action_remove') }}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
+          </button>
+        </div>
+        <div class="dl-task-bottom-bar">
+          <div class="dl-task-bottom-fill is-error" style="width:100%;"></div>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    <div class="dl-empty-note" id="error-empty-note" style="display:none;">{{ t('dl_empty_errors') }}</div>
   </section>
 
   <div class="empty-state" id="dl-empty" style="display:none;">

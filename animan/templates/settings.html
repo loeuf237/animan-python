@@ -475,7 +475,12 @@
     const panes = ['general', 'downloads', 'sources', 'storage', 'proxy'];
     panes.forEach(p => {
       const el = document.getElementById(`settings-pane-${p}`);
-      if (el) el.style.display = (p === sectionId) ? 'block' : 'none';
+      if (el) {
+        const isMatch = (p === sectionId);
+        el.style.display = isMatch ? 'block' : 'none';
+        if (isMatch) el.classList.add('active');
+        else el.classList.remove('active');
+      }
     });
   }
 

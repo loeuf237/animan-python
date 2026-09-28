@@ -20,6 +20,28 @@ from animan.services.extractors import extractor_registry
 
 _get_hanime_catalog = get_hanime_catalog
 
+KNOWN_EMBED_HOSTS = {
+    "sibnet": "Sibnet",
+    "sendvid": "Sendvid",
+    "vidmoly": "Vidmoly",
+    "ansembed": "Vidmoly",
+    "voembed": "Vidmoly",
+    "vmeas": "Vidmoly",
+    "vmpx": "Vidmoly",
+    "streamtape": "Streamtape",
+    "stape": "Streamtape",
+    "tapecontent": "Streamtape",
+    "voe": "VOE",
+    "uqload": "Uqload",
+    "filemoon": "Filemoon",
+    "dood": "Doodstream",
+    "mp4upload": "Mp4upload",
+    "mail.ru": "MailRu",
+    "my.mail.ru": "MailRu",
+    "kwik": "Kwik",
+    "owocdn": "Kwik",
+}
+
 
 def _clean_selector(sel: Optional[str]) -> str:
     if not sel:
@@ -461,14 +483,18 @@ class AniyomiContainerSource:
                 iframe_url = urljoin(self.base_url, iframe_url)
 
             # Identification du nom de l'hébergeur
-            host_name = "Lecteur Externe"
-            i_domain = urlparse(iframe_url).netloc.lower()
-            for k_domain, s_name in known_embed_hosts.items():
-                if k_domain in i_domain:
-                    host_name = s_name
-                    break
+            matched_ext = extractor_registry.find_extractor(iframe_url)
+            if matched_ext:
+                host_name = matched_ext.name
             else:
-                host_name = i_domain.replace("www.", "").split(".")[0].capitalize()
+                host_name = "Lecteur Externe"
+                i_domain = urlparse(iframe_url).netloc.lower()
+                for k_domain, s_name in KNOWN_EMBED_HOSTS.items():
+                    if k_domain in i_domain:
+                        host_name = s_name
+                        break
+                else:
+                    host_name = i_domain.replace("www.", "").split(".")[0].capitalize()
 
             sources.append({
                 "name": f"{self.name} - {host_name}",

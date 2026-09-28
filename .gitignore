@@ -78,3 +78,7 @@ android/app/src/main/python/
 android/local.properties
 *.apk
 *.aab
+
+# Node
+node_modules/
+frontend/dist/

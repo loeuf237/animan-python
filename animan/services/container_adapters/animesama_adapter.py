@@ -246,25 +246,40 @@ class AnimeSamaAdapter(BaseSourceAdapter):
         episodes: List[Episode] = []
 
         if player_arrays:
+            from animan.services.extractors import extractor_registry
+            import json
+
             max_count = max(len(arr) for arr in player_arrays.values())
             for idx in range(max_count):
                 ep_num = idx + 1
+                servers_map: Dict[str, str] = {}
                 best_url = ""
                 for p_name, urls in player_arrays.items():
                     if idx < len(urls) and urls[idx]:
-                        best_url = urls[idx]
-                        break
+                        u = urls[idx].strip()
+                        if not best_url:
+                            best_url = u
+                        ext = extractor_registry.find_extractor(u)
+                        s_name = ext.name if ext else (
+                            "Sibnet" if "sibnet" in u.lower() else
+                            "Vidmoly" if any(k in u.lower() for k in ["vidmoly", "ansembed", "voembed"]) else
+                            "Sendvid" if "sendvid" in u.lower() else p_name
+                        )
+                        if s_name not in servers_map:
+                            servers_map[s_name] = u
+
+                ep_url = best_url or anime_url
+                if len(servers_map) > 1:
+                    ep_url = f"{best_url}#servers={quote_plus(json.dumps(servers_map))}"
 
                 episodes.append(
                     Episode(
                         number=ep_num,
                         title=f"Épisode {ep_num:02d}",
-                        url=best_url or anime_url,
-                        downloadPageUrl=best_url or anime_url,
+                        downloadPageUrl=ep_url,
                         playerUrl=best_url or anime_url,
                         thumbnailUrl=img_url,
                         version="VOSTFR",
-                        animeId=str(hash(anime_url))[-8:],
                     )
                 )
 
@@ -273,17 +288,14 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                 Episode(
                     number=1,
                     title="Épisode 01",
-                    url=anime_url,
                     downloadPageUrl=anime_url,
                     playerUrl=anime_url,
                     thumbnailUrl=img_url,
                     version="VOSTFR",
-                    animeId=str(hash(anime_url))[-8:],
                 )
             ]
 
         return AnimeDetail(
-            id=str(hash(anime_url))[-8:],
             title=title,
             imageUrl=img_url,
             synopsis=synopsis,
@@ -296,12 +308,37 @@ class AnimeSamaAdapter(BaseSourceAdapter):
 
     async def get_episode_sources(self, play_url: str, container: Any) -> List[Dict[str, Any]]:
         from animan.services.extractors import extractor_registry
-        extractor = extractor_registry.find_extractor(play_url)
+        import json
+        from urllib.parse import unquote_plus
+
+        # Si des serveurs alternatifs sont encodés dans le hash fragment
+        if "#servers=" in play_url:
+            base_part, _, srv_raw = play_url.partition("#servers=")
+            try:
+                srv_dict = json.loads(unquote_plus(srv_raw))
+                sources: List[Dict[str, Any]] = []
+                for s_name, s_url in srv_dict.items():
+                    ext = extractor_registry.find_extractor(s_url)
+                    real_srv = ext.name if ext else s_name
+                    sources.append({
+                        "name": f"{container.name} - {real_srv}",
+                        "server": real_srv,
+                        "url": s_url,
+                        "quality": "HD",
+                        "format": "embed",
+                    })
+                if sources:
+                    return sources
+            except Exception as e:
+                logger.debug("[animesama_adapter] Error decoding servers fragment: %s", e)
+
+        clean_url = play_url.split("#")[0].strip()
+        extractor = extractor_registry.find_extractor(clean_url)
         if extractor:
             return [{
                 "name": f"{container.name} - {extractor.name}",
                 "server": extractor.name,
-                "url": play_url,
+                "url": clean_url,
                 "quality": "HD",
                 "format": "embed",
             }]
@@ -309,7 +346,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
         return [{
             "name": f"{container.name} - Lecteur",
             "server": "AnimeSama",
-            "url": play_url,
+            "url": clean_url,
             "quality": "HD",
             "format": "embed",
         }]
