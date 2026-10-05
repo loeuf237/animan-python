@@ -1,8 +1,10 @@
+from animan.services.source_http import source_http, VerificationRequired
 import asyncio
 from contextlib import contextmanager
 import json
 import logging
 import os
+import re
 import sqlite3
 import urllib.request
 from datetime import datetime
@@ -11,6 +13,7 @@ from typing import List, Dict, Any, Optional, Set
 from urllib.parse import urlparse, urljoin
 import httpx
 
+from animan.security import is_safe_url
 from animan.config import settings
 from animan.services.aniyomi_dex_parser import AniyomiDexParser, SourceRecipe
 from animan.services.aniyomi_container import AniyomiContainerSource
@@ -90,18 +93,20 @@ class ExtensionService:
             raise ValueError("L'URL du magasin d'extensions ne peut pas être vide.")
 
         # Normalisation si l'URL ne pointe pas directement vers index.min.json
-        if not clean_url.endswith(".json"):
+        if not urlparse(clean_url).path.endswith(".json"):
             clean_url = clean_url.rstrip("/") + "/index.min.json"
 
         logger.info("[extensions] Downloading extension repository: %s", clean_url)
 
         # Téléchargement de l'index
         try:
-            async with httpx.AsyncClient(timeout=15.0, verify=settings.SSL_VERIFY, follow_redirects=True) as client:
+            async with source_http.async_client(timeout=15.0, verify=settings.SSL_VERIFY, follow_redirects=True, event_hooks={"request": [self._validate_request]}) as client:
                 resp = await client.get(clean_url, headers={"User-Agent": settings.DEFAULT_USER_AGENT})
                 if resp.status_code != 200:
                     raise ValueError(f"Impossible de joindre le magasin (HTTP {resp.status_code})")
                 data = resp.json()
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("[extensions] Failed downloading repository index: %s", e)
             raise ValueError(f"Erreur lors de la récupération du catalogue: {e}")
@@ -145,8 +150,14 @@ class ExtensionService:
 
             # 3. Importe massivement toutes les extensions (désactivées par défaut)
             imported_count = 0
+            seen_packages = set()
             for item in data:
+                if not isinstance(item, dict):
+                    continue
                 pkg = item.get("pkg") or ""
+                if not isinstance(pkg, str) or not re.fullmatch(r"[A-Za-z0-9_.]+", pkg) or pkg in seen_packages:
+                    continue
+                seen_packages.add(pkg)
                 name = item.get("name") or pkg
                 lang = item.get("lang") or "all"
                 version = item.get("version") or str(item.get("code") or "1.0")
@@ -177,6 +188,7 @@ class ExtensionService:
                     ON CONFLICT(repo_id, pkg) DO UPDATE SET
                         name = excluded.name,
                         lang = excluded.lang,
+                        recipe_json = CASE WHEN version IS NOT excluded.version OR base_url IS NOT excluded.base_url OR apk_url IS NOT excluded.apk_url THEN NULL ELSE recipe_json END,
                         version = excluded.version,
                         apk_url = excluded.apk_url,
                         base_url = excluded.base_url,
@@ -187,6 +199,10 @@ class ExtensionService:
                 ))
                 imported_count += 1
 
+            if not seen_packages:
+                raise ValueError("Le dépôt ne contient aucune extension valide.")
+            placeholders = ",".join("?" for _ in seen_packages)
+            cursor.execute(f"DELETE FROM imported_extensions WHERE repo_id = ? AND pkg NOT IN ({placeholders})", (repo_id, *seen_packages))
             conn.commit()
 
         # Réinitialise le cache des sources en mémoire pour ne conserver que celles du dépôt actif
@@ -253,6 +269,9 @@ class ExtensionService:
                 raise ValueError("Extension introuvable.")
 
             ext_data = dict(row)
+            active = self.get_active_repository()
+            if not active or active["id"] != ext_data["repo_id"]:
+                raise ValueError("Cette extension appartient à un dépôt inactif.")
             pkg = ext_data["pkg"]
 
             if enabled:
@@ -261,6 +280,8 @@ class ExtensionService:
                 if ext_data.get("recipe_json"):
                     try:
                         recipe_dict = json.loads(ext_data["recipe_json"])
+                    except VerificationRequired:
+                        raise
                     except Exception:
                         pass
 
@@ -271,6 +292,8 @@ class ExtensionService:
                     cursor.execute("UPDATE imported_extensions SET is_enabled = 1 WHERE id = ?;", (ext_id,))
 
                 recipe = SourceRecipe.from_dict(recipe_dict)
+                if not recipe.base_url or not await asyncio.to_thread(is_safe_url, recipe.base_url):
+                    raise ValueError("Aucune adresse de source valide : configurez sa recette avant activation.")
                 self._active_container_sources[pkg] = AniyomiContainerSource(recipe)
                 logger.info("[extensions] Extension enabled: %s (%s)", ext_data["name"], pkg)
             else:
@@ -297,18 +320,22 @@ class ExtensionService:
         lang = ext_data.get("lang") or "all"
 
         apk_bytes = b""
-        local_apk = APKS_DIR / f"{pkg}.apk"
+        import hashlib
+        cache_id = hashlib.sha256(f"{pkg}:{ext_data.get('version')}:{apk_url}".encode()).hexdigest()
+        local_apk = APKS_DIR / f"{cache_id}.apk"
 
         if local_apk.exists() and local_apk.stat().st_size > 1000:
             apk_bytes = local_apk.read_bytes()
         elif apk_url:
             logger.info("[extensions] Downloading APK for %s from %s", name, apk_url)
             try:
-                async with httpx.AsyncClient(timeout=25.0, verify=settings.SSL_VERIFY, follow_redirects=True) as client:
+                async with source_http.async_client(timeout=25.0, verify=settings.SSL_VERIFY, follow_redirects=True, event_hooks={"request": [self._validate_request]}) as client:
                     resp = await client.get(apk_url, headers={"User-Agent": settings.DEFAULT_USER_AGENT})
                     if resp.status_code == 200 and len(resp.content) > 1000:
                         apk_bytes = resp.content
                         local_apk.write_bytes(apk_bytes)
+            except VerificationRequired:
+                raise
             except Exception as e:
                 logger.warning("[extensions] Failed downloading APK for %s: %s", name, e)
 
@@ -336,11 +363,18 @@ class ExtensionService:
             rows = cursor.fetchall()
             for r in rows:
                 ext = dict(r)
+                if not ext.get("recipe_json"):
+                    recipe = SourceRecipe(pkg=ext["pkg"], name=ext["name"], base_url=ext["base_url"] or "", lang=ext["lang"])
+                    AniyomiDexParser._fill_heuristics(recipe)
+                    if recipe.base_url:
+                        self._active_container_sources[ext["pkg"]] = AniyomiContainerSource(recipe)
                 if ext.get("recipe_json"):
                     try:
                         recipe_data = json.loads(ext["recipe_json"])
                         recipe = SourceRecipe.from_dict(recipe_data)
                         AniyomiDexParser._fill_heuristics(recipe)
+                        # Keep user-defined paths/selectors; fill only missing values.
+                        recipe = SourceRecipe.from_dict({**recipe.to_dict(), **{key: value for key, value in recipe_data.items() if value not in ("", None, [])}})
                         updated_dict = recipe.to_dict()
                         if updated_dict != recipe_data:
                             cursor.execute("UPDATE imported_extensions SET recipe_json = ? WHERE id = ?;", (json.dumps(updated_dict), ext["id"]))
@@ -354,6 +388,68 @@ class ExtensionService:
     # Accesseurs pour le coeur d'Animan
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    async def _validate_request(request):
+        if not await asyncio.to_thread(is_safe_url, str(request.url)):
+            raise ValueError("URL du dépôt ou de l’APK non autorisée.")
+
+    async def configure_extension(self, ext_id: int, data: Dict[str, Any]):
+        unknown = set(data) - set(SourceRecipe.__dataclass_fields__)
+        if unknown:
+            raise ValueError("Champs de recette inconnus : " + ", ".join(sorted(unknown)))
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM imported_extensions WHERE id = ?", (ext_id,)).fetchone()
+            active = self.get_active_repository()
+            if not row or not active or row["repo_id"] != active["id"]:
+                raise ValueError("Extension introuvable dans le dépôt actif.")
+            existing = json.loads(row["recipe_json"] or "{}")
+            existing.update(data)
+            existing.update(pkg=row["pkg"], name=row["name"], lang=row["lang"])
+            recipe = SourceRecipe.from_dict(existing)
+            if not isinstance(recipe.base_url, str) or not await asyncio.to_thread(is_safe_url, recipe.base_url):
+                raise ValueError("URL de source invalide.")
+            from bs4 import BeautifulSoup
+            import re
+            for key, value in recipe.to_dict().items():
+                if key.endswith("selector"):
+                    if not isinstance(value, str):
+                        raise ValueError("Les sélecteurs doivent être du texte.")
+                    if value:
+                        try:
+                            BeautifulSoup("", "html.parser").select(value)
+                        except VerificationRequired:
+                            raise
+                        except Exception as exc:
+                            raise ValueError(f"Sélecteur invalide : {key}") from exc
+            try:
+                re.compile(recipe.video_iframe_regex)
+            except (TypeError, re.error) as exc:
+                raise ValueError("Expression de lecteur invalide.") from exc
+            conn.execute("UPDATE imported_extensions SET recipe_json = ?, base_url = ? WHERE id = ?",
+                         (json.dumps(recipe.to_dict()), recipe.base_url, ext_id))
+        self._load_enabled_sources()
+        return {"success": True, "id": ext_id}
+
+    async def diagnose_extension(self, ext_id: int):
+        ext = next((ext for ext in self.get_visible_extensions() if ext["id"] == ext_id), None)
+        if not ext:
+            raise ValueError("Extension introuvable dans le dépôt actif.")
+        recipe = SourceRecipe.from_dict(json.loads(ext["recipe_json"])) if ext.get("recipe_json") else SourceRecipe(
+            pkg=ext["pkg"], name=ext["name"], base_url=ext["base_url"] or "", lang=ext["lang"])
+        stored = recipe.to_dict()
+        AniyomiDexParser._fill_heuristics(recipe)
+        if ext.get("recipe_json"):
+            recipe = SourceRecipe.from_dict({**recipe.to_dict(), **{k: v for k, v in stored.items() if v not in ("", None, [])}})
+        source = AniyomiContainerSource(recipe)
+        try:
+            results = await asyncio.wait_for(source.get_latest_releases(), timeout=20)
+        except VerificationRequired:
+            raise
+        except Exception as exc:
+            return {"success": False, "count": 0, "message": f"Échec du catalogue : {exc}"}
+        return {"success": bool(results), "count": len(results), "message":
+                f"{len(results)} titres trouvés." if results else source.last_error or "Catalogue vide : source indisponible ou recette à adapter."}
+
     def get_enabled_container_sources(self) -> List[AniyomiContainerSource]:
         """Retourne la liste des conteneurs de sources actuellement activés."""
         return list(self._active_container_sources.values())
@@ -364,7 +460,7 @@ class ExtensionService:
             return None
         sid = source_id.lower().strip()
         for k, src in self._active_container_sources.items():
-            if k.lower() == sid or src.name.lower() == sid or src.pkg.lower() == sid or sid in k.lower():
+            if k.lower() == sid or src.name.lower() == sid or src.pkg.lower() == sid:
                 return src
         return None
 

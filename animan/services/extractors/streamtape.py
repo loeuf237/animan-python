@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Optional
@@ -91,6 +92,8 @@ class StreamtapeExtractor(BaseVideoExtractor):
                             elif r_redir.status_code == 200 and "text/html" not in (r_redir.headers.get("content-type") or ""):
                                 direct_url = cand
                                 break
+                        except VerificationRequired:
+                            raise
                         except Exception as e:
                             logger.debug("Test redirection Streamtape échoué: %s", e)
 
@@ -106,6 +109,8 @@ class StreamtapeExtractor(BaseVideoExtractor):
                     cl = head_resp.headers.get("Content-Length")
                     if cl and cl.isdigit():
                         file_size = int(cl)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -117,6 +122,8 @@ class StreamtapeExtractor(BaseVideoExtractor):
                     headers={"Referer": "https://streamtape.com/"},
                     size=file_size,
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Streamtape pour %s: %s", url, e)
             return None

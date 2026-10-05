@@ -1,3 +1,5 @@
+from animan.services.source_http import source_http, VerificationRequired
+import asyncio
 import json
 import logging
 import re
@@ -9,7 +11,7 @@ from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 
 import httpx
 from animan.config import settings
-from animan.security import is_safe_url, is_safe_path
+from animan.security import is_safe_url, is_safe_url_async, is_safe_path
 from animan.services.download_manager import download_manager
 from animan.services.proxy_service import proxy_service
 from animan.services.library_service import library_service
@@ -24,12 +26,38 @@ import hashlib
 logger = logging.getLogger("animan.router.media")
 router = APIRouter()
 
-IMAGE_CACHE: Dict[str, tuple[bytes, str]] = {}
+import os
+from collections import OrderedDict
+
+IMAGE_CACHE: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
+IMAGE_CACHE_CURRENT_BYTES = 0
+MAX_IMAGE_CACHE_BYTES = 50 * 1024 * 1024  # 50 Mo max en mémoire vive
+MAX_IMAGE_CACHE_ITEMS = 200
 IMAGE_DISK_CACHE_DIR = settings.CACHE_DIR / "images"
 IMAGE_DISK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 Mo max pour prévenir les attaques OOM
-MAX_IMAGE_CACHE_ITEMS = 600
 CACHE_HEADERS = {"Cache-Control": "public, max-age=604800, immutable"}
+
+def _get_memory_cached_image(url: str) -> Optional[tuple[bytes, str]]:
+    global IMAGE_CACHE
+    if url in IMAGE_CACHE:
+        IMAGE_CACHE.move_to_end(url)
+        return IMAGE_CACHE[url]
+    return None
+
+def _put_memory_cached_image(url: str, content: bytes, ctype: str):
+    global IMAGE_CACHE, IMAGE_CACHE_CURRENT_BYTES
+    if url in IMAGE_CACHE:
+        old_data, _ = IMAGE_CACHE.pop(url)
+        IMAGE_CACHE_CURRENT_BYTES -= len(old_data)
+
+    item_len = len(content)
+    while IMAGE_CACHE and (IMAGE_CACHE_CURRENT_BYTES + item_len > MAX_IMAGE_CACHE_BYTES or len(IMAGE_CACHE) >= MAX_IMAGE_CACHE_ITEMS):
+        _, (evicted_data, _) = IMAGE_CACHE.popitem(last=False)
+        IMAGE_CACHE_CURRENT_BYTES -= len(evicted_data)
+
+    IMAGE_CACHE[url] = (content, ctype)
+    IMAGE_CACHE_CURRENT_BYTES += item_len
 
 def _get_disk_cached_image(url: str) -> Optional[tuple[bytes, str]]:
     try:
@@ -49,18 +77,24 @@ def _save_disk_cached_image(url: str, content: bytes, ctype: str):
         url_hash = hashlib.sha256(url.encode()).hexdigest()
         cache_bin = IMAGE_DISK_CACHE_DIR / f"{url_hash}.bin"
         cache_meta = IMAGE_DISK_CACHE_DIR / f"{url_hash}.meta"
-        cache_bin.write_bytes(content)
-        cache_meta.write_text(ctype, encoding="utf-8")
+        tmp_bin = IMAGE_DISK_CACHE_DIR / f"{url_hash}.bin.tmp.{os.getpid()}"
+        tmp_meta = IMAGE_DISK_CACHE_DIR / f"{url_hash}.meta.tmp.{os.getpid()}"
+        tmp_bin.write_bytes(content)
+        tmp_meta.write_text(ctype, encoding="utf-8")
+        os.replace(tmp_bin, cache_bin)
+        os.replace(tmp_meta, cache_meta)
     except Exception as e:
         logger.debug("[media] Error writing image disk cache: %s", e)
 
+async def _validate_media_request(request: httpx.Request):
+    # HTTPX runs request hooks for every redirect, before sending it.
+    if not await is_safe_url_async(str(request.url)):
+        raise HTTPException(status_code=400, detail="URL non autorisée ou non sécurisée")
+
+
 def _get_media_async_client(timeout: float = 10.0) -> httpx.AsyncClient:
-    proxy = proxy_service.get_active_proxy()
-    try:
-        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY, proxy=proxy)
-    except Exception as e:
-        logger.warning("[media] HTTP proxy client error: %s - falling back to trust_env=False", e)
-        return httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=settings.SSL_VERIFY, trust_env=False, proxy=proxy)
+    return source_http.async_client(timeout=timeout, follow_redirects=True,
+                                    event_hooks={"request": [_validate_media_request]})
 
 @router.get("/api/media/image-proxy")
 async def proxy_image(url: str):
@@ -68,38 +102,50 @@ async def proxy_image(url: str):
         raise HTTPException(status_code=400, detail="URL d'image invalide")
 
     # Protection SSRF
-    if not is_safe_url(url):
+    if not await is_safe_url_async(url):
         logger.warning("SSRF blocked on image-proxy for URL: %s", url)
         raise HTTPException(status_code=400, detail="URL d'image non autorisée ou non sécurisée")
 
     # 1. Cache mémoire ultra-rapide (0 ms)
-    if url in IMAGE_CACHE:
-        content, ctype = IMAGE_CACHE[url]
+    mem_data = _get_memory_cached_image(url)
+    if mem_data:
+        content, ctype = mem_data
         return Response(content=content, media_type=ctype, headers=CACHE_HEADERS)
 
     # 2. Cache disque persistant (survit aux redémarrages)
     disk_data = _get_disk_cached_image(url)
     if disk_data:
         content, ctype = disk_data
-        if len(IMAGE_CACHE) > MAX_IMAGE_CACHE_ITEMS:
-            IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
-        IMAGE_CACHE[url] = (content, ctype)
+        _put_memory_cached_image(url, content, ctype)
         return Response(content=content, media_type=ctype, headers=CACHE_HEADERS)
 
     try:
-        is_animepahe = any(d in url for d in ["animepahe", "kwik", "pahe"])
-        if "themoviedb.org" in url or "tmdb.org" in url:
+        parsed_url = urllib.parse.urlparse(url)
+        host = (parsed_url.hostname or "").lower()
+        is_animepahe = any(host == d or host.endswith("." + d) for d in [
+            "animepahe.com", "animepahe.org", "animepahe.pw", "animepahe.ru",
+            "animepahe.si", "animepahe.su", "kwik.cx", "kwik.si", "kwik.link",
+            "kwik.top", "pahe.win", "owocdn.top", "kwikcdn.com"
+        ])
+        if host in ("themoviedb.org", "image.tmdb.org", "api.themoviedb.org") or host.endswith(".tmdb.org") or host.endswith(".themoviedb.org"):
             referer = "https://www.themoviedb.org/"
         elif is_animepahe:
             referer = f"{settings.ANIMEPAHE_URL}/"
-        elif any(d in url for d in ["voir-anime", "voembed", "vidmoly"]):
+        elif any(host == d or host.endswith("." + d) for d in ["voir-anime.to", "voiranime.to", "voiranime.io", "voiranime.homes", "voembed.net", "vidmoly.to"]):
             referer = "https://voir-anime.to/"
         else:
             referer = "https://french-manga.net/"
             for cs in extension_service.get_enabled_container_sources():
-                if cs.base_url and urllib.parse.urlparse(cs.base_url).hostname in url:
-                    referer = cs.base_url.rstrip("/") + "/"
-                    break
+                if cs.base_url:
+                    try:
+                        cs_host = (urllib.parse.urlparse(cs.base_url).hostname or "").lower()
+                        if cs_host and (host == cs_host or host.endswith("." + cs_host)):
+                            referer = cs.base_url.rstrip("/") + "/"
+                            break
+                    except VerificationRequired:
+                        raise
+                    except Exception:
+                        pass
 
         if is_animepahe:
             media_data = await animepahe_service.fetch_media_bytes(url, referer=referer)
@@ -108,9 +154,7 @@ async def proxy_image(url: str):
                 if len(final_bytes) > MAX_IMAGE_SIZE:
                     raise HTTPException(status_code=413, detail="Image trop volumineuse (max 10 Mo)")
                 _save_disk_cached_image(url, final_bytes, ctype)
-                if len(IMAGE_CACHE) > MAX_IMAGE_CACHE_ITEMS:
-                    IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
-                IMAGE_CACHE[url] = (final_bytes, ctype)
+                _put_memory_cached_image(url, final_bytes, ctype)
                 return Response(content=final_bytes, media_type=ctype, headers=CACHE_HEADERS)
 
         headers = {
@@ -139,12 +183,12 @@ async def proxy_image(url: str):
 
                 final_bytes = bytes(content)
                 _save_disk_cached_image(url, final_bytes, ctype)
-                if len(IMAGE_CACHE) > MAX_IMAGE_CACHE_ITEMS:
-                    IMAGE_CACHE.pop(next(iter(IMAGE_CACHE)))
-                IMAGE_CACHE[url] = (final_bytes, ctype)
+                _put_memory_cached_image(url, final_bytes, ctype)
 
                 return Response(content=final_bytes, media_type=ctype, headers=CACHE_HEADERS)
     except HTTPException:
+        raise
+    except VerificationRequired:
         raise
     except Exception as e:
         logger.debug("Error in image-proxy: %s", e)
@@ -180,7 +224,8 @@ async def resolve_stream(
                 animeName, episodeNumber, source, server, quality)
 
     # 1. Vérification si l'épisode est déjà téléchargé sur le disque dur
-    local_task = library_service.find_downloaded_episode(
+    local_task = await asyncio.to_thread(
+        library_service.find_downloaded_episode,
         anime_name=animeName,
         episode_number=episodeNumber,
         version=version or "",
@@ -193,6 +238,8 @@ async def resolve_stream(
         subtitles = []
         try:
             subtitles = await get_subtitles_list(local_task.id)
+        except VerificationRequired:
+            raise
         except Exception:
             pass
 
@@ -230,12 +277,16 @@ async def resolve_stream(
                         if src.base_url and ep_host in src.base_url.lower():
                             container_source = src
                             break
+            except VerificationRequired:
+                raise
             except Exception:
                 pass
 
     if container_source:
         try:
             container_sources = await container_source.get_episode_sources(episodeUrl)
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.warning("[media] Error getting episode sources from container: %s", e)
             container_sources = []
@@ -279,6 +330,8 @@ async def resolve_stream(
                         server_type = resolved.get("serverType") or cand_srv
                         selected_quality = resolved.get("selectedQuality") or cand_q or "HD"
                         break
+                except VerificationRequired:
+                    raise
                 except Exception as ex:
                     logger.debug("[media] Error resolving candidate %s: %s", cand_url, ex)
 
@@ -294,12 +347,15 @@ async def resolve_stream(
                     video_url = resolved["videoUrl"]
                     server_type = resolved.get("serverType") or (container_source.name if container_source else "imported")
                     selected_quality = resolved.get("selectedQuality") or "HD"
+            except VerificationRequired:
+                raise
             except Exception as ex:
                 logger.debug("[media] Error resolving direct episodeUrl fallback: %s", ex)
     elif source == "voir-anime":
         pref_srv = server if (server and server != "auto") else None
         pref_q = quality if (quality and quality != "auto") else None
-        info = voiranime_service.extract_download_info(
+        info = await asyncio.to_thread(
+            voiranime_service.extract_download_info,
             episodeUrl,
             preferred_server=pref_srv,
             preferred_quality=pref_q,
@@ -311,6 +367,8 @@ async def resolve_stream(
         if isinstance(raw_qualities, str):
             try:
                 qualities_dict = json.loads(raw_qualities)
+            except VerificationRequired:
+                raise
             except Exception:
                 qualities_dict = {}
         elif isinstance(raw_qualities, dict):
@@ -363,7 +421,7 @@ async def resolve_stream(
                         video_url = await animepahe_service.extract_kwik_stream(target_kwik_url) or ""
     elif source == "french-manga" or "french-manga" in episodeUrl:
         # french-manga
-        info = scraping_service.extract_download_info(episodeUrl)
+        info = await asyncio.to_thread(scraping_service.extract_download_info, episodeUrl)
         video_url = info.get("videoUrl") or info.get("directUrl") or ""
         server_type = "vidzy"
         sub_url = info.get("subtitleUrl")
@@ -387,6 +445,8 @@ async def resolve_stream(
                 video_url = resolved["videoUrl"]
                 server_type = resolved.get("serverType") or "imported"
                 selected_quality = resolved.get("selectedQuality") or "HD"
+        except VerificationRequired:
+            raise
         except Exception as ex:
             logger.debug("[media] Generic resolve error: %s", ex)
 
@@ -464,14 +524,20 @@ async def stream_video(task_id: str, request: Request, range: Optional[str] = He
         )
 
     # HTTP Range handling: "bytes=0-1024" or "bytes=1024-"
-    range_match = re.search(r"bytes=(\d+)-(\d*)", range)
-    if not range_match:
-        raise HTTPException(status_code=416, detail="Range header non valide")
+    range_match = re.fullmatch(r"bytes=(\d*)-(\d*)", range.strip())
+    if not range_match or not any(range_match.groups()) or file_size == 0:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
 
-    start = int(range_match.group(1))
-    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+    first, last = range_match.groups()
+    if first:
+        start = int(first)
+        end = min(int(last), file_size - 1) if last else file_size - 1
+    else:
+        suffix_length = int(last)
+        start = max(0, file_size - suffix_length)
+        end = file_size - 1
 
-    if start >= file_size or end >= file_size or start > end:
+    if start >= file_size or start > end:
         return Response(
             status_code=416,
             headers={"Content-Range": f"bytes */{file_size}"}
@@ -565,7 +631,7 @@ async def proxy_subtitle(url: str = Query(...)):
     """
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL de sous-titre invalide")
-    if not is_safe_url(url):
+    if not await is_safe_url_async(url):
         logger.warning("SSRF blocked on subtitle-proxy: %s", url)
         raise HTTPException(status_code=400, detail="URL de sous-titre non autorisée")
 
@@ -591,6 +657,8 @@ async def proxy_subtitle(url: str = Query(...)):
             )
     except HTTPException:
         raise
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.debug("Error in subtitle-proxy: %s", e)
         raise HTTPException(status_code=502, detail="Erreur lors de la récupération des sous-titres")
@@ -612,7 +680,7 @@ async def hls_proxy_playlist(request: Request, url: str = Query(...)):
 
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL HLS invalide")
-    if not is_safe_url(url):
+    if not await is_safe_url_async(url):
         logger.warning("SSRF blocked on hls-proxy/playlist: %s", url)
         raise HTTPException(status_code=400, detail="URL non autorisée")
 
@@ -620,10 +688,9 @@ async def hls_proxy_playlist(request: Request, url: str = Query(...)):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer": "https://kwik.cx/",
     }
-    from curl_cffi.requests import AsyncSession
 
     try:
-        async with AsyncSession(impersonate="chrome124") as session:
+        async with source_http.async_client() as session:
             resp = await session.get(url, headers=headers, timeout=20.0)
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Échec récupération playlist HLS")
@@ -647,6 +714,8 @@ async def hls_proxy_playlist(request: Request, url: str = Query(...)):
                 if s.startswith("#EXT-X-MEDIA-SEQUENCE"):
                     try:
                         seq = int(s.split(":")[-1])
+                    except VerificationRequired:
+                        raise
                     except Exception:
                         pass
                     lines.append(line)
@@ -674,6 +743,8 @@ async def hls_proxy_playlist(request: Request, url: str = Query(...)):
                 }
             )
     except HTTPException:
+        raise
+    except VerificationRequired:
         raise
     except Exception as e:
         logger.error("Error in hls_proxy_playlist: %s", e)
@@ -706,7 +777,7 @@ async def hls_proxy_segment(
 
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL de segment invalide")
-    if not is_safe_url(url):
+    if not await is_safe_url_async(url):
         logger.warning("SSRF blocked on hls-proxy/segment: %s", url)
         raise HTTPException(status_code=400, detail="URL non autorisée")
 
@@ -714,15 +785,11 @@ async def hls_proxy_segment(
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Referer": "https://kwik.cx/",
     }
-    from curl_cffi.requests import AsyncSession
 
     try:
         # Session rapide sans surcoût d'impersonation (téléchargement 2x plus rapide sur les CDN)
-        async with AsyncSession() as session:
+        async with source_http.async_client() as session:
             resp = await session.get(url, headers=headers, timeout=120.0)
-            if resp.status_code == 403:
-                async with AsyncSession(impersonate="chrome124") as session_cf:
-                    resp = await session_cf.get(url, headers=headers, timeout=120.0)
 
             if resp.status_code != 200:
                 raise HTTPException(status_code=resp.status_code, detail="Échec récupération segment")
@@ -754,6 +821,8 @@ async def hls_proxy_segment(
                 }
             )
     except HTTPException:
+        raise
+    except VerificationRequired:
         raise
     except Exception as e:
         logger.error("Error in hls_proxy_segment: %s", e)
@@ -788,7 +857,7 @@ async def stream_proxy(
     if not url or not url.startswith("http"):
         raise HTTPException(status_code=400, detail="URL de flux vidéo invalide")
 
-    if not is_safe_url(url):
+    if not await is_safe_url_async(url):
         logger.warning("SSRF blocked on stream-proxy: %s", url)
         raise HTTPException(status_code=400, detail="URL non autorisée ou non sécurisée")
 
@@ -799,11 +868,12 @@ async def stream_proxy(
         upstream_headers["Range"] = range
 
     proxy = proxy_service.get_active_proxy()
-    client = httpx.AsyncClient(
+    client = source_http.async_client(
         timeout=httpx.Timeout(connect=15.0, read=60.0, write=15.0, pool=60.0),
         follow_redirects=True,
         verify=settings.SSL_VERIFY,
         proxy=proxy,
+        event_hooks={"request": [_validate_media_request]},
     )
 
     if request.method == "HEAD":
@@ -812,6 +882,10 @@ async def stream_proxy(
             if head_resp.status_code not in (200, 206):
                 # Certains hébergeurs (ex: Sibnet) refusent HEAD -> repli Range: bytes=0-0
                 head_resp = await client.get(url, headers={**upstream_headers, "Range": "bytes=0-0"})
+        except HTTPException:
+            raise
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[stream-proxy] HEAD failed for %s, trying GET range: %s", url, e)
             head_resp = await client.get(url, headers={**upstream_headers, "Range": "bytes=0-0"})
@@ -870,6 +944,9 @@ async def stream_proxy(
             headers=resp_headers,
         )
     except HTTPException:
+        await client.aclose()
+        raise
+    except VerificationRequired:
         raise
     except Exception as e:
         await client.aclose()

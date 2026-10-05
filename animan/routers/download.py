@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import asyncio
 import json
 import logging
@@ -45,6 +46,7 @@ async def start_download(request: Request):
     episode_number = int(body.get("episodeNumber", 0))
     url = body.get("url", "").strip()
     file_name = body.get("fileName", f"{anime_name} - Episode {episode_number}.mp4")
+    version = body.get("version") or ""
     subtitle_url = body.get("subtitleUrl")
     download_subtitles = str(body.get("downloadSubtitles", "false")).lower() == "true"
     selected_server = body.get("selectedServer")
@@ -56,6 +58,8 @@ async def start_download(request: Request):
     if scheduled_time_str:
         try:
             scheduled_time = datetime.fromisoformat(scheduled_time_str)
+        except VerificationRequired:
+            raise
         except Exception:
             pass
 
@@ -63,6 +67,8 @@ async def start_download(request: Request):
     if body.get("speedLimit"):
         try:
             speed_limit = int(body["speedLimit"])
+        except VerificationRequired:
+            raise
         except Exception:
             pass
 
@@ -70,7 +76,7 @@ async def start_download(request: Request):
         return JSONResponse(status_code=400, content={"error": "URL manquante"})
 
     # Vérification doublon
-    existing = download_manager.check_existing_file(anime_name, file_name, episode_number)
+    existing = download_manager.check_existing_file(anime_name, file_name, episode_number, version)
     if existing:
         info = await download_manager.get_or_resolve_episode_info(url, preferred_server=selected_server, preferred_quality=selected_quality, source=source)
         if info and info.size > 0 and existing.stat().st_size == info.size:
@@ -95,6 +101,8 @@ async def start_download(request: Request):
         selected_server=selected_server,
         selected_quality=selected_quality,
         source=source,
+        version=version,
+        anime_url=body.get("animeUrl") or "",
     )
 
     msg = (
@@ -127,6 +135,10 @@ async def start_batch_download(request: Request):
     for ep in episodes:
         if "source" not in ep:
             ep["source"] = source
+        if "selectedServer" not in ep:
+            ep["selectedServer"] = body.get("preferredServer")
+        if "selectedQuality" not in ep:
+            ep["selectedQuality"] = body.get("preferredQuality")
 
     tasks = download_manager.start_batch_download(anime_name, episodes, source=source)
     return {
@@ -165,7 +177,8 @@ async def resume_download(task_id: str):
     resumed = download_manager.resume_download(task_id)
     if resumed:
         return {"success": True, "message": "Téléchargement repris"}
-    return JSONResponse(status_code=400, content={"error": "Impossible de reprendre ce téléchargement"})
+    task = download_manager.get_task(task_id)
+    return JSONResponse(status_code=400, content={"error": task.error if task and task.error else "Impossible de reprendre ce téléchargement"})
 
 @router.delete("/api/download/{task_id}/remove")
 async def remove_task(task_id: str):
@@ -256,6 +269,8 @@ async def save_proxy_settings(request: Request):
         data = await request.json()
         saved = proxy_service.save_proxy_settings(data)
         return {"success": True, "settings": saved, "message": "Paramètres proxy enregistrés"}
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.error(f"Error saving proxy settings: {e}")
         return JSONResponse(status_code=400, content={"error": f"Erreur lors de l'enregistrement: {e}"})
@@ -267,6 +282,8 @@ async def test_proxy(request: Request):
         url = body.get("proxyUrl")
         res = await proxy_service.test_proxy_connection(url)
         return res
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.error(f"Error testing proxy connection: {e}")
         return {"success": False, "error": str(e)}
@@ -288,6 +305,8 @@ async def get_episode_servers(url: str = Query(...)):
             "servers": [],
             "defaultServer": "auto",
         }
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.error("Error get_episode_servers: %s", e)
         return {"success": False, "servers": [], "error": str(e)}
@@ -308,18 +327,24 @@ async def get_episode_size(
             if info.video_qualities_json:
                 try:
                     qualities_dict = json.loads(info.video_qualities_json)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
             qualities_sizes_dict = {}
             if getattr(info, "qualities_sizes_json", None):
                 try:
                     qualities_sizes_dict = json.loads(info.qualities_sizes_json)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
             subtitles_list = []
             if getattr(info, "subtitles_json", None):
                 try:
                     subtitles_list = json.loads(info.subtitles_json)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
             if not subtitles_list and info.subtitle_url:
@@ -340,6 +365,8 @@ async def get_episode_size(
                 "currentServer": info.selected_server,
             }
         return {"success": False, "formattedSize": "Taille inconnue", "size": -1}
+    except VerificationRequired:
+        raise
     except Exception:
         return {"success": False, "formattedSize": "Erreur résolution", "size": -1}
 
@@ -365,7 +392,7 @@ async def reorder_tasks(request: Request):
 
 @router.post("/api/download/{task_id}/verify")
 async def verify_task(task_id: str):
-    res = download_manager.verify_task(task_id)
+    res = await download_manager.verify_task_async(task_id)
     if not res:
         return JSONResponse(status_code=404, content={"error": "Tâche introuvable"})
     return {
@@ -385,7 +412,7 @@ async def verify_task(task_id: str):
 
 @router.post("/api/download/verify-all")
 async def verify_all_tasks():
-    summary = download_manager.verify_all_completed()
+    summary = await download_manager.verify_all_completed_async()
     return {
         "success": True,
         **summary

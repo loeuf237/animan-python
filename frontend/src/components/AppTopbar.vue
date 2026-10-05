@@ -13,8 +13,9 @@
         autocomplete="off"
         spellcheck="false"
         readonly
+        @keydown.enter.prevent="emitOpenPalette"
       />
-      <kbd class="kbd-shortcut-badge" title="Ctrl + K">Ctrl K</kbd>
+      <button type="button" class="kbd-shortcut-badge search-shortcut" title="Ouvrir la recherche (Ctrl + K)" aria-label="Ouvrir la recherche — Ctrl + K" @click.stop="emitOpenPalette">Ctrl + K</button>
     </div>
 
     <div class="top-actions">
@@ -80,3 +81,7 @@ function toggleLang() {
   i18nStore.changeLanguage(next);
 }
 </script>
+
+<style scoped>
+.search-shortcut { display: inline-flex !important; cursor: pointer; }
+</style>

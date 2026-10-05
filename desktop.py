@@ -87,7 +87,15 @@ def main():
             min_size=(960, 600),
             confirm_close=False,
         )
-        webview.start()
+        from animan.services.browser_verification import browser_verification
+        from animan.services.source_http import USER_AGENT
+        browser_verification.webview_opener = lambda target: webview.create_window(
+            title="Animan — Vérification du site", url=target, width=900, height=700,
+        )
+        try:
+            webview.start(user_agent=USER_AGENT)
+        finally:
+            browser_verification.webview_opener = None
     except Exception as e:
         logger.warning("pywebview n'a pas pu initialiser la fenêtre native (%s). Bascule sur le navigateur par défaut.", e)
         has_webview = False

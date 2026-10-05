@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import random
 import re
@@ -31,6 +32,8 @@ class DoodstreamExtractor(BaseVideoExtractor):
             parsed = urlparse(url)
             if parsed.scheme and parsed.netloc:
                 return f"{parsed.scheme}://{parsed.netloc}/"
+        except VerificationRequired:
+            raise
         except Exception:
             pass
         return "https://dood.to/"
@@ -85,6 +88,8 @@ class DoodstreamExtractor(BaseVideoExtractor):
                     qualities={"HD": direct_video_url},
                     headers={"Referer": f"https://{host}/"},
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Doodstream pour %s: %s", url, e)
             return None

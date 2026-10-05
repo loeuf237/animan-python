@@ -201,6 +201,7 @@ async def test_kwik_stream_extraction_unpack():
     class MockResponse:
         status_code = 200
         text = packed_html
+        def raise_for_status(self): pass
 
     class MockAsyncClient:
         def __init__(self, *args, **kwargs):
@@ -212,7 +213,7 @@ async def test_kwik_stream_extraction_unpack():
         async def get(self, url):
             return MockResponse()
 
-    with patch("httpx.AsyncClient", side_effect=MockAsyncClient):
+    with patch("animan.services.animepahe_service.source_http.async_client", side_effect=MockAsyncClient):
         stream_url = await animepahe_service.extract_kwik_stream("https://kwik.cx/e/testembed")
         assert stream_url is not None
         assert "https://na-01.kwik.cx/teststream.mp4" in stream_url

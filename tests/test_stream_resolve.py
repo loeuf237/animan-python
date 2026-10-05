@@ -1,7 +1,7 @@
 import os
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
 from fastapi.testclient import TestClient
 
@@ -147,7 +147,7 @@ def test_subtitle_proxy(stream_fixture):
     mock_resp.status_code = 200
     mock_resp.text = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.000\nSous-titre test"
 
-    with patch("httpx.AsyncClient.get", return_value=mock_resp):
+    with patch("animan.services.source_http.AsyncSourceClient.get", new_callable=AsyncMock, return_value=mock_resp):
         resp = c.get("/api/media/subtitle-proxy", params={"url": "https://vidzy.org/srtproxy/sample.vtt"})
         assert resp.status_code == 200
         assert resp.headers.get("access-control-allow-origin") == "*"

@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Dict, Optional
@@ -58,6 +59,8 @@ class VidmolyExtractor(BaseVideoExtractor):
                                     if not cand.startswith("#"):
                                         full_cand = urljoin(master_m3u8, cand)
                                         qualities[q_label] = full_cand
+                except VerificationRequired:
+                    raise
                 except Exception as e:
                     logger.debug("Erreur parsing variantes m3u8 Vidmoly: %s", e)
 
@@ -78,6 +81,8 @@ class VidmolyExtractor(BaseVideoExtractor):
                     qualities=qualities,
                     headers={"Referer": url},
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Vidmoly pour %s: %s", url, e)
             return None

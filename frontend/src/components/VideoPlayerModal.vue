@@ -246,7 +246,7 @@ function onTimeUpdate() {
   if (total > 0 && current / total >= 0.85) {
     markedWatched = true;
     if (playerStore.currentEpisode) {
-      libraryStore.markWatched(playerStore.animeUrl, String(playerStore.currentEpisode.number), true);
+      libraryStore.markWatched(playerStore.animeUrl, playerStore.currentEpisode.number, true, playerStore.currentEpisode.version || '', playerStore.animeTitle);
     }
   }
 }

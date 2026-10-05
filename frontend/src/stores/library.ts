@@ -6,8 +6,9 @@ import type { FavoriteItem, HistoryItem } from '@/types';
 export const useLibraryStore = defineStore('library', () => {
   const favorites = ref<FavoriteItem[]>([]);
   const history = ref<HistoryItem[]>([]);
-  const watchedMap = ref<Record<string, string[]>>({});
+  const watchedMap = ref<Record<string, Record<string, boolean>>>({});
   const isLoading = ref(false);
+  const isLoadingHistory = ref(false);
 
   async function fetchFavorites() {
     isLoading.value = true;
@@ -23,6 +24,41 @@ export const useLibraryStore = defineStore('library', () => {
     }
   }
 
+  async function fetchHistory(animeName?: string) {
+    isLoadingHistory.value = true;
+    try {
+      const res = await api.getHistory(animeName);
+      if (Array.isArray(res)) {
+        history.value = res;
+      }
+    } catch (e) {
+      console.error('[LibraryStore] fetchHistory error:', e);
+    } finally {
+      isLoadingHistory.value = false;
+    }
+  }
+
+  async function loadWatchedForAnime(animeUrl: string) {
+    if (!animeUrl) return;
+    try {
+      const progressList = await api.getProgress(animeUrl);
+      if (Array.isArray(progressList)) {
+        if (!watchedMap.value[animeUrl]) {
+          watchedMap.value[animeUrl] = {};
+        }
+        for (const p of progressList) {
+          const epNum = p.episodeNumber ?? p.episode_number;
+          const ver = p.version || '';
+          if (epNum !== undefined && epNum !== null) {
+            watchedMap.value[animeUrl][`${epNum}-${ver}`] = p.isWatched ?? p.watched ?? true;
+          }
+        }
+      }
+    } catch (e) {
+      console.debug('[LibraryStore] loadWatchedForAnime error:', e);
+    }
+  }
+
   async function toggleFavorite(payload: {
     url: string;
     title: string;
@@ -30,21 +66,36 @@ export const useLibraryStore = defineStore('library', () => {
     source: string;
     autoDownload?: boolean;
   }) {
-    const isFav = favorites.value.some((f) => f.url === payload.url);
-    if (isFav) {
-      await api.removeFavorite(payload.url);
-    } else {
-      await api.addFavorite(payload);
+    if (isLoading.value && favorites.value.length === 0) {
+      await fetchFavorites();
     }
-    await fetchFavorites();
-    return { isFavorite: !isFav };
+    const isFav = favorites.value.some((f) => f.url === payload.url);
+    try {
+      if (isFav) {
+        await api.removeFavorite(payload.url);
+      } else {
+        await api.addFavorite(payload);
+      }
+      await fetchFavorites();
+      return { isFavorite: !isFav };
+    } catch (e) {
+      console.error('[LibraryStore] toggleFavorite error:', e);
+      throw e;
+    }
   }
 
   async function toggleAutoDownload(url: string, current: boolean) {
-    const res = await api.toggleAutoDownload(url, !current);
     const item = favorites.value.find((f) => f.url === url);
-    if (item) item.autoDownload = !current;
-    return res;
+    const targetState = !current;
+    if (item) item.autoDownload = targetState;
+    try {
+      const res = await api.toggleAutoDownload(url, targetState);
+      return res;
+    } catch (e) {
+      if (item) item.autoDownload = current; // Rollback
+      console.error('[LibraryStore] toggleAutoDownload error:', e);
+      throw e;
+    }
   }
 
   async function clearAllFavorites() {
@@ -53,24 +104,32 @@ export const useLibraryStore = defineStore('library', () => {
     return res;
   }
 
-  async function markWatched(animeUrl: string, episodeNumber: string | number, watched: boolean) {
+  async function markWatched(animeUrl: string, episodeNumber: string | number, watched: boolean, version = '', animeName = '') {
     const epStr = String(episodeNumber);
-    await api.markEpisodeWatched({ animeUrl, episodeNumber: epStr, watched });
+    const key = `${epStr}-${version}`;
     if (!watchedMap.value[animeUrl]) {
-      watchedMap.value[animeUrl] = [];
+      watchedMap.value[animeUrl] = {};
     }
-    const list = watchedMap.value[animeUrl];
-    if (watched && !list.includes(epStr)) {
-      list.push(epStr);
-    } else if (!watched) {
-      watchedMap.value[animeUrl] = list.filter((n) => n !== epStr);
+    const previous = watchedMap.value[animeUrl][key];
+    // Mise à jour optimiste
+    watchedMap.value[animeUrl][key] = watched;
+
+    try {
+      await api.markEpisodeWatched({ animeUrl, animeName, episodeNumber: epStr, watched, version });
+    } catch (e) {
+      // Rollback en cas d'échec
+      if (previous !== undefined) {
+        watchedMap.value[animeUrl][key] = previous;
+      } else {
+        delete watchedMap.value[animeUrl][key];
+      }
+      console.error('[LibraryStore] markWatched error:', e);
+      throw e;
     }
   }
 
-  function isWatched(animeUrl: string, episodeNumber: string | number): boolean {
-    const epStr = String(episodeNumber);
-    const list = watchedMap.value[animeUrl];
-    return list ? list.includes(epStr) : false;
+  function isWatched(animeUrl: string, episodeNumber: string | number, version = ''): boolean | undefined {
+    return watchedMap.value[animeUrl]?.[`${episodeNumber}-${version}`];
   }
 
   return {
@@ -78,7 +137,10 @@ export const useLibraryStore = defineStore('library', () => {
     history,
     watchedMap,
     isLoading,
+    isLoadingHistory,
     fetchFavorites,
+    fetchHistory,
+    loadWatchedForAnime,
     toggleFavorite,
     toggleAutoDownload,
     clearAllFavorites,

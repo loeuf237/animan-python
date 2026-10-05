@@ -1,0 +1,173 @@
+from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlparse
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from run import app
+from animan.models.anime import AnimeResult
+from animan.routers import anime as anime_router
+from animan.services.source_catalogue import SourceCatalogueService, CatalogueError
+from animan.services.source_http import VerificationRequired
+from animan.services.aniyomi_container import AniyomiContainerSource
+from animan.services.aniyomi_dex_parser import SourceRecipe
+from animan.services.extension_service import extension_service
+
+
+@pytest.fixture
+def providers(monkeypatch):
+    for service in (anime_router.scraping_service, anime_router.voiranime_service, anime_router.animepahe_service):
+        monkeypatch.setattr(service, 'search_anime', AsyncMock(return_value=[]))
+    monkeypatch.setattr(extension_service, 'get_enabled_container_sources', lambda: [])
+    monkeypatch.setattr(extension_service, 'get_container_source_by_id', lambda sid: None)
+    return TestClient(app)
+
+
+def test_global_search_keeps_results_and_exposes_challenges(providers, monkeypatch):
+    challenge = VerificationRequired('https://voir-anime.to/?s=naruto')
+    anime_router.voiranime_service.search_anime.side_effect = challenge
+    anime_router.scraping_service.search_anime.return_value = [AnimeResult(id='1', title='Naruto', url='https://fm.example/1')]
+    response = providers.get('/api/search', params={'q': 'naruto', 'source': 'all', 'include_challenges': 'true'})
+    assert response.status_code == 200
+    data = response.json()
+    assert data['results'][0]['source'] == 'french-manga'
+    assert data['challenges'] == [{**challenge.to_dict(), 'source': 'voir-anime'}]
+    assert not data['errors']
+    # Legacy callers must receive a real error rather than an empty result set.
+    assert providers.get('/api/search?q=naruto&source=all').status_code == 409
+
+
+def test_targeted_search_challenge_and_cookie_validation_retry(providers, monkeypatch, tmp_path):
+    from curl_cffi.requests import Cookies
+    from animan.services.source_http import SourceHTTPService
+    from animan.services.browser_verification import BrowserVerificationService
+    from animan.routers import network
+    import time
+    url = 'https://source.example/search?q=naruto'
+    class Session:
+        def __init__(self, **kwargs): self.cookies = Cookies()
+        def request(self, method, target, **kwargs):
+            success = self.cookies.get('clearance') == 'verified'
+            return httpx.Response(200 if success else 403, text='Naruto' if success else 'challenge',
+                headers={'cache-control':'no-store', **({} if success else {'cf-mitigated':'challenge'})}, request=httpx.Request(method, target))
+        def close(self): pass
+    monkeypatch.setattr('animan.services.source_http.is_safe_url', lambda target: target == url)
+    transport = SourceHTTPService(storage=tmp_path, min_interval=0, session_factory=Session)
+    browser = BrowserVerificationService(transport)
+    browser._cdp = AsyncMock(return_value={'cookies':[{'name':'clearance','value':'verified','domain':'source.example'}]})
+    browser.jobs['job'] = {'id':'job','domain':'source.example','url':url,'created':time.monotonic(), 'mode':'browser','window':None,'process':None}
+    monkeypatch.setattr(network, 'browser_verification', browser)
+    monkeypatch.setattr(network.download_manager, 'resume_verified_domain', lambda domain: 0)
+    async def search(q):
+        response = await transport.async_client().get(url)
+        return [AnimeResult(id='1', title=response.text, url='https://source.example/anime/1')]
+    monkeypatch.setattr(anime_router.voiranime_service, 'search_anime', search)
+    try:
+        initial = providers.get('/api/search?q=naruto&source=voir-anime&include_challenges=true').json()
+        assert initial['challenges'][0]['domain'] == 'source.example' and not initial['results']
+        verified = providers.post('/api/network/verification/job/complete')
+        assert verified.status_code == 200 and verified.json()['domain'] == 'source.example'
+        retried = providers.get('/api/search?q=naruto&source=voir-anime&include_challenges=true').json()
+        assert not retried['challenges'] and retried['results'][0]['title'] == 'Naruto'
+    finally: transport.close()
+
+
+def test_unknown_source_does_not_search_another_catalogue(providers):
+    assert providers.get('/api/search?q=naruto&source=missing').status_code == 404
+    anime_router.scraping_service.search_anime.assert_not_called()
+
+
+@pytest.fixture
+def catalogue(monkeypatch):
+    service = SourceCatalogueService()
+    monkeypatch.setattr(extension_service, 'get_visible_extensions', lambda: [])
+    monkeypatch.setattr(extension_service, 'get_enabled_container_sources', lambda: [])
+    return service
+
+
+def test_source_list_includes_compiled_extensions_only(catalogue, monkeypatch):
+    enabled = AniyomiContainerSource(SourceRecipe(pkg='installed', name='Installed', base_url='https://installed.example', popular_request_path='/popular', popular_selector='article'))
+    monkeypatch.setattr(extension_service, 'get_enabled_container_sources', lambda: [enabled])
+    monkeypatch.setattr(extension_service, 'get_visible_extensions', lambda: [
+        {'pkg':'available','name':'Available','lang':'fr','recipe_json':None},
+        {'pkg':'disabled','name':'Disabled','lang':'fr','recipe_json':'{}'},
+    ])
+    sources = catalogue.sources()
+    assert len(sources) == 5
+    assert not any(s['id'] == 'available' for s in sources)
+    assert next(s for s in sources if s['id'] == 'disabled')['isEnabled'] is False
+    assert 'popular' in [v['id'] for v in next(s for s in sources if s['id'] == 'installed')['views']]
+    assert 'popular' not in [view['id'] for source in sources if source['id']=='french-manga' for view in source['views']]
+
+
+@pytest.mark.asyncio
+async def test_empty_search_does_not_request_the_site(catalogue, monkeypatch):
+    fetch = AsyncMock()
+    search = AsyncMock()
+    monkeypatch.setattr(catalogue, 'html', fetch)
+    monkeypatch.setattr(anime_router.scraping_service, 'search_anime', search)
+    page = await catalogue.browse('french-manga', 'search')
+    assert not page['results'] and page['nextCursor'] is None
+    fetch.assert_not_called()
+    search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_voiranime_combines_remote_genres_query_and_sort(catalogue, monkeypatch):
+    html = '<a href="/anime-genre/action/">Action</a><a href="/anime-genre/comedy/">Comedy</a><a href="https://private.example/genre/hack">External</a>'
+    requests = []
+    async def fetch(service, url, *args): requests.append(url); return html, url
+    monkeypatch.setattr(catalogue, 'html', fetch)
+    filters = await catalogue.filters('voir-anime')
+    assert len(filters['tags']) == 2
+    tags = [t['id'] for t in filters['tags']]
+    await catalogue.browse('voir-anime', 'popular', 'Naruto & Boruto', tags, 'views')
+    params = parse_qs(urlparse(requests[-1]).query)
+    assert params['s'] == ['Naruto & Boruto']
+    assert params['genre[]'] == ['action', 'comedy'] and params['op'] == ['AND']
+    assert params['m_orderby'] == ['views']
+
+
+@pytest.mark.asyncio
+async def test_recipe_popular_pagination_is_bound_to_criteria(catalogue, monkeypatch):
+    source = AniyomiContainerSource(SourceRecipe(pkg='recipe', name='Recipe', base_url='https://source.example',
+        popular_request_path='/popular/{page}', popular_selector='article', popular_next_selector='a.next'))
+    monkeypatch.setattr(extension_service, 'get_container_source_by_id', lambda sid: source)
+    calls = []
+    async def fetch(service, url, *args):
+        calls.append(url)
+        if url.endswith('/2'): return '<article><a href="/anime/second"><img alt="Second" src="/2.jpg"></a></article>', url
+        return '<article><a href="/anime/first"><img alt="First" src="/1.jpg"></a></article><a class="next" href="/popular/2">Next</a>', url
+    monkeypatch.setattr(catalogue, 'html', fetch)
+    first = await catalogue.browse('recipe', 'popular')
+    assert first['results'][0].source == 'recipe' and first['results'][0].imageUrl == 'https://source.example/1.jpg'
+    second = await catalogue.browse('recipe', 'popular', cursor=first['nextCursor'])
+    assert second['results'][0].title == 'Second' and not second['nextCursor']
+    with pytest.raises(CatalogueError, match='expiré'):
+        await catalogue.browse('recipe', 'latest', cursor=first['nextCursor'])
+    assert calls == ['https://source.example/popular/1', 'https://source.example/popular/2']
+
+
+@pytest.mark.asyncio
+async def test_filters_reject_unknown_ids_and_foreign_pagination(catalogue, monkeypatch):
+    fetch = AsyncMock(return_value=('<a href="/xfsearch/tagz/magic/">Magie</a>', 'https://w16.french-manga.net/'))
+    monkeypatch.setattr(catalogue, 'html', fetch)
+    with pytest.raises(CatalogueError, match='Filtre inconnu'):
+        await catalogue.browse('french-manga', tags=['http://127.0.0.1/private'])
+    assert fetch.await_count == 1
+    assert not catalogue.next_cursor('<a rel="next" href="http://127.0.0.1/private">Next</a>', 'https://source.example/', ('source',))
+    assert not catalogue.next_cursor('<a rel="next" href="#">Next</a>', 'https://source.example/', ('source',))
+
+
+@pytest.mark.asyncio
+async def test_franime_api_tags_search_and_pagination(catalogue, monkeypatch):
+    source = AniyomiContainerSource(SourceRecipe(pkg='animeextension.fr.franime', name='FRAnime', base_url='https://franime.fr'))
+    monkeypatch.setattr(extension_service, 'get_container_source_by_id', lambda sid: source)
+    rows = [AnimeResult(id=str(i),title=f'Anime {i:03}',url=f'https://franime.fr/anime/{i}',genres=['Action']) for i in range(70)]
+    monkeypatch.setattr(catalogue, 'api_catalogue', AsyncMock(return_value=rows))
+    filters = await catalogue.filters(source.pkg)
+    first = await catalogue.browse(source.pkg, 'catalogue', 'Anime', [filters['tags'][0]['id']], 'title')
+    assert len(first['results']) == 48 and first['queryScope'] == 'catalogue'
+    second = await catalogue.browse(source.pkg, 'catalogue', 'Anime', [filters['tags'][0]['id']], 'title', first['nextCursor'])
+    assert len(second['results']) == 22 and not second['nextCursor']

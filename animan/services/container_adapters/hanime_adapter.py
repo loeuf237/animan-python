@@ -1,3 +1,4 @@
+from animan.services.source_http import source_http, VerificationRequired
 import asyncio
 import logging
 import re
@@ -25,6 +26,8 @@ async def get_hanime_catalog() -> List[Dict[str, Any]]:
             res = await aniyomi_container._get_hanime_catalog()
             if res:
                 return res
+        except VerificationRequired:
+            raise
         except Exception:
             pass
 
@@ -41,7 +44,7 @@ async def get_hanime_catalog() -> List[Dict[str, Any]]:
     }
     proxy = proxy_service.get_active_proxy()
     try:
-        async with httpx.AsyncClient(timeout=12.0, verify=settings.SSL_VERIFY, proxy=proxy) as client:
+        async with source_http.async_client(timeout=12.0, verify=settings.SSL_VERIFY, proxy=proxy) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
@@ -50,6 +53,8 @@ async def get_hanime_catalog() -> List[Dict[str, Any]]:
                     _catalog_cache = items
                     _catalog_time = now
                     return _catalog_cache
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.warning("[hanime_adapter] Erreur lors de la récupération du catalogue Hanime: %s", e)
 
@@ -174,7 +179,7 @@ class HanimeAdapter(BaseSourceAdapter):
         }
         try:
             proxy = proxy_service.get_active_proxy()
-            async with httpx.AsyncClient(timeout=10.0, proxy=proxy, headers=headers) as client:
+            async with source_http.async_client(timeout=10.0, proxy=proxy, headers=headers) as client:
                 resp = await client.get(api_url)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -195,6 +200,8 @@ class HanimeAdapter(BaseSourceAdapter):
                                 })
                     if sources:
                         return sources
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[hanime_adapter] Erreur extraction streams Hanime: %s", e)
 

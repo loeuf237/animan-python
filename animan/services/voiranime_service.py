@@ -1,4 +1,6 @@
+from animan.services.source_http import source_http, VerificationRequired
 import asyncio
+from animan.services.background import spawn
 import base64
 import json
 import logging
@@ -65,48 +67,18 @@ class VoirAnimeScrapingService:
         }
 
     def _get_client(self, follow_redirects: bool = True, referer: Optional[str] = None, timeout: Optional[float] = None) -> httpx.Client:
-        headers = self._get_headers(referer)
-        proxy = proxy_service.get_random_proxy()
-        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
-        try:
-            return httpx.Client(
-                headers=headers,
-                proxy=proxy,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-            )
-        except Exception as e:
-            logger.warning("[voir-anime] HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
-            return httpx.Client(
-                headers=headers,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-                trust_env=False,
-            )
+        return source_http.client(
+            headers={"Referer": referer or (self.base_url + "/"), "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7"},
+            timeout=timeout or settings.READ_TIMEOUT, follow_redirects=follow_redirects,
+        )
 
     def _get_async_client(self, follow_redirects: bool = True, referer: Optional[str] = None, timeout: Optional[float] = None) -> httpx.AsyncClient:
-        headers = self._get_headers(referer)
-        proxy = proxy_service.get_random_proxy()
-        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
-        try:
-            return httpx.AsyncClient(
-                headers=headers,
-                proxy=proxy,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-            )
-        except Exception as e:
-            logger.warning("[voir-anime] Async HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
-            return httpx.AsyncClient(
-                headers=headers,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-                trust_env=False,
-            )
+        return source_http.async_client(
+            headers={"Referer": referer or (self.base_url + "/"), "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7"},
+            timeout=timeout or settings.READ_TIMEOUT, follow_redirects=follow_redirects,
+        )
 
     async def get_latest_releases(self) -> List[AnimeResult]:
         now = time.time()
@@ -114,7 +86,7 @@ class VoirAnimeScrapingService:
         if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
             if not self.is_refreshing:
                 self.is_refreshing = True
-                asyncio.create_task(self._safe_refresh_cache())
+                spawn(self._safe_refresh_cache(), name="refresh-cache")
         return list(self.latest_cache)
 
     async def _safe_refresh_cache(self):
@@ -138,6 +110,8 @@ class VoirAnimeScrapingService:
                         self.last_cache_time = time.time()
                         self._save_persistent_cache()
                         logger.info("[voir-anime] Cache updated (%d animes)", len(self.latest_cache))
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("[voir-anime] Cache update error: %s", e)
 
@@ -235,6 +209,8 @@ class VoirAnimeScrapingService:
                     resp = await client.post(asp_endpoint, data=data)
                     if resp.status_code == 200:
                         return resp.text
+                except VerificationRequired:
+                    raise
                 except Exception as e:
                     logger.warning("[voir-anime] Erreur fetch ASP asid=%d: %s", asid, e)
                 return ""
@@ -299,6 +275,8 @@ class VoirAnimeScrapingService:
         try:
             # 1. Moteur officiel Ajax Search Pro (identique au moteur live du site voir-anime.to)
             results = await self.search_via_asp(query)
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("[voir-anime] ASP search error: %s", e)
 
@@ -315,6 +293,8 @@ class VoirAnimeScrapingService:
                         resp2 = await client.get(fallback_url)
                         if resp2.status_code == 200:
                             results = self.parse_cards(resp2.text)
+            except VerificationRequired:
+                raise
             except Exception as e:
                 logger.error("[voir-anime] Fallback search error: %s", e)
 
@@ -468,6 +448,8 @@ class VoirAnimeScrapingService:
                     episodes=episodes,
                     source="voir-anime",
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("[voir-anime] Erreur détail anime: %s", e)
             return None
@@ -535,6 +517,8 @@ class VoirAnimeScrapingService:
                         version=ep_version,
                     )
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("[voir-anime] fetch_episodes error: %s", e)
 
@@ -558,6 +542,8 @@ class VoirAnimeScrapingService:
                     "servers": server_keys,
                     "defaultServer": self.default_server
                 }
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] get_episode_servers error: %s", e)
             return {"servers": ["myTV"], "defaultServer": self.default_server}
@@ -778,6 +764,8 @@ class VoirAnimeScrapingService:
                                     detected_size = int(cl)
                                     qualities_sizes_bytes["1080p (Streamtape)"] = detected_size
                                     qualities_sizes_formatted["1080p (Streamtape)"] = format_bytes(detected_size)
+                            except VerificationRequired:
+                                raise
                             except Exception:
                                 pass
                             break
@@ -805,6 +793,8 @@ class VoirAnimeScrapingService:
                                         for qk in qualities.keys():
                                             qualities_sizes_bytes[qk] = detected_size
                                             qualities_sizes_formatted[qk] = format_bytes(detected_size)
+                                except VerificationRequired:
+                                    raise
                                 except Exception:
                                     pass
                             break
@@ -822,6 +812,8 @@ class VoirAnimeScrapingService:
                                     for qk in qualities.keys():
                                         qualities_sizes_bytes[qk] = detected_size
                                         qualities_sizes_formatted[qk] = format_bytes(detected_size)
+                            except VerificationRequired:
+                                raise
                             except Exception:
                                 pass
                             break
@@ -841,6 +833,8 @@ class VoirAnimeScrapingService:
                             from animan.services.source_settings_service import source_settings_service
                             va_settings = source_settings_service.get_source_settings("voir-anime")
                             quality_strategy = va_settings.get("quality_strategy", "highest")
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             quality_strategy = "highest"
 
@@ -915,6 +909,8 @@ class VoirAnimeScrapingService:
                 result["formattedSize"] = formatted_sz
                 result["qualitiesSizes"] = json.dumps(qualities_sizes_formatted)
 
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("[voir-anime] extract_download_info error: %s", e)
 
@@ -947,18 +943,22 @@ class VoirAnimeScrapingService:
                         if redir_resp.status_code == 200:
                             embed_html = redir_resp.text
                     break
+            except VerificationRequired:
+                raise
             except Exception:
                 try:
-                    from curl_cffi import requests as c_requests
-                    c_resp = c_requests.get(cand_url, headers={"Referer": episode_url}, impersonate="chrome120", timeout=10)
+                    c_requests = source_http.client()
+                    c_resp = c_requests.get(cand_url, headers={"Referer": episode_url}, timeout=10)
                     if c_resp.status_code == 200 and len(c_resp.text) > 500:
                         embed_html = c_resp.text
                         js_redir = re.search(r"window\.location\.replace\(\x27([^\x27]+)\x27\)", embed_html)
                         if js_redir:
-                            r2 = c_requests.get(js_redir.group(1), headers={"Referer": episode_url}, impersonate="chrome120", timeout=10)
+                            r2 = c_requests.get(js_redir.group(1), headers={"Referer": episode_url}, timeout=10)
                             if r2.status_code == 200:
                                 embed_html = r2.text
                         break
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -1000,6 +1000,8 @@ class VoirAnimeScrapingService:
                     q_sizes = self._estimate_m3u8_sizes_sync(best_url, qualities, bandwidths, client)
                     if q_sizes:
                         qualities_sizes.update(q_sizes)
+                except VerificationRequired:
+                    raise
                 except Exception as e:
                     logger.debug("[voir-anime] Erreur estimation taille myTV: %s", e)
 
@@ -1013,10 +1015,12 @@ class VoirAnimeScrapingService:
 
             st_html = ""
             try:
-                from curl_cffi import requests as c_requests
-                c_resp = c_requests.get(ifr_url, headers={"Referer": referer}, impersonate="chrome120", timeout=12)
+                c_requests = source_http.client()
+                c_resp = c_requests.get(ifr_url, headers={"Referer": referer}, timeout=12)
                 if c_resp.status_code == 200:
                     st_html = c_resp.text
+            except VerificationRequired:
+                raise
             except Exception:
                 pass
 
@@ -1060,12 +1064,14 @@ class VoirAnimeScrapingService:
                 if "streamtape.com/get_video?" in cand:
                     redir_url = None
                     try:
-                        from curl_cffi import requests as c_requests
-                        r_c = c_requests.get(cand, headers={"Referer": "https://streamtape.com/"}, allow_redirects=False, impersonate="chrome120", timeout=8)
+                        c_requests = source_http.client()
+                        r_c = c_requests.get(cand, headers={"Referer": "https://streamtape.com/"}, allow_redirects=False, timeout=8)
                         if r_c.status_code in [301, 302, 303, 307, 308]:
                             redir_url = r_c.headers.get("location")
                         elif r_c.status_code == 200 and "text/html" not in (r_c.headers.get("content-type") or ""):
                             return cand
+                    except VerificationRequired:
+                        raise
                     except Exception:
                         pass
 
@@ -1076,6 +1082,8 @@ class VoirAnimeScrapingService:
                                 redir_url = redir_resp.headers.get("location")
                             elif redir_resp.status_code == 200 and "text/html" not in (redir_resp.headers.get("content-type") or ""):
                                 return cand
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             pass
 
@@ -1089,13 +1097,17 @@ class VoirAnimeScrapingService:
                 if video_id:
                     cand = re.sub(r"([?&])(?:b?id=)[^&]+", r"\1id=" + video_id, cand)
                 try:
-                    from curl_cffi import requests as c_requests
-                    r_c = c_requests.get(cand, headers={"Referer": "https://streamtape.com/"}, allow_redirects=False, impersonate="chrome120", timeout=8)
+                    c_requests = source_http.client()
+                    r_c = c_requests.get(cand, headers={"Referer": "https://streamtape.com/"}, allow_redirects=False, timeout=8)
                     if r_c.status_code in [301, 302, 303, 307, 308] and r_c.headers.get("location"):
                         return r_c.headers.get("location")
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
                 return cand
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] Erreur résolution Streamtape: %s", e)
         return None
@@ -1145,6 +1157,8 @@ class VoirAnimeScrapingService:
                                 or next(iter(qualities.values()))
                             )
                             return best, qualities
+                except VerificationRequired:
+                    raise
                 except Exception as e:
                     logger.debug("[voir-anime] VOE download page error: %s", e)
 
@@ -1173,8 +1187,12 @@ class VoirAnimeScrapingService:
                     if hls:
                         hls = html.unescape(hls)
                         return hls, {"VOE": hls}
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] _resolve_voe error: %s", e)
         return "", {}
@@ -1204,6 +1222,8 @@ class VoirAnimeScrapingService:
                 if qualities:
                     best = qualities.get("1080p") or qualities.get("720p") or next(iter(qualities.values()))
                     return best, qualities
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] _resolve_fhd1 error: %s", e)
         return "", {}
@@ -1228,6 +1248,8 @@ class VoirAnimeScrapingService:
             if r_det.status_code == 200:
                 stream_url = f"{base_moon}/api/videos/stream/{code}"
                 return stream_url, {"1080p (MOON)": stream_url}
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] _resolve_moon error: %s", e)
         return "", {}
@@ -1259,6 +1281,8 @@ class VoirAnimeScrapingService:
                                 qualities[label] = full_url
                                 if current_bw > 0:
                                     bandwidths[label] = current_bw
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] _extract_qualities_and_bandwidths_from_m3u8: %s", e)
         return qualities, bandwidths
@@ -1320,6 +1344,8 @@ class VoirAnimeScrapingService:
                         cl = hr.headers.get("Content-Length")
                         if cl and cl.isdigit() and int(cl) > 0:
                             sample_sizes.append(int(cl))
+                    except VerificationRequired:
+                        raise
                     except Exception:
                         pass
                 if sample_sizes:
@@ -1331,6 +1357,8 @@ class VoirAnimeScrapingService:
                     for q_label in (qualities.keys() if qualities else ["Stream"]):
                         qualities_sizes[q_label] = int((1_800_000 * total_duration) / 8)
 
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[voir-anime] _estimate_m3u8_sizes_sync error: %s", e)
 
@@ -1340,6 +1368,8 @@ class VoirAnimeScrapingService:
         info = self.extract_download_info(episode_url)
         try:
             return json.loads(info.get("videoChunks", "[]"))
+        except VerificationRequired:
+            raise
         except Exception:
             return []
 
@@ -1347,6 +1377,8 @@ class VoirAnimeScrapingService:
         info = self.extract_download_info(episode_url)
         try:
             return json.loads(info.get("videoQualities", "{}"))
+        except VerificationRequired:
+            raise
         except Exception:
             return {}
 

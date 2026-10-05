@@ -1,4 +1,6 @@
+from animan.services.source_http import source_http, VerificationRequired
 import asyncio
+from animan.services.background import spawn
 import json
 import logging
 import re
@@ -13,6 +15,7 @@ from animan.config import settings
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
 from animan.services.proxy_service import proxy_service
 from animan.services.unpacking import try_unpack
+from animan.services.subtitle_service import normalize_subtitles
 from animan.security import is_safe_url
 
 logger = logging.getLogger("animan.scraping")
@@ -58,58 +61,18 @@ class ScrapingService:
             logger.warning("Error saving disk cache french-manga: %s", e)
 
     def _get_client(self, follow_redirects: bool = True, timeout: Optional[float] = None) -> httpx.Client:
-        headers = {
-            "User-Agent": proxy_service.get_user_agent(),
-            "Referer": self.base_url + "/",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-        }
-        proxy = proxy_service.get_random_proxy()
-        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
-        try:
-            return httpx.Client(
-                headers=headers,
-                proxy=proxy,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-            )
-        except Exception as e:
-            logger.warning("[scraping] HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
-            return httpx.Client(
-                headers=headers,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-                trust_env=False,
-            )
+        return source_http.client(
+            headers={"Referer": self.base_url + "/", "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7"},
+            timeout=timeout or settings.READ_TIMEOUT, follow_redirects=follow_redirects,
+        )
 
     def _get_async_client(self, follow_redirects: bool = True, timeout: Optional[float] = None) -> httpx.AsyncClient:
-        headers = {
-            "User-Agent": proxy_service.get_user_agent(),
-            "Referer": self.base_url + "/",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
-        }
-        proxy = proxy_service.get_random_proxy()
-        t = httpx.Timeout(timeout or settings.READ_TIMEOUT, connect=settings.CONNECTION_TIMEOUT)
-        try:
-            return httpx.AsyncClient(
-                headers=headers,
-                proxy=proxy,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-            )
-        except Exception as e:
-            logger.warning("[scraping] Async HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy, e)
-            return httpx.AsyncClient(
-                headers=headers,
-                timeout=t,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-                trust_env=False,
-            )
+        return source_http.async_client(
+            headers={"Referer": self.base_url + "/", "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                     "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.7"},
+            timeout=timeout or settings.READ_TIMEOUT, follow_redirects=follow_redirects,
+        )
 
     # -------------------------------------------------------------------------
     # Dernières sorties & Cache
@@ -121,7 +84,7 @@ class ScrapingService:
         if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
             if not self.is_refreshing:
                 self.is_refreshing = True
-                asyncio.create_task(self._safe_refresh_cache())
+                spawn(self._safe_refresh_cache(), name="refresh-cache")
         return list(self.latest_cache)
 
     async def _safe_refresh_cache(self):
@@ -145,6 +108,8 @@ class ScrapingService:
                         self.last_cache_time = time.time()
                         self._save_persistent_cache()
                         logger.info("Cache updated (french-manga: %d animes)", len(self.latest_cache))
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("Error updating french-manga cache: %s", e)
 
@@ -169,6 +134,8 @@ class ScrapingService:
 
             if not results:
                 results = await self.search_via_listing(query)
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("Error searching french-manga: %s", e)
             results = await self.search_via_listing(query)
@@ -196,6 +163,8 @@ class ScrapingService:
                                 results.append(r)
                     if len(results) >= 20:
                         break
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("Error in fallback listing: %s", e)
 
@@ -434,6 +403,8 @@ class ScrapingService:
                     if "merged_ids" in q_params and q_params["merged_ids"]:
                         raw_ids = q_params["merged_ids"][0]
                         news_ids = [nid.strip() for nid in raw_ids.split(",") if nid.strip()]
+                except VerificationRequired:
+                    raise
                 except Exception as e:
                     logger.debug("Error parsing merged_ids from URL: %s", e)
 
@@ -451,6 +422,8 @@ class ScrapingService:
                             api_resp = await client.get(api_url, headers={"Referer": anime_url})
                             if api_resp.status_code == 200:
                                 return self.parse_episodes_from_json(api_resp.text)
+                        except VerificationRequired:
+                            raise
                         except Exception as e:
                             logger.warning("Episodes API failed for newsid=%s: %s", nid, e)
                         return []
@@ -494,6 +467,8 @@ class ScrapingService:
                     episodes=episodes,
                     source="french-manga",
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("Error loading french-manga anime: %s", e)
             return None
@@ -731,6 +706,8 @@ class ScrapingService:
                             if direct_url and not direct_url.startswith(f"{domain}/d/"):
                                 logger.info("Extracted MP4 link (200): %s", direct_url)
                                 result["videoUrl"] = direct_url
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.error("Error extracting video from %s: %s", download_url, e)
 
@@ -740,10 +717,12 @@ class ScrapingService:
                 embed_resp = sub_client.get(embed_url)
                 if embed_resp.status_code == 200:
                     search_source = try_unpack(embed_resp.text)
-                    subtitles_list = self._extract_all_subtitles(search_source, embed_resp.text)
+                    subtitles_list = self._extract_all_subtitles(search_source, embed_resp.text, embed_url)
                     result["subtitles"] = json.dumps(subtitles_list)
                     if subtitles_list:
                         result["subtitleUrl"] = subtitles_list[0].get("url", "")
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Subtitles unavailable or timed out on %s: %s", embed_url, e)
 
@@ -763,29 +742,58 @@ class ScrapingService:
             return url[last_slash + 1:].replace("_n", "").replace("_o", "").replace(".html", "")
         return ""
 
-    def _extract_all_subtitles(self, source: str, html: str) -> List[Dict[str, str]]:
+    def _extract_all_subtitles(self, source: str, html: str, base_url: str = "") -> List[Dict[str, str]]:
         subs = []
         seen = set()
 
-        # JS tracks regex
-        tracks_match = re.search(r"tracks\s*[=:]\s*\[([^\]]+)\]", source, re.DOTALL | re.IGNORECASE)
-        if tracks_match:
-            block = tracks_match.group(1)
-            for em in re.finditer(r"file\s*:\s*['\"]([^'\"]+)['\"](?:.*?label\s*:\s*['\"]([^'\"]*)['\"])?", block, re.DOTALL):
-                url = em.group(1)
-                label = em.group(2) or "Sous-titres"
-                if re.search(r"\.(vtt|srt|ass)(\?.*)?$", url) and url not in seen:
-                    seen.add(url)
-                    lang = "fr" if "fr" in label.lower() else "und"
-                    subs.append({"url": url, "label": label, "lang": lang})
+        def balanced_end(start, opening, closing):
+            depth, quote, escaped = 0, None, False
+            for index in range(start, len(source)):
+                char = source[index]
+                if quote:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == quote:
+                        quote = None
+                elif char in "\"'":
+                    quote = char
+                elif char == opening:
+                    depth += 1
+                elif char == closing:
+                    depth -= 1
+                    if depth == 0:
+                        return index
+            return len(source)
 
-        if not subs:
-            for vm in re.finditer(r"(https?://[^'\"\s]+\.(?:vtt|srt)(?:[^'\"\s]*)?)", source, re.IGNORECASE):
-                url = vm.group(1)
-                if url not in seen:
+        for match in re.finditer(r"[\"']?tracks[\"']?\s*[=:]\s*\[", source, re.IGNORECASE):
+            start = match.end() - 1
+            end = balanced_end(start, "[", "]")
+            cursor = start + 1
+            while cursor < end:
+                obj_start = source.find("{", cursor, end)
+                if obj_start < 0:
+                    break
+                obj_end = balanced_end(obj_start, "{", "}")
+                block = source[obj_start:obj_end + 1]
+                cursor = obj_end + 1
+                fields = {}
+                for key in ("file", "src", "url", "label", "kind", "lang", "srclang"):
+                    field = re.search(r"(?:^|[{,])\s*[\"']?" + key + r"[\"']?\s*:\s*([\"'])((?:\\.|(?!\1).)*)\1", block, re.DOTALL)
+                    if field:
+                        fields[key] = field.group(2).replace("\\/", "/")
+                url = fields.get("file") or fields.get("src") or fields.get("url")
+                kind = fields.get("kind", "").lower()
+                if url and (kind in ("subtitles", "captions") or (not kind and re.search(r"\.(vtt|srt|ass)(?:\?.*)?$", url, re.IGNORECASE))):
+                    subs.append({**fields, "url": url})
                     seen.add(url)
-                    lang = "fr" if "fre" in url or "fr" in url else "und"
-                    subs.append({"url": url, "label": f"Sous-titres {len(subs) + 1}", "lang": lang})
+
+        for vm in re.finditer(r"(https?://[^'\"\s]+\.(?:vtt|srt|ass)(?:[^'\"\s]*)?)", source, re.IGNORECASE):
+            url = vm.group(1)
+            if url not in seen:
+                seen.add(url)
+                subs.append({"url": url, "label": f"Sous-titres {len(subs) + 1}"})
 
         soup = BeautifulSoup(html, "html.parser")
         for track in soup.select("track[src]"):
@@ -797,7 +805,7 @@ class ScrapingService:
                     label = track.get("label", "") or track.get("srclang", "Sous-titres")
                     subs.append({"url": src, "label": label, "lang": track.get("srclang", "und")})
 
-        return subs
+        return normalize_subtitles(subs, base_url)
 
     def _extract_video_from_html(self, html: str) -> str:
         soup = BeautifulSoup(html, "html.parser")

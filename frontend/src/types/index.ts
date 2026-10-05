@@ -1,3 +1,15 @@
+export interface SourceChallenge { domain: string; source?: string; code: string; error: string }
+export interface SearchResponse { results: AnimeResult[]; challenges: SourceChallenge[]; errors: {source: string; message: string; domain?: string}[] }
+export interface CatalogueSource {
+  id: string; name: string; type: string; lang: string; baseUrl: string; isEnabled: boolean;
+  views: {id: string; label: string}[]; multiTags: boolean;
+}
+export interface CatalogueFilters {
+  tags: {id: string; label: string; group: string}[];
+  orders: {id: string; label: string}[];
+}
+export interface CataloguePage { source: string; results: AnimeResult[]; nextCursor: string | null; queryScope: string }
+
 export interface AnimeResult {
   title: string;
   url: string;
@@ -92,6 +104,8 @@ export interface DownloadTask {
   selectedServer?: string | null;
   createdAt?: string | null;
   completedAt?: string | null;
+  verificationDomain?: string | null;
+  verificationUrl?: string | null;
   verificationStatus?: 'VALID' | 'MISSING' | 'CORRUPTED' | 'EMPTY' | 'UNVERIFIED' | string;
   verificationError?: string | null;
   videoDuration?: number | null;
@@ -145,6 +159,7 @@ export interface HistoryItem {
 }
 
 export interface ExtensionSource {
+  recipe_json?: string | null;
   id: number | string;
   pkg: string;
   name: string;

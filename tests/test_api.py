@@ -6,7 +6,7 @@ from animan.database import init_db
 @pytest.fixture(scope="module")
 def client():
     init_db()
-    with TestClient(app) as c:
+    with TestClient(app, headers={"Accept-Language": "fr"}) as c:
         yield c
 
 def test_html_pages(client):

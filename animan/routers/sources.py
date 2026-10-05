@@ -1,12 +1,46 @@
+from animan.services.source_http import VerificationRequired
 import logging
 from typing import Dict, Any
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Query
+import httpx
 from fastapi.responses import JSONResponse
 
 from animan.services.source_settings_service import source_settings_service
+from animan.services.source_catalogue import source_catalogue, CatalogueError
 
 logger = logging.getLogger("animan.router.sources")
 router = APIRouter(prefix="/api/sources", tags=["sources"])
+
+
+@router.get("")
+async def list_catalogues():
+    return {"sources": source_catalogue.sources()}
+
+
+@router.get("/{source_id}/filters")
+async def catalogue_filters(source_id: str):
+    try:
+        filters = await source_catalogue.filters(source_id)
+        return {"tags": [{k: t[k] for k in ('id', 'label', 'group')} for t in filters['tags']],
+                "orders": filters['orders']}
+    except CatalogueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Impossible de charger les filtres de cette source") from exc
+
+
+@router.get("/{source_id}/catalogue")
+async def browse_catalogue(source_id: str, mode: str = 'latest', q: str = Query('', max_length=250),
+                           tags: list[str] = Query(default=[]), order: str = 'source',
+                           cursor: str | None = Query(None, max_length=64)):
+    if len(tags) > 12:
+        raise HTTPException(400, "Sélectionnez au maximum douze genres")
+    try:
+        return await source_catalogue.browse(source_id, mode, q, tags, order, cursor)
+    except CatalogueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "La source est momentanément inaccessible") from exc
 
 
 @router.get("/settings")
@@ -20,6 +54,8 @@ async def get_all_source_settings():
             "success": True,
             "sources": sources,
         }
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.error("[router.sources] Error fetching source settings: %s", e)
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
@@ -35,6 +71,8 @@ async def get_source_settings(source_id: str):
             "sourceId": source_id,
             "settings": settings,
         }
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.error("[router.sources] Error reading source %s: %s", source_id, e)
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
@@ -55,6 +93,8 @@ async def save_source_settings(source_id: str, request: Request):
             "settings": updated,
             "message": "Paramètres de la source mis à jour avec succès",
         }
+    except VerificationRequired:
+        raise
     except Exception as e:
         logger.error("[router.sources] Error saving source %s: %s", source_id, e)
         return JSONResponse(status_code=400, content={"success": False, "error": str(e)})

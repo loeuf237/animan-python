@@ -64,7 +64,7 @@ venv.bak/
 *.db
 
 # Local artifacts and temporary media resources
-animan/Artefacts/
+artefacts/
 animan/ressources/
 CONVERSATION_HISTORY.md
 *CONVERSATION*.md
@@ -82,3 +82,7 @@ android/local.properties
 # Node
 node_modules/
 frontend/dist/
+
+# Private source sessions and browser verification profiles
+http_sessions/
+verification_profiles/

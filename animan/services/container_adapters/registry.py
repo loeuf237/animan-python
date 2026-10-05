@@ -1,3 +1,5 @@
+from .anisama_adapter import AniSamaAdapter
+from .franime_adapter import FrAnimeAdapter
 import logging
 from typing import List, Optional
 
@@ -14,6 +16,8 @@ class AdapterRegistry:
 
     def _register_defaults(self):
         self.register(HanimeAdapter())
+        self.register(AniSamaAdapter())
+        self.register(FrAnimeAdapter())
         self.register(AnimeSamaAdapter())
 
     def register(self, adapter: BaseSourceAdapter):

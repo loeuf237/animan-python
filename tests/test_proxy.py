@@ -68,7 +68,10 @@ def test_sqlite_persistence(clean_proxy_service):
     assert saved["host"] == "10.0.0.1"
     assert saved["port"] == 1080
     assert saved["username"] == "user"
-    assert saved["password"] == "pass"
+    # L'API ne renvoie jamais le mot de passe en clair
+    assert saved["password"] == "******"
+    assert saved["has_password"] is True
+    assert "pass" not in saved["effective_url"].replace("password", "")
     assert srv.get_active_proxy() == "socks5://user:pass@10.0.0.1:1080"
 
     # Rechargement depuis la base
@@ -174,7 +177,11 @@ def test_one_click_proxy_enable_and_offline_i18n():
         assert settings["host"] == "127.0.0.1"
         assert settings["port"] == 1080
         assert settings["username"] == "tg_user"
-        assert settings["effective_url"] == "socks5://tg_user:tg_password@127.0.0.1:1080"
+        assert settings["effective_url"] == "socks5://tg_user:******@127.0.0.1:1080"
+        assert "tg_password" not in str(settings)
+        # Le secret réel reste utilisé en interne
+        from animan.services.proxy_service import proxy_service as _ps
+        assert _ps.get_active_proxy() == "socks5://tg_user:tg_password@127.0.0.1:1080"
 
         # Vérification des traductions i18n du bandeau hors-ligne
         from animan.services.i18n_service import i18n_service

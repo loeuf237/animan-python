@@ -1,11 +1,32 @@
 import collections
+import json
 import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Deque, Tuple
+from urllib.parse import urlparse
 from sqlalchemy import Column, Integer, BigInteger, Float, String, Boolean, DateTime
 from animan.database import Base
+
+def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalise une date en UTC aware.
+
+    Une date naïve fournie par un client est interprétée comme heure locale ;
+    SQLite ne conservant pas le fuseau, les dates relues depuis la base sont
+    rattachées à UTC explicitement dans ``DownloadTaskEntity.to_task``.
+    """
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc)
+
+
+def _db_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Rattache UTC à une date naïve relue depuis SQLite (stockée en UTC)."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 class SpeedTracker:
     """
@@ -73,6 +94,7 @@ class DownloadStatus(str, Enum):
     DOWNLOADING = "DOWNLOADING"
     RETRYING = "RETRYING"
     PAUSED = "PAUSED"
+    VERIFICATION_REQUIRED = "VERIFICATION_REQUIRED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     CANCELLED = "CANCELLED"
@@ -109,6 +131,8 @@ class DownloadTaskEntity(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     animeName = Column(String, nullable=False)
     episodeNumber = Column(Integer, default=0)
+    version = Column(String, default="")
+    animeUrl = Column(String, default="")
     fileName = Column(String, nullable=False)
     fileUrl = Column(String, nullable=True)
     savePath = Column(String, nullable=True)
@@ -118,6 +142,7 @@ class DownloadTaskEntity(Base):
     subtitleUrl = Column(String, nullable=True)
     subtitlesJson = Column(String, default="[]")
     error = Column(String, nullable=True)
+    verificationUrl = Column(String, nullable=True)
     status = Column(String, default=DownloadStatus.PENDING.value, nullable=False)
     progress = Column(Float, default=0.0)
     downloadedBytes = Column(BigInteger, default=0)
@@ -141,6 +166,8 @@ class DownloadTaskEntity(Base):
             id=self.id,
             animeName=self.animeName,
             episodeNumber=self.episodeNumber,
+            version=self.version,
+            animeUrl=self.animeUrl,
             fileName=self.fileName,
             fileUrl=self.fileUrl or "",
             savePath=self.savePath,
@@ -150,6 +177,7 @@ class DownloadTaskEntity(Base):
             subtitleUrl=self.subtitleUrl,
             subtitlesJson=self.subtitlesJson or "[]",
             error=self.error,
+            verificationUrl=self.verificationUrl,
             status=DownloadStatus(self.status),
             progress=self.progress,
             downloadedBytes=self.downloadedBytes,
@@ -157,7 +185,7 @@ class DownloadTaskEntity(Base):
             maxSpeedLimit=self.maxSpeedLimit,
             retryCount=self.retryCount,
             downloadSubtitles=self.downloadSubtitles,
-            scheduledStartTime=self.scheduledStartTime,
+            scheduledStartTime=_db_utc(self.scheduledStartTime),
             createdAt=self.createdAt,
             completedAt=self.completedAt,
             source=self.source,
@@ -184,6 +212,7 @@ class DownloadTask:
         subtitleUrl: Optional[str] = None,
         subtitlesJson: str = "[]",
         error: Optional[str] = None,
+        verificationUrl: Optional[str] = None,
         status: DownloadStatus = DownloadStatus.PENDING,
         progress: float = 0.0,
         downloadedBytes: int = 0,
@@ -201,10 +230,14 @@ class DownloadTask:
         verificationError: Optional[str] = None,
         selectedServer: Optional[str] = None,
         selectedQuality: Optional[str] = None,
+        version: str = "",
+        animeUrl: str = "",
     ):
         self.id = id or str(uuid.uuid4())
         self.animeName = animeName
         self.episodeNumber = episodeNumber
+        self.version = version or ""
+        self.animeUrl = animeUrl or ""
         self.fileName = fileName
         self.fileUrl = fileUrl
         self.savePath = savePath
@@ -212,8 +245,9 @@ class DownloadTask:
         self.downloadPageUrl = downloadPageUrl
         self.directDownloadUrl = directDownloadUrl
         self.subtitleUrl = subtitleUrl
-        self.subtitlesJson = subtitlesJson
+        self.subtitlesJson = subtitlesJson if isinstance(subtitlesJson, str) else json.dumps(subtitlesJson or [])
         self.error = error
+        self.verificationUrl = verificationUrl
         self.status = status
         self.progress = progress
         self.downloadedBytes = downloadedBytes
@@ -222,7 +256,7 @@ class DownloadTask:
         self.maxSpeedLimit = maxSpeedLimit
         self.retryCount = retryCount
         self.downloadSubtitles = downloadSubtitles
-        self.scheduledStartTime = scheduledStartTime
+        self.scheduledStartTime = ensure_utc(scheduledStartTime)
         self.createdAt = createdAt or datetime.now(timezone.utc)
         self.completedAt = completedAt
         self.source = source
@@ -286,6 +320,8 @@ class DownloadTask:
             "id": self.id,
             "animeName": self.animeName,
             "episodeNumber": self.episodeNumber,
+            "version": self.version,
+            "animeUrl": self.animeUrl,
             "fileName": self.fileName,
             "status": self.status.value,
             "progress": round(self.progress, 1),
@@ -296,6 +332,8 @@ class DownloadTask:
             "speed": self.formattedSpeed,
             "speedBytes": self.speed,
             "error": self.error,
+            "verificationUrl": self.verificationUrl,
+            "verificationDomain": urlparse(self.verificationUrl or "").hostname,
             "savePath": self.savePath,
             "scheduledStartTime": self.scheduledStartTime.isoformat() if self.scheduledStartTime else None,
             "downloadPageUrl": self.downloadPageUrl,
@@ -316,6 +354,8 @@ class DownloadTask:
             id=self.id,
             animeName=self.animeName,
             episodeNumber=self.episodeNumber,
+            version=self.version,
+            animeUrl=self.animeUrl,
             fileName=self.fileName,
             fileUrl=self.fileUrl,
             savePath=self.savePath,
@@ -325,6 +365,7 @@ class DownloadTask:
             subtitleUrl=self.subtitleUrl,
             subtitlesJson=self.subtitlesJson,
             error=self.error,
+            verificationUrl=self.verificationUrl,
             status=self.status.value,
             progress=self.progress,
             downloadedBytes=self.downloadedBytes,

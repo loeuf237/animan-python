@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import asyncio
 import logging
 from typing import List, Optional, Dict, Any
@@ -36,6 +37,8 @@ def detect_source_from_url(url: str, fallback: str = "french-manga") -> str:
             for src in extension_service.get_enabled_container_sources():
                 if src.base_url and host in src.base_url.lower():
                     return src.pkg
+    except VerificationRequired:
+        raise
     except Exception:
         pass
     return fallback
@@ -178,92 +181,51 @@ async def search(
         }
     )
 
-@router.get("/api/search", response_model=List[AnimeResult])
+@router.get("/api/search")
 async def search_api(
-    q: str = Query(..., alias="q"),
-    source: str = Query("all", alias="source")
+    q: str = Query(..., max_length=250),
+    source: str = Query("all"),
+    include_challenges: bool = Query(False),
 ):
+    """Keep partial results and identify every source awaiting verification."""
     norm_source = (source or "all").lower().strip()
-    enabled_exts = extension_service.get_enabled_container_sources()
+    providers = [("french-manga", scraping_service), ("voir-anime", voiranime_service),
+                 ("animepahe", animepahe_service)]
+    providers += [(ext.pkg, ext) for ext in extension_service.get_enabled_container_sources()]
+    if norm_source != "all":
+        ext = extension_service.get_container_source_by_id(norm_source)
+        providers = [(sid, service) for sid, service in providers if sid == norm_source]
+        if not providers and ext:
+            providers = [(ext.pkg, ext)]
+        if not providers:
+            raise HTTPException(404, "Source introuvable ou désactivée")
 
-    if norm_source == "all":
-        async def _safe_search_task(coro, timeout_sec: float = 6.0):
-            try:
-                return await asyncio.wait_for(coro, timeout=timeout_sec)
-            except Exception as e:
-                logger.debug("Source search task timed out or failed: %s", e)
-                return []
+    async def run(service):
+        return await asyncio.wait_for(service.search_anime(q.strip()), timeout=12)
 
-        tasks = [
-            _safe_search_task(scraping_service.search_anime(q)),
-            _safe_search_task(voiranime_service.search_anime(q)),
-            _safe_search_task(animepahe_service.search_anime(q)),
-        ]
-        for ext in enabled_exts:
-            tasks.append(_safe_search_task(ext.search_anime(q)))
-
-        all_res = await asyncio.gather(*tasks, return_exceptions=True)
-        results: List[AnimeResult] = []
-        fm_res, va_res, ap_res = all_res[0], all_res[1], all_res[2]
-        ext_res_list = all_res[3:]
-
-        if not isinstance(fm_res, Exception) and fm_res:
-            for item in fm_res:
-                item.source = "french-manga"
-            results.extend(fm_res)
-        if not isinstance(va_res, Exception) and va_res:
-            for item in va_res:
-                item.source = "voir-anime"
-            results.extend(va_res)
-        if not isinstance(ap_res, Exception) and ap_res:
-            for item in ap_res:
-                item.source = "animepahe"
-            results.extend(ap_res)
-
-        for idx, ext_res in enumerate(ext_res_list):
-            if not isinstance(ext_res, Exception) and ext_res:
-                ext_pkg = enabled_exts[idx].pkg
-                for item in ext_res:
-                    item.source = ext_pkg
-                results.extend(ext_res)
-
-        # Déduplication par URL
-        seen_urls = set()
-        deduped: List[AnimeResult] = []
-        for item in results:
-            if item.url and item.url in seen_urls:
-                continue
-            if item.url:
-                seen_urls.add(item.url)
-            deduped.append(item)
-
-        return deduped
-    elif norm_source == "voir-anime":
-        results = await voiranime_service.search_anime(q)
-        for item in results:
-            item.source = "voir-anime"
-        return results
-    elif norm_source == "animepahe":
-        results = await animepahe_service.search_anime(q)
-        for item in results:
-            item.source = "animepahe"
-        return results
-    elif norm_source == "french-manga":
-        results = await scraping_service.search_anime(q)
-        for item in results:
-            item.source = "french-manga"
-        return results
-    else:
-        ext_src = extension_service.get_container_source_by_id(norm_source)
-        if ext_src:
-            results = await ext_src.search_anime(q)
-            for item in results:
-                item.source = ext_src.pkg
-            return results
-        results = await scraping_service.search_anime(q)
-        for item in results:
-            item.source = "french-manga"
-        return results
+    responses = await asyncio.gather(*(run(service) for _, service in providers), return_exceptions=True)
+    results, challenges, errors, seen = [], [], [], set()
+    first_challenge = None
+    for (sid, service), response in zip(providers, responses):
+        if isinstance(response, VerificationRequired):
+            first_challenge = first_challenge or response
+            challenges.append({**response.to_dict(), "source": sid})
+        elif isinstance(response, BaseException):
+            logger.debug("Search source %s failed: %s", sid, response)
+            errors.append({"source": sid, "domain": urlparse(service.base_url).hostname or '',
+                           "message": "La source est momentanément inaccessible"})
+        else:
+            for item in response or []:
+                item.source = sid
+                key = (sid, item.url)
+                if key not in seen:
+                    seen.add(key)
+                    results.append(item)
+    if include_challenges is True:
+        return {"results": results, "challenges": challenges, "errors": errors}
+    if first_challenge:
+        raise first_challenge
+    return results
 
 async def fetch_enriched_anime_detail(url: str, source: str = "french-manga") -> Optional[Dict[str, Any]]:
     """Récupère et enrichit la fiche complète d'un animé (TMDB, épisodes, favoris, progression)."""
@@ -303,6 +265,10 @@ async def fetch_enriched_anime_detail(url: str, source: str = "french-manga") ->
     detail = await tmdb_service.enrich_anime_detail(detail)
     downloaded_set = library_service.get_downloaded_episodes_set(url)
     watched_set = library_service.get_watched_episodes_set(url)
+    progress_by_episode = {
+        (p.episodeNumber, p.version or ""): p
+        for p in library_service.get_progress_for_anime(url)
+    }
     fav = library_service.get_favorite(url)
     is_favorite = fav is not None
     auto_download = fav.autoDownload if fav else False
@@ -310,8 +276,12 @@ async def fetch_enriched_anime_detail(url: str, source: str = "french-manga") ->
     episodes_data = []
     for ep in detail.episodes:
         num = ep.number
-        is_dl = (num in downloaded_set) or (str(num) in downloaded_set)
-        is_watched = (num in watched_set) or (str(num) in watched_set)
+        version = ep.version or detail.version or ""
+        progress = progress_by_episode.get((num, version))
+        if progress is None:
+            progress = progress_by_episode.get((num, ""))
+        is_dl = bool(progress and progress.downloaded)
+        is_watched = bool(progress and progress.watched)
         local_task = library_service.find_downloaded_episode(
             anime_name=detail.title,
             episode_number=num,
@@ -320,7 +290,8 @@ async def fetch_enriched_anime_detail(url: str, source: str = "french-manga") ->
         )
         task_id = local_task.id if local_task else None
         ep_dict = ep.model_dump()
-        ep_dict["isDownloaded"] = is_dl
+        ep_dict["version"] = version
+        ep_dict["isDownloaded"] = is_dl or local_task is not None
         ep_dict["isWatched"] = is_watched
         ep_dict["downloadTaskId"] = task_id
         episodes_data.append(ep_dict)
@@ -424,6 +395,8 @@ async def api_home_feed():
     async def _safe_fetch(coro, default=None, timeout: float = 6.0):
         try:
             return await asyncio.wait_for(coro, timeout=timeout)
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[home_feed] Source fetch error: %s", e)
             return default if default is not None else []
@@ -505,5 +478,3 @@ async def api_source_feed(source_id: str):
         return {"success": True, "source": container.name, "releases": [r.model_dump() for r in releases]}
 
     return JSONResponse(status_code=404, content={"success": False, "error": f"Source '{source_id}' introuvable"})
-
-

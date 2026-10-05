@@ -110,7 +110,7 @@ def test_estimate_m3u8_sizes_sync_via_bandwidth():
 async def test_estimate_hls_size_async():
     """Vérifie l'estimation asynchrone HLS dans download_manager."""
     # Simuler le client httpx dans estimate_hls_size
-    with patch("httpx.AsyncClient") as mock_client_cls:
+    with patch.object(download_manager, "_create_async_client") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None
@@ -137,7 +137,7 @@ async def test_estimate_hls_size_async():
 @pytest.mark.asyncio
 async def test_get_remote_file_size_mp4_head():
     """Vérifie la détection de taille MP4 via HEAD Content-Length."""
-    with patch("httpx.AsyncClient") as mock_client_cls:
+    with patch.object(download_manager, "_create_async_client") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.__aenter__.return_value = mock_client
         mock_client.__aexit__.return_value = None

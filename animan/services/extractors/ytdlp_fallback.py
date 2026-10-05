@@ -1,4 +1,6 @@
+from animan.services.source_http import source_http, VerificationRequired, USER_AGENT
 import asyncio
+import io
 import logging
 from typing import Optional
 
@@ -32,6 +34,23 @@ class YtDlpFallbackExtractor(BaseVideoExtractor):
     ) -> Optional[ExtractorResult]:
         try:
             import yt_dlp
+            from yt_dlp.networking.common import Response as YtdlResponse
+            from yt_dlp.networking.exceptions import HTTPError
+
+            def shared_urlopen(request):
+                target = request if isinstance(request, str) else getattr(request, "url", None) or request.full_url
+                method = getattr(request, "method", None) or (
+                    request.get_method() if hasattr(request, "get_method") else "GET")
+                headers = dict(getattr(request, "headers", {}) or {})
+                if referer:
+                    headers.setdefault("Referer", referer)
+                response = source_http.request(method, target, headers=headers,
+                                               data=getattr(request, "data", None))
+                result = YtdlResponse(io.BytesIO(response.content), str(response.url),
+                                      dict(response.headers), status=response.status_code)
+                if response.status_code >= 400:
+                    raise HTTPError(result)
+                return result
 
             def _extract_sync():
                 ydl_opts = {
@@ -43,6 +62,9 @@ class YtDlpFallbackExtractor(BaseVideoExtractor):
                 if referer:
                     ydl_opts["http_headers"] = {"Referer": referer}
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Override this instance only; all fallback extractor HTTP
+                    # requests retain the same source sessions and challenge checks.
+                    ydl.urlopen = shared_urlopen
                     return ydl.extract_info(url, download=False)
 
             info = await asyncio.to_thread(_extract_sync)
@@ -60,7 +82,7 @@ class YtDlpFallbackExtractor(BaseVideoExtractor):
 
             sz = info.get("filesize") or info.get("filesize_approx") or -1
             extractor_name = info.get("extractor", "yt-dlp")
-            headers = {}
+            headers = {"User-Agent": USER_AGENT}
             if referer:
                 headers["Referer"] = referer
 
@@ -72,6 +94,8 @@ class YtDlpFallbackExtractor(BaseVideoExtractor):
                 headers=headers,
                 size=sz if sz and sz > 0 else -1,
             )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Extraction yt-dlp échouée pour %s: %s", url, e)
             return None

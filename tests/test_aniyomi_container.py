@@ -10,7 +10,7 @@ from animan.services.extension_service import ExtensionService
 
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"Accept-Language": "fr"}) as c:
         yield c
 
 def test_dex_parser_heuristics():
@@ -129,7 +129,7 @@ async def test_extension_service_business_rules(tmp_path):
     mock_resp1.status_code = 200
     mock_resp1.json.return_value = repo1_data
 
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+    with patch("animan.services.source_http.AsyncSourceClient.get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_resp1
         res1 = await service.import_repository("https://example.com/repo1/index.min.json")
         assert res1["success"] is True
@@ -159,7 +159,7 @@ async def test_extension_service_business_rules(tmp_path):
     mock_resp2.status_code = 200
     mock_resp2.json.return_value = repo2_data
 
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+    with patch("animan.services.source_http.AsyncSourceClient.get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_resp2
         res2 = await service.import_repository("https://example.com/repo2/index.min.json")
         assert res2["success"] is True
@@ -173,7 +173,7 @@ async def test_extension_service_business_rules(tmp_path):
 
     # Activation manuelle d'une extension par l'utilisateur
     gamma_id = visible2[0]["id"]
-    with patch.object(service, "_compile_extension_recipe", new_callable=AsyncMock) as mock_compile:
+    with patch("animan.services.extension_service.is_safe_url", return_value=True), patch.object(service, "_compile_extension_recipe", new_callable=AsyncMock) as mock_compile:
         mock_compile.return_value = SourceRecipe(
             pkg="eu.kanade.tachiyomi.animeextension.en.repo2_gamma",
             name="Repo2 Gamma",
@@ -282,8 +282,8 @@ async def test_resolve_imported_video_stream():
     });
     </script></body></html>
     """
-    with patch.object(download_manager, "_create_async_client") as mock_client_ctx:
-        mock_resp = AsyncMock()
+    with patch("animan.services.extractors.base.source_http.async_client") as mock_client_ctx:
+        mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = mock_html_vidmoly
         mock_client = AsyncMock()
@@ -306,10 +306,11 @@ async def test_resolve_imported_video_stream():
     </script>
     </body></html>
     """
-    with patch.object(download_manager, "_create_async_client") as mock_client_ctx:
-        mock_resp = AsyncMock()
+    with patch("animan.services.extractors.base.source_http.async_client") as mock_client_ctx:
+        mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.text = mock_html_sibnet
+        mock_resp.headers = {}
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_resp
         mock_client_ctx.return_value.__aenter__.return_value = mock_client
@@ -356,5 +357,4 @@ def test_download_task_source_propagation():
             download_manager.tasks.pop(bt.id, None)
             if bt.id in download_manager.task_order:
                 download_manager.task_order.remove(bt.id)
-
 

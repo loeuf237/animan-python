@@ -1,3 +1,4 @@
+from animan.services.source_http import source_http, VerificationRequired, USER_AGENT
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import json
@@ -54,7 +55,7 @@ class BaseVideoExtractor(ABC):
 
     def get_headers(self, url: str) -> Dict[str, str]:
         """Renvoie les en-têtes indispensables pour l'accès et le téléchargement."""
-        ua = proxy_service.get_user_agent()
+        ua = USER_AGENT
         headers = {"User-Agent": ua}
         ref = self.get_default_referer(url)
         if ref:
@@ -67,6 +68,8 @@ class BaseVideoExtractor(ABC):
             parsed = urlparse(url)
             if parsed.scheme and parsed.netloc:
                 return f"{parsed.scheme}://{parsed.netloc}/"
+        except VerificationRequired:
+            raise
         except Exception:
             pass
         return None
@@ -77,21 +80,7 @@ class BaseVideoExtractor(ABC):
         timeout: float = 10.0,
         follow_redirects: bool = True,
     ) -> httpx.AsyncClient:
-        try:
-            from animan.services.download_manager import download_manager
-            return download_manager._create_async_client(
-                headers=headers,
-                timeout=timeout,
-                follow_redirects=follow_redirects,
-            )
-        except Exception:
-            proxy_url = proxy_service.get_proxy()
-            return httpx.AsyncClient(
-                headers=headers,
-                timeout=timeout,
-                follow_redirects=follow_redirects,
-                proxy=proxy_url,
-            )
+        return source_http.async_client(headers=headers, timeout=timeout, follow_redirects=follow_redirects)
 
     @abstractmethod
     async def extract(

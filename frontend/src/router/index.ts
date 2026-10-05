@@ -1,6 +1,12 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import { getRouterBase } from './base';
 
 const routes = [
+  {
+    path: '/sources/:sourceId?',
+    name: 'sources',
+    component: () => import('@/views/SourcesView.vue'),
+  },
   {
     path: '/',
     name: 'home',
@@ -47,7 +53,7 @@ const routes = [
 ];
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(getRouterBase(window.location.pathname)),
   routes,
   scrollBehavior() {
     return { top: 0 };

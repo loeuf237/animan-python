@@ -10,6 +10,9 @@ from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+from animan.services.source_http import source_http, VerificationRequired
+from animan.services.browser_verification import browser_verification
+from animan.routers.network import router as network_router
 from animan.config import settings
 from animan.database import init_db
 from animan.services.download_manager import download_manager
@@ -37,6 +40,7 @@ logger = logging.getLogger("animan")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Animan Python v2.0...")
+    source_http.start()
     # 1. Initialize SQLite database
     init_db()
     # 2. Restore unfinished download tasks
@@ -44,9 +48,12 @@ async def lifespan(app: FastAPI):
     # 3. Start Watchdog service
     watchdog_service.start()
     # 4. Pre-load release feeds (background with concurrency lock)
-    asyncio.create_task(scraping_service._safe_refresh_cache())
-    asyncio.create_task(voiranime_service._safe_refresh_cache())
-    asyncio.create_task(animepahe_service._safe_refresh_cache())
+    bg_tasks = [
+        asyncio.create_task(browser_verification.watch()),
+        asyncio.create_task(scraping_service._safe_refresh_cache()),
+        asyncio.create_task(voiranime_service._safe_refresh_cache()),
+        asyncio.create_task(animepahe_service._safe_refresh_cache()),
+    ]
 
     import socket
     lan_ip = "127.0.0.1"
@@ -61,6 +68,12 @@ async def lifespan(app: FastAPI):
 
     logger.info("Stopping Animan...")
     watchdog_service.stop()
+    for t in bg_tasks:
+        if not t.done():
+            t.cancel()
+    await asyncio.gather(*bg_tasks, return_exceptions=True)
+    await browser_verification.close()
+    await asyncio.to_thread(source_http.close)
 
 app = FastAPI(
     title="Animan",
@@ -110,9 +123,14 @@ async def i18n_middleware(request: Request, call_next):
     finally:
         current_request_lang.reset(token)
 
+    path = request.url.path
+    is_static_or_media = (
+        path.startswith(("/static", "/assets", "/css", "/js", "/img", "/api/media"))
+        or path in ("/favicon.ico", "/manifest.json", "/sw.js", "/offline.html")
+    )
     if "lang" in request.query_params and request.query_params["lang"] in ("fr", "en"):
         response.set_cookie(key="animan_lang", value=lang, max_age=31536000, httponly=False, samesite="lax")
-    elif not request.cookies.get("animan_lang"):
+    elif not is_static_or_media and not request.cookies.get("animan_lang"):
         response.set_cookie(key="animan_lang", value=lang, max_age=31536000, httponly=False, samesite="lax")
     return response
 
@@ -195,6 +213,11 @@ async def get_offline_page():
     )
 
 # Enregistrement des routeurs
+@app.exception_handler(VerificationRequired)
+async def source_verification_error(request: Request, exc: VerificationRequired):
+    return JSONResponse(status_code=409, content=exc.to_dict())
+
+app.include_router(network_router)
 app.include_router(anime_router)
 app.include_router(download_router)
 app.include_router(library_router)
@@ -257,7 +280,7 @@ def stop_embedded_server():
 if __name__ == "__main__":
     import os
     reload_enabled = os.getenv("ANIMAN_RELOAD", "true").lower() in ("1", "true", "yes")
-    bind_host = os.getenv("ANIMAN_HOST", "0.0.0.0")
+    bind_host = os.getenv("ANIMAN_HOST", settings.HOST)
     uvicorn.run(
         "run:app" if reload_enabled else app,
         host=bind_host,

@@ -21,7 +21,12 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+import logging
+
+logger = logging.getLogger("animan.database")
+
 def init_db():
+    import animan.models  # Assure le chargement de tous les modèles pour create_all
     Base.metadata.create_all(bind=engine)
     # Migrations de schéma légères pour SQLite
     try:
@@ -30,6 +35,9 @@ def init_db():
             result = conn.exec_driver_sql("PRAGMA table_info(download_tasks)").fetchall()
             existing_cols = {row[1] for row in result}
             new_cols = [
+                ("verificationUrl", "VARCHAR"),
+                ("animeUrl", "VARCHAR DEFAULT ''"),
+                ("version", "VARCHAR DEFAULT ''"),
                 ("verificationStatus", "VARCHAR DEFAULT 'UNVERIFIED'"),
                 ("videoDuration", "FLOAT"),
                 ("verifiedAt", "DATETIME"),
@@ -41,8 +49,8 @@ def init_db():
                 if col_name not in existing_cols:
                     conn.exec_driver_sql(f"ALTER TABLE download_tasks ADD COLUMN {col_name} {col_type}")
             conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[database] Migration de schéma SQLite ignorée ou déjà appliquée: %s", e)
 
 def get_db():
     db = SessionLocal()

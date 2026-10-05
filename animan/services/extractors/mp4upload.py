@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Optional
@@ -51,6 +52,8 @@ class Mp4uploadExtractor(BaseVideoExtractor):
                     cl = head_resp.headers.get("Content-Length")
                     if cl and cl.isdigit():
                         file_size = int(cl)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -62,6 +65,8 @@ class Mp4uploadExtractor(BaseVideoExtractor):
                     headers={"Referer": "https://www.mp4upload.com/"},
                     size=file_size,
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Mp4upload pour %s: %s", url, e)
             return None

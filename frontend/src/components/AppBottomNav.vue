@@ -5,10 +5,10 @@
       <span>Accueil</span>
     </router-link>
 
-    <button type="button" class="bottom-nav-link" @click="emit('open-palette')">
-      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-      <span>Recherche</span>
-    </button>
+    <router-link to="/sources" class="bottom-nav-link" active-class="active">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>Sources</span>
+    </router-link>
 
     <router-link to="/downloads" class="bottom-nav-link" active-class="active">
       <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
@@ -39,7 +39,4 @@
 import { useDownloadStore } from '@/stores/downloads';
 
 const downloadStore = useDownloadStore();
-const emit = defineEmits<{
-  (e: 'open-palette'): void;
-}>();
 </script>

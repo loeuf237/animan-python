@@ -3,8 +3,10 @@ from contextlib import contextmanager
 import logging
 import os
 import random
+import re
 import sqlite3
 import time
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
 from urllib.parse import quote
 
@@ -43,9 +45,15 @@ class ProxyService:
 
     @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
+        db_dir = os.path.dirname(os.path.abspath(self.db_path))
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             with conn:
                 yield conn
         finally:
@@ -98,14 +106,21 @@ class ProxyService:
             for p_str in settings.PROXIES_CONFIG.split(","):
                 self.add_proxy_str(p_str)
 
-        # 2. From proxies.txt
-        if os.path.exists("proxies.txt"):
-            try:
-                with open("proxies.txt", "r", encoding="utf-8") as f:
-                    for line in f:
-                        self.add_proxy_str(line)
-            except Exception:
-                pass
+        # 2. From proxies.txt (base dir or current working dir)
+        proxies_paths = [
+            Path(settings.BASE_DIR).parent / "proxies.txt",
+            Path(settings.BASE_DIR) / "proxies.txt",
+            Path.cwd() / "proxies.txt",
+        ]
+        for p_path in proxies_paths:
+            if p_path.exists():
+                try:
+                    with open(p_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            self.add_proxy_str(line)
+                    break
+                except Exception as e:
+                    logger.debug("[proxy_service] Erreur lecture proxies.txt: %s", e)
 
     def add_proxy_str(self, p_str: str):
         p_str = p_str.strip()
@@ -197,9 +212,28 @@ class ProxyService:
 
         return f"{ptype}://{auth}{host}{port_str}"
 
+    MASK = "******"
+
+    @classmethod
+    def mask_url(cls, url: str) -> str:
+        """Masque le mot de passe d'une URL de proxy (scheme://user:pass@host -> user:******@host)."""
+        if not url:
+            return ""
+        return re.sub(r"(://[^/@:]+):[^/@]*@", r"\1:" + cls.MASK + "@", url)
+
+    def get_masked_proxy_url(self) -> str:
+        """Retourne l'URL active du proxy avec le mot de passe masqué."""
+        return self.mask_url(self.get_active_proxy() or "")
+
     def get_proxy_settings(self) -> Dict[str, Any]:
-        """Retourne la configuration actuelle du proxy."""
-        effective = self.get_active_proxy()
+        """Retourne la configuration du proxy pour l'API.
+
+        Aucun secret n'est renvoyé : le mot de passe et les identifiants intégrés
+        aux URL sont masqués. Le client renvoie ``******`` pour conserver la valeur.
+        """
+        masked_effective = self.get_masked_proxy_url()
+        masked_custom = self.mask_url(self.custom_proxy_url)
+        masked_password = self.MASK if self.proxy_password else ""
         return {
             "enabled": self.proxy_enabled,
             "proxy_type": self.proxy_type,
@@ -207,11 +241,15 @@ class ProxyService:
             "host": self.proxy_host,
             "port": self.proxy_port,
             "username": self.proxy_username,
-            "password": self.proxy_password,
-            "custom_url": self.custom_proxy_url,
-            "customUrl": self.custom_proxy_url,
-            "effective_url": effective or "",
-            "effectiveUrl": effective or "",
+            "password": masked_password,
+            "has_password": bool(self.proxy_password),
+            "hasPassword": bool(self.proxy_password),
+            "custom_url": masked_custom,
+            "customUrl": masked_custom,
+            "effective_url": masked_effective,
+            "effectiveUrl": masked_effective,
+            "effective_url_masked": masked_effective,
+            "effectiveUrlMasked": masked_effective,
         }
 
     def save_proxy_settings(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -233,9 +271,15 @@ class ProxyService:
         if "username" in data:
             self.proxy_username = str(data.get("username", "") or "").strip()
         if "password" in data:
-            self.proxy_password = str(data.get("password", "") or "")
+            pwd = str(data.get("password") or "")
+            # Le placeholder renvoyé par l'API signifie « ne pas modifier »
+            if pwd != self.MASK:
+                self.proxy_password = pwd
         if "custom_url" in data or "customUrl" in data:
-            self.custom_proxy_url = str(data.get("custom_url") or data.get("customUrl") or "").strip()
+            new_custom = str(data.get("custom_url") or data.get("customUrl") or "").strip()
+            # Une URL masquée (user:******@host) est ce que l'API renvoie : on garde l'originale
+            if new_custom != self.mask_url(self.custom_proxy_url) or not new_custom:
+                self.custom_proxy_url = new_custom
 
         try:
             with self._get_conn() as conn:
@@ -296,11 +340,14 @@ class ProxyService:
     def get_proxy_dict(self) -> Optional[Dict[str, str]]:
         p = self.get_active_proxy() or self.get_random_proxy()
         if p:
-            return {"http://": p, "https://": p}
+            return {"http://": p, "https://": p, "all://": p}
         return None
 
     async def test_proxy_connection(self, proxy_url: Optional[str] = None) -> Dict[str, Any]:
         """Teste la connectivité d'une URL de proxy en direct."""
+        # Le client ne connaît que l'URL masquée : retrouver l'URL réelle correspondante
+        if proxy_url and self.custom_proxy_url and proxy_url.strip() == self.mask_url(self.custom_proxy_url):
+            proxy_url = self.custom_proxy_url
         url_to_test = (proxy_url or self.get_active_proxy() or "").strip()
         if not url_to_test:
             return {

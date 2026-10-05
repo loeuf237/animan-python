@@ -249,18 +249,30 @@ class AniyomiDexParser:
             recipe.search_selector = "div.ml-item, .film_list article"
             recipe.popular_selector = recipe.search_selector
             recipe.search_request_path = "/?s={query}"
+            recipe.latest_request_path = "/filter-advance/page/1/?status=ongoing"
+            recipe.episode_list_selector = "div#seasonss > div.les-title > a"
             recipe.item_title_selector = "span.mli-info > h2, h3, h2, .title"
             recipe.item_thumb_selector = "div.thumb > img, img[src]"
+        elif "vostfree" in pkg_lower or "vostfree" in base_lower:
+            recipe.search_method = "POST"
+            recipe.search_request_path = "/index.php?do=search"
+            recipe.search_selector = "#dle-content .search-result, #dle-content .movie-poster"
+            recipe.latest_request_path = "/animes-vostfr/page/1/"
+            recipe.popular_selector = recipe.search_selector
+            recipe.episode_list_selector = "select.new_player_selector option"
+            recipe.details_thumb_selector = "div.slide-poster img"
         elif "anisama" in pkg_lower or "animesz" in base_lower:
             recipe.search_selector = ".film_list article, .film_list .film-item"
             recipe.popular_selector = recipe.search_selector
             recipe.search_request_path = "/filter?keyword={query}"
+            recipe.latest_request_path = "/recently-added/?page=1"
             recipe.item_title_selector = ".dynamic-name, h3, h2, .title"
             recipe.item_thumb_selector = ".film-poster-img, img[src]"
         elif "jetanime" in pkg_lower or "jetanime" in base_lower:
             recipe.search_selector = "div#archive-content > article > div.poster, div.search-page > div.result-item, article"
             recipe.popular_selector = recipe.search_selector
             recipe.search_request_path = "/?s={query}"
+            recipe.episode_list_selector = "#seasons .episodiotitle a, .episodiotitle a, a[href*='/episodes/']"
         elif "voiranime" in pkg_lower or "voir-anime" in base_lower:
             recipe.search_selector = "div.c-tabs-item__content, article"
             recipe.popular_selector = recipe.search_selector

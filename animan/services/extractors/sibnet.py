@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Optional
@@ -50,6 +51,8 @@ class SibnetExtractor(BaseVideoExtractor):
                         cl = range_resp.headers.get("Content-Length")
                         if cl and cl.isdigit() and range_resp.status_code == 200:
                             file_size = int(cl)
+                except VerificationRequired:
+                    raise
                 except Exception as e:
                     logger.debug("Impossible d'obtenir la taille Sibnet: %s", e)
 
@@ -61,6 +64,8 @@ class SibnetExtractor(BaseVideoExtractor):
                     headers={"Referer": "https://video.sibnet.ru/"},
                     size=file_size,
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Sibnet pour %s: %s", url, e)
             return None

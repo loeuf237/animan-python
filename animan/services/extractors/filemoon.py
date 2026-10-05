@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Dict, Optional
@@ -73,6 +74,8 @@ class FilemoonExtractor(BaseVideoExtractor):
                     qualities={"HD": video_url},
                     headers={"Referer": url},
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Filemoon pour %s: %s", url, e)
             return None

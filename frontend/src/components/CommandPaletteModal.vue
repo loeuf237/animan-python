@@ -1,6 +1,6 @@
 <template>
   <div v-if="isOpen" class="palette-backdrop" @click="close">
-    <div class="palette-card" @click.stop>
+    <div class="palette-card" role="dialog" aria-modal="true" aria-label="Recherche d’animés" @click.stop>
       <div class="palette-header">
         <div class="palette-search-field">
           <svg viewBox="0 0 24 24" class="palette-search-icon"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
@@ -18,8 +18,8 @@
             @keydown.enter.prevent="selectActive"
             @keydown.esc="close"
           />
-          <button v-if="query" type="button" class="palette-clear-btn" @click="query = ''; results = []">✕</button>
-          <kbd class="palette-esc-badge" @click="close">Échap</kbd>
+          <button v-if="query" type="button" class="palette-clear-btn" @click="clearQuery">✕</button>
+          <button type="button" class="palette-esc-badge palette-close-button" aria-label="Fermer la recherche" @click="close">Fermer</button>
         </div>
 
         <div class="palette-tabs-bar">
@@ -57,11 +57,11 @@
           </button>
           <button
             v-for="ext in enabledExtensions"
-            :key="ext.id || ext.pkg"
+            :key="ext.id"
             type="button"
             class="palette-tab-chip palette-ext-chip"
-            :class="{ active: selectedSource === String(ext.id || ext.pkg) }"
-            @click="setSource(String(ext.id || ext.pkg))"
+            :class="{ active: selectedSource === ext.id }"
+            @click="setSource(ext.id)"
           >
             📦 {{ ext.name }}
           </button>
@@ -69,6 +69,9 @@
       </div>
 
       <div class="palette-body">
+        <VerificationPrompt :challenges="challenges" />
+        <p v-if="error" class="palette-error" role="alert">{{ error }}</p>
+        <p v-for="warning in warnings" :key="warning.source" class="palette-error">{{ warning.source }} : {{ warning.message }}</p>
         <!-- Spinner -->
         <div v-if="isLoading" class="palette-loading">
           <div class="spinner"></div>
@@ -77,8 +80,9 @@
 
         <!-- Results List -->
         <div v-else-if="results.length > 0" class="palette-results-list">
-          <div
+          <button
             v-for="(item, idx) in results"
+            type="button"
             :key="item.url"
             class="palette-result-item"
             :class="{ 'is-active': activeIdx === idx }"
@@ -97,16 +101,16 @@
               </div>
             </div>
             <span class="palette-enter-hint">Entrée ↵</span>
-          </div>
+          </button>
         </div>
 
         <!-- Empty State -->
-        <div v-else-if="hasSearched" class="palette-empty-hint">
+        <div v-else-if="hasSearched && !challenges.length && !error && !warnings.length" class="palette-empty-hint">
           <p>Aucun résultat trouvé pour "{{ query }}" sur cette source.</p>
         </div>
 
         <!-- Initial Hint -->
-        <div v-else class="palette-empty-hint">
+        <div v-else-if="!hasSearched" class="palette-empty-hint">
           <p>Tapez au moins 2 lettres pour lancer une recherche instantanée sur tous les catalogues.</p>
         </div>
       </div>
@@ -115,114 +119,113 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '@/api/client';
-import { useAnimeStore } from '@/stores/anime';
-import type { AnimeResult } from '@/types';
+import VerificationPrompt from './VerificationPrompt.vue';
+import { useVerificationStore, challengeFromError } from '@/stores/verification';
+import type { AnimeResult, SourceChallenge, CatalogueSource } from '@/types';
 
-const props = defineProps<{
-  isOpen: boolean;
-}>();
-
-const emit = defineEmits<{
-  (e: 'close'): void;
-}>();
-
+const props = defineProps<{isOpen: boolean; initialQuery?: string}>();
+const emit = defineEmits<{(e: 'close'): void}>();
 const router = useRouter();
-const animeStore = useAnimeStore();
-
+const verification = useVerificationStore();
 const query = ref('');
 const selectedSource = ref('all');
 const results = ref<AnimeResult[]>([]);
+const challenges = ref<SourceChallenge[]>([]);
+const warnings = ref<{source: string; message: string}[]>([]);
+const enabledExtensions = ref<CatalogueSource[]>([]);
+const error = ref('');
 const isLoading = ref(false);
 const hasSearched = ref(false);
 const activeIdx = ref(0);
 const inputRef = ref<HTMLInputElement | null>(null);
+let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+let sequence = 0;
 
-let debounceTimer: any = null;
-
-const enabledExtensions = computed(() => {
-  return animeStore.homeFeed?.enabledExtensions || [];
+function invalidate() {
+  sequence++;
+  clearTimeout(debounceTimer);
+  verification.clearPending('palette-search');
+  challenges.value = []; warnings.value = []; error.value = ''; isLoading.value = false;
+}
+watch(() => props.isOpen, async open => {
+  invalidate();
+  if (open) {
+    query.value = props.initialQuery || '';
+    await nextTick(); inputRef.value?.focus();
+    void api.getSources().then(res => { enabledExtensions.value = res.sources.filter(s => s.isEnabled && s.type === 'imported'); }).catch(() => {});
+    if (query.value.trim().length >= 2) void executeSearch();
+  } else {
+    query.value = ''; results.value = []; hasSearched.value = false;
+  }
 });
-
-watch(
-  () => props.isOpen,
-  (open) => {
-    if (open) {
-      nextTick(() => {
-        inputRef.value?.focus();
-      });
-    } else {
-      query.value = '';
-      results.value = [];
-      hasSearched.value = false;
-    }
-  }
-);
-
-function close() {
-  emit('close');
-}
-
+function close() { invalidate(); emit('close'); }
+function clearQuery() { query.value = ''; results.value = []; hasSearched.value = false; invalidate(); inputRef.value?.focus(); }
 function setSource(src: string) {
-  selectedSource.value = src;
-  if (query.value.trim().length >= 2) {
-    executeSearch();
-  }
+  invalidate(); selectedSource.value = src; results.value = [];
+  if (query.value.trim().length >= 2) void executeSearch();
 }
-
 function onInput() {
-  if (debounceTimer) clearTimeout(debounceTimer);
-  if (!query.value.trim() || query.value.trim().length < 2) {
-    results.value = [];
-    hasSearched.value = false;
-    return;
-  }
-  debounceTimer = setTimeout(() => {
-    executeSearch();
-  }, 300);
+  invalidate(); results.value = [];
+  if (query.value.trim().length < 2) { hasSearched.value = false; return; }
+  debounceTimer = setTimeout(() => void executeSearch(), 300);
 }
-
 async function executeSearch() {
-  if (!query.value.trim()) return;
-  isLoading.value = true;
-  hasSearched.value = true;
-  activeIdx.value = 0;
+  if (!query.value.trim() || !props.isOpen) return;
+  const current = ++sequence;
+  const requestedQuery = query.value.trim(), source = selectedSource.value;
+  verification.clearPending('palette-search');
+  isLoading.value = true; hasSearched.value = true; activeIdx.value = 0; error.value = '';
   try {
-    results.value = await api.searchAnime(query.value.trim(), selectedSource.value);
-  } catch (e) {
-    console.error('[CommandPalette] Search error:', e);
+    const response = await api.searchAnimeDetailed(requestedQuery, source);
+    if (current !== sequence || !props.isOpen) return;
+    results.value = response.results; challenges.value = response.challenges; warnings.value = response.errors;
+    verification.waitForVerification('palette-search', [...response.challenges, ...response.errors.flatMap(e => e.domain ? [{domain: e.domain}] : [])], async () => {
+      if (current === sequence && props.isOpen) await executeSearch();
+    });
+  } catch (exc) {
+    if (current !== sequence || !props.isOpen) return;
+    const challenge = challengeFromError(exc);
     results.value = [];
-  } finally {
-    isLoading.value = false;
-  }
+    if (challenge) {
+      challenges.value = [challenge];
+      verification.waitForVerification('palette-search', [challenge], async () => {
+        if (current === sequence && props.isOpen) await executeSearch();
+      });
+    } else error.value = exc instanceof Error ? exc.message : 'La recherche a échoué.';
+  } finally { if (current === sequence) isLoading.value = false; }
 }
-
 function navigateResults(delta: number) {
-  if (!results.value.length) return;
   const next = activeIdx.value + delta;
-  if (next >= 0 && next < results.value.length) {
-    activeIdx.value = next;
-  }
+  if (next >= 0 && next < results.value.length) activeIdx.value = next;
 }
-
 function selectActive() {
-  if (results.value.length > 0 && results.value[activeIdx.value]) {
-    openAnime(results.value[activeIdx.value]);
-  }
+  if (results.value[activeIdx.value]) openAnime(results.value[activeIdx.value]!);
+  else if (!isLoading.value) void executeSearch();
 }
-
 function openAnime(item: AnimeResult) {
   close();
-  router.push({
-    path: '/anime',
-    query: { url: item.url, source: item.source || 'french-manga' },
-  });
+  void router.push({path: '/anime', query: {url: item.url, source: item.source || 'french-manga'}});
 }
+function onEscape(event: KeyboardEvent) {
+  if (!props.isOpen) return;
+  if (event.key === 'Escape') close();
+  if (event.key === 'Tab') {
+    const elements = [...document.querySelectorAll<HTMLElement>('.palette-card input, .palette-card button:not(:disabled), .palette-card select')].filter(el => el.getClientRects().length);
+    const first = elements[0], last = elements.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }
+}
+onMounted(() => window.addEventListener('keydown', onEscape));
+onUnmounted(() => { invalidate(); window.removeEventListener('keydown', onEscape); });
 </script>
 
 <style scoped>
+.palette-close-button { display: inline-flex !important; }
+.palette-result-item { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
 .palette-backdrop {
   position: fixed;
   inset: 0;
@@ -335,6 +338,8 @@ function openAnime(item: AnimeResult) {
   border-color: var(--accent);
 }
 
+.palette-error { padding: 12px 16px; color: var(--yellow, #d9a441); }
+.palette-body > .verification-prompt { margin: 12px; }
 .palette-body {
   flex: 1;
   overflow-y: auto;

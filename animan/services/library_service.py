@@ -95,7 +95,7 @@ class LibraryService:
             db.refresh(prog)
             return prog
 
-    def mark_as_watched(self, anime_url: str, anime_name: str, episode_number: int, version: str = "") -> WatchProgress:
+    def mark_as_watched(self, anime_url: str, anime_name: str, episode_number: int, version: str = "", watched: bool = True) -> WatchProgress:
         with SessionLocal() as db:
             prog = db.query(WatchProgress).filter(
                 WatchProgress.animeUrl == anime_url,
@@ -110,8 +110,8 @@ class LibraryService:
                     version=version
                 )
                 db.add(prog)
-            prog.watched = True
-            prog.watchedAt = datetime.now(timezone.utc)
+            prog.watched = watched
+            prog.watchedAt = datetime.now(timezone.utc) if watched else None
             db.commit()
             db.refresh(prog)
             return prog
@@ -143,6 +143,8 @@ class LibraryService:
     def _populate_entity(self, entity: DownloadTaskEntity, task: DownloadTask):
         entity.animeName = task.animeName
         entity.episodeNumber = task.episodeNumber
+        entity.version = task.version
+        entity.animeUrl = task.animeUrl
         entity.fileName = task.fileName
         entity.fileUrl = task.fileUrl
         entity.savePath = task.savePath
@@ -232,6 +234,7 @@ class LibraryService:
                     DownloadStatus.DOWNLOADING.value,
                     DownloadStatus.RETRYING.value,
                     DownloadStatus.PAUSED.value,
+                    DownloadStatus.VERIFICATION_REQUIRED.value,
                     DownloadStatus.FAILED.value,
                 ])
             ).all()
@@ -256,16 +259,19 @@ class LibraryService:
                 DownloadTaskEntity.episodeNumber == episode_number
             )
 
-            filters = []
             if episode_url:
-                filters.append(DownloadTaskEntity.downloadPageUrl == episode_url)
-                filters.append(DownloadTaskEntity.fileUrl == episode_url)
-            if anime_name:
-                filters.append(DownloadTaskEntity.animeName == anime_name)
-                filters.append(DownloadTaskEntity.animeName.ilike(anime_name.strip()))
-
-            if filters:
-                q = q.filter(or_(*filters))
+                # The episode URL identifies the version; a matching title must
+                # never override a different URL (e.g. VF versus VOSTFR).
+                q = q.filter(or_(
+                    DownloadTaskEntity.downloadPageUrl == episode_url,
+                    DownloadTaskEntity.fileUrl == episode_url,
+                ))
+            elif anime_name and not version:
+                q = q.filter(DownloadTaskEntity.animeName.ilike(anime_name.strip()))
+            else:
+                # Legacy tasks do not store a language version. Without an
+                # episode URL we cannot safely match a requested version.
+                return None
 
             candidates = q.order_by(DownloadTaskEntity.completedAt.desc(), DownloadTaskEntity.createdAt.desc()).all()
 

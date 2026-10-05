@@ -412,6 +412,10 @@
             </button>
           </template>
 
+          <template v-else-if="task.status === 'verification_required'">
+            <button class="btn btn-danger-outline btn-sm" @click="downloadStore.cancelDownload(task.id)">Annuler</button>
+          </template>
+
           <!-- Terminé : Lire (Mode Cinéma local), Vérifier l'intégrité, Supprimer -->
           <template v-else-if="task.status === 'completed'">
             <button class="btn btn-primary btn-sm btn-icon" title="Lire la vidéo locale (Mode Cinéma)" @click="playTask(task)">
@@ -574,7 +578,7 @@ async function saveSettings() {
 const activeAndQueuedCount = computed(() => {
   return downloadStore.tasks.filter((t) => {
     const s = (t.status || '').toLowerCase();
-    return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing'].includes(s);
+    return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing', 'verification_required'].includes(s);
   }).length;
 });
 
@@ -598,7 +602,7 @@ const filteredTasks = computed<DownloadTask[]>(() => {
   if (tab.value === 'queue') {
     return list.filter((t) => {
       const s = (t.status || '').toLowerCase();
-      return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing'].includes(s);
+      return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing', 'verification_required'].includes(s);
     });
   }
   if (tab.value === 'done') {
@@ -660,7 +664,7 @@ function getStatusBadgeClass(task: DownloadTask): string {
   const s = (task.status || '').toLowerCase();
   if (s === 'completed') return 'badge-success';
   if (s === 'downloading' || s === 'muxing') return 'badge-source';
-  if (s === 'paused') return 'badge-warning';
+  if (s === 'paused' || s === 'verification_required') return 'badge-warning';
   if (s === 'error' || s === 'failed') return 'badge-danger';
   if (s === 'cancelled') return 'badge-neutral';
   return 'badge-blue';
@@ -674,6 +678,7 @@ function getStatusLabel(task: DownloadTask): string {
     case 'pending': return 'En attente';
     case 'scheduled': return 'Planifié';
     case 'paused': return 'En pause';
+    case 'verification_required': return 'Vérification nécessaire';
     case 'completed': return 'Terminé';
     case 'error':
     case 'failed': return 'Échec';

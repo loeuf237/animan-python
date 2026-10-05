@@ -6,7 +6,7 @@ from animan.models.download_task import DownloadTask, DownloadStatus
 from animan.services.download_manager import download_manager
 
 @pytest.mark.asyncio
-async def test_html_response_rejection(tmp_path):
+async def test_html_response_rejection(tmp_path, monkeypatch):
     """Vérifie que _download_single_file rejette immédiatement un contenu HTML."""
     task = DownloadTask(
         animeName="Test Anime",
@@ -15,8 +15,10 @@ async def test_html_response_rejection(tmp_path):
         fileUrl="https://example.com/test",
         savePath=str(tmp_path / "test_ep1.mp4"),
     )
-    # Si on essaie de télécharger une URL qui renvoie une page web au lieu d'une vidéo
-    # (par exemple https://example.com qui renvoie du text/html)
+    import httpx
+    monkeypatch.setattr(download_manager, '_create_async_client', lambda **kwargs:
+        httpx.AsyncClient(transport=httpx.MockTransport(lambda request:
+            httpx.Response(200, text='<html>web page</html>', headers={'content-type':'text/html'})), trust_env=False))
     with pytest.raises(Exception) as excinfo:
         await download_manager._download_single_file(task, "https://example.com")
     

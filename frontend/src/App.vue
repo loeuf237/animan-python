@@ -1,25 +1,26 @@
 <template>
   <div class="app-shell">
     <!-- Left Navigation Sidebar -->
-    <AppSidebar @open-palette="isPaletteOpen = true" />
+    <AppSidebar />
 
     <!-- Top Action Bar -->
-    <AppTopbar @open-palette="isPaletteOpen = true" />
+    <AppTopbar @open-palette="openPalette" />
 
     <!-- Main Content Area -->
     <main class="main-content">
-      <router-view @open-palette="isPaletteOpen = true" v-slot="{ Component }">
+      <NetworkVerificationPanel />
+      <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
-          <component :is="Component" @open-palette="isPaletteOpen = true" />
+          <component :is="Component" @open-palette="openPalette" />
         </transition>
       </router-view>
     </main>
 
     <!-- Mobile Bottom Navigation -->
-    <AppBottomNav @open-palette="isPaletteOpen = true" />
+    <AppBottomNav />
 
     <!-- Universal Command Palette Modal (Ctrl + K) -->
-    <CommandPaletteModal :is-open="isPaletteOpen" @close="isPaletteOpen = false" />
+    <CommandPaletteModal :is-open="isPaletteOpen" :initial-query="paletteQuery" @close="isPaletteOpen = false" />
 
     <!-- Global Video Streaming Modal -->
     <VideoPlayerModal />
@@ -28,6 +29,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
+import NetworkVerificationPanel from '@/components/NetworkVerificationPanel.vue';
 import AppSidebar from '@/components/AppSidebar.vue';
 import AppTopbar from '@/components/AppTopbar.vue';
 import AppBottomNav from '@/components/AppBottomNav.vue';
@@ -39,11 +41,15 @@ import { useI18nStore } from '@/stores/i18n';
 const downloadStore = useDownloadStore();
 const i18nStore = useI18nStore();
 const isPaletteOpen = ref(false);
+const paletteQuery = ref('');
+function openPalette(query = '') { paletteQuery.value = query; isPaletteOpen.value = true; }
 
 function onKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
-    isPaletteOpen.value = !isPaletteOpen.value;
+    if (e.repeat) return;
+    if (isPaletteOpen.value) isPaletteOpen.value = false;
+    else openPalette();
   }
 }
 

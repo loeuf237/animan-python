@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import base64
 import html
 import json
@@ -78,6 +79,8 @@ class VoeExtractor(BaseVideoExtractor):
                                     q_m = re.search(r"(\d{3,4}p)", text, re.IGNORECASE)
                                     q_label = f"{q_m.group(1)}" if q_m else "720p"
                                     qualities[q_label] = href
+                    except VerificationRequired:
+                        raise
                     except Exception as e:
                         logger.debug("Erreur page download VOE: %s", e)
 
@@ -91,6 +94,8 @@ class VoeExtractor(BaseVideoExtractor):
                             hls = s_data.get("hls") or s_data.get("mp4")
                             if hls:
                                 qualities["HD"] = html.unescape(hls)
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             pass
 
@@ -105,6 +110,8 @@ class VoeExtractor(BaseVideoExtractor):
                                 if m_url:
                                     qualities["HD"] = m_url.group(0)
                                     break
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             continue
 
@@ -142,6 +149,8 @@ class VoeExtractor(BaseVideoExtractor):
                     qualities=qualities,
                     headers={"Referer": "https://voe.sx/"},
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction VOE pour %s: %s", url, e)
             return None

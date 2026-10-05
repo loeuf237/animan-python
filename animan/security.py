@@ -64,6 +64,11 @@ def get_all_allowed_domains() -> set:
         pass
     return domains
 
+import time
+
+_DNS_CACHE: dict[str, tuple[float, list[str]]] = {}
+_DNS_CACHE_TTL = 60.0
+
 def is_ip_blocked(ip_obj: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
     """
     Vérifie si une adresse IP est privée, de boucle locale, réservée ou de lien local.
@@ -77,9 +82,29 @@ def is_ip_blocked(ip_obj: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -
         or ip_obj.is_multicast
         or ip_obj == ipaddress.IPv4Address("0.0.0.0")
         or str(ip_obj) == "::"
+        or (hasattr(ip_obj, "is_unspecified") and ip_obj.is_unspecified)
     ):
         return True
     return False
+
+def _resolve_dns(hostname: str) -> list[str]:
+    """Résout le nom d'hôte avec cache TTL pour minimiser la latence réseau."""
+    now = time.time()
+    cached = _DNS_CACHE.get(hostname)
+    if cached and (now - cached[0]) < _DNS_CACHE_TTL:
+        return cached[1]
+
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+        ips = [item[4][0] for item in addr_info if item and len(item) > 4 and item[4]]
+        # Éviter la croissance infinie du cache
+        if len(_DNS_CACHE) > 500:
+            _DNS_CACHE.clear()
+        _DNS_CACHE[hostname] = (now, ips)
+        return ips
+    except Exception as e:
+        logger.debug("DNS resolution failed for '%s': %s", hostname, e)
+        return []
 
 def is_safe_url(
     url: str,
@@ -132,19 +157,29 @@ def is_safe_url(
                 return False
         except ValueError:
             # Nom de domaine : résolution DNS pour inspecter les adresses réelles
-            try:
-                addr_info = socket.getaddrinfo(hostname, None)
-                for item in addr_info:
-                    ip_str = item[4][0]
+            resolved_ips = _resolve_dns(hostname)
+            if not resolved_ips:
+                logger.debug("DNS resolution empty for '%s'", hostname)
+                return False
+            for ip_str in resolved_ips:
+                try:
                     ip = ipaddress.ip_address(ip_str)
                     if is_ip_blocked(ip):
                         logger.warning("SSRF blocked: Resolved IP '%s' for '%s' is private/loopback", ip, hostname)
                         return False
-            except Exception as e:
-                logger.debug("DNS resolution failed for '%s': %s", hostname, e)
-                return False
+                except ValueError:
+                    return False
 
     return True
+
+async def is_safe_url_async(
+    url: str,
+    allowed_domains: Optional[Iterable[str]] = None,
+    allow_private: bool = False
+) -> bool:
+    """Version non bloquante de :func:`is_safe_url` (résolution DNS dans un thread)."""
+    import asyncio
+    return await asyncio.to_thread(is_safe_url, url, allowed_domains, allow_private)
 
 def is_safe_path(
     target_path: Union[str, Path],

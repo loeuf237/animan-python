@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Optional
@@ -47,6 +48,8 @@ class SendvidExtractor(BaseVideoExtractor):
                     cl = head_resp.headers.get("Content-Length")
                     if cl and cl.isdigit():
                         file_size = int(cl)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -58,6 +61,8 @@ class SendvidExtractor(BaseVideoExtractor):
                     headers={"Referer": "https://sendvid.com/"},
                     size=file_size,
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Sendvid pour %s: %s", url, e)
             return None

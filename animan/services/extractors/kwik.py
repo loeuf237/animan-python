@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 from typing import Optional
 
@@ -31,6 +32,8 @@ class KwikExtractor(BaseVideoExtractor):
                 qualities={"HD": direct_stream},
                 headers={"Referer": "https://kwik.cx/"},
             )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction Kwik pour %s: %s", url, e)
             return None

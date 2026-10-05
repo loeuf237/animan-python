@@ -1,3 +1,5 @@
+from animan.services.source_http import source_http, VerificationRequired
+import json
 import asyncio
 import logging
 import re
@@ -55,6 +57,8 @@ def _safe_select(parent: Any, selector: str) -> List[Any]:
         return []
     try:
         return parent.select(s)
+    except VerificationRequired:
+        raise
     except Exception:
         # Si le sélecteur composé échoue (syntaxe invalide), essayer chaque sous-sélecteur séparé par virgule
         valid: List[Any] = []
@@ -65,6 +69,8 @@ def _safe_select(parent: Any, selector: str) -> List[Any]:
                     for el in parent.select(p):
                         if el not in valid:
                             valid.append(el)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
         return valid
@@ -75,6 +81,8 @@ def _safe_select_one(parent: Any, selector: str) -> Optional[Any]:
         return None
     try:
         return parent.select_one(s)
+    except VerificationRequired:
+        raise
     except Exception:
         for part in s.split(","):
             p = _clean_selector(part)
@@ -83,6 +91,8 @@ def _safe_select_one(parent: Any, selector: str) -> Optional[Any]:
                     res = parent.select_one(p)
                     if res:
                         return res
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
         return None
@@ -97,6 +107,7 @@ class AniyomiContainerSource:
         self.base_url = recipe.base_url.rstrip("/")
         self.pkg = recipe.pkg
         self.lang = recipe.lang
+        self.last_error = None
         self.source_id = recipe.pkg  # Identifiant unique de la source
 
     def _get_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
@@ -108,45 +119,22 @@ class AniyomiContainerSource:
         }
 
     async def _fetch_html(self, url: str, method: str = "GET", data: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> str:
-        """Effectue une requête HTTP sécurisée vers la source."""
         headers = self._get_headers(referer=self.base_url + "/")
+        headers["Origin"] = self.base_url
+        headers["X-Requested-With"] = "XMLHttpRequest"
         try:
-            proxy = proxy_service.get_active_proxy()
-            # Essai curl_cffi pour bypasser Cloudflare basique si disponible
-            try:
-                from curl_cffi.requests import AsyncSession
-                async with AsyncSession(impersonate="chrome124", proxy=proxy) as session:
-                    if method.upper() == "POST":
-                        resp = await session.post(url, data=data, headers=headers, timeout=timeout, allow_redirects=False)
-                        if resp.status_code in (301, 302, 307, 308) and "location" in resp.headers:
-                            redir_url = urljoin(url, resp.headers["location"])
-                            p = urlparse(redir_url)
-                            if p.netloc:
-                                self.base_url = f"{p.scheme}://{p.netloc}"
-                            resp = await session.post(redir_url, data=data, headers=self._get_headers(referer=self.base_url + "/"), timeout=timeout)
-                    else:
-                        resp = await session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-                    if resp.status_code == 200:
-                        return resp.text
-            except Exception:
-                pass
-
-            async with httpx.AsyncClient(timeout=timeout, verify=settings.SSL_VERIFY, follow_redirects=False, proxy=proxy) as client:
-                if method.upper() == "POST":
-                    resp = await client.post(url, data=data, headers=headers)
-                    # Si redirection (ex: vostfree.ws -> ipv4.vostfree.ws), conserver POST vers la nouvelle adresse
-                    if resp.is_redirect and resp.headers.get("location"):
-                        redirect_url = urljoin(url, resp.headers["location"])
-                        parsed_redirect = urlparse(redirect_url)
-                        if parsed_redirect.netloc:
-                            self.base_url = f"{parsed_redirect.scheme}://{parsed_redirect.netloc}"
-                        resp = await client.post(redirect_url, data=data, headers=self._get_headers(referer=self.base_url + "/"))
-                else:
-                    resp = await client.get(url, headers=headers, follow_redirects=True)
-                if resp.status_code == 200:
-                    return resp.text
-        except Exception as e:
-            logger.debug("[container:%s] Erreur fetch %s: %s", self.name, url, e)
+            # The common transport checks initial and redirected URLs before any I/O.
+            async with source_http.async_client(headers=headers, timeout=timeout) as client:
+                response = await client.request(method, url, data=data)
+                response.raise_for_status()
+                self.last_error = None
+                return response.text
+        except VerificationRequired as exc:
+            self.last_error = str(exc)
+            raise
+        except Exception as exc:
+            self.last_error = str(exc)
+            logger.warning("[container:%s] Échec requête %s: %s", self.name, url, exc)
         return ""
 
     # -------------------------------------------------------------------------
@@ -163,6 +151,9 @@ class AniyomiContainerSource:
         if adapter:
             return await adapter.search_anime(clean_q, self)
 
+        return await self._search_anime_html(clean_q)
+
+    async def _search_anime_html(self, clean_q: str) -> List[AnimeResult]:
         logger.info("[container:%s] Recherche: '%s'", self.name, clean_q)
         results: List[AnimeResult] = []
 
@@ -231,7 +222,7 @@ class AniyomiContainerSource:
             title = ""
             title_el = _safe_select_one(it, self.recipe.item_title_selector or "h2, h3, .title, .movie-title, .card-title")
             if title_el:
-                title = title_el.get_text().strip()
+                title = title_el.get_text().strip() or title_el.get("alt", "")
             if not title and link_el.get("title"):
                 title = link_el.get("title").strip()
             if not title and link_el.get("aria-label"):
@@ -271,6 +262,9 @@ class AniyomiContainerSource:
         if adapter:
             return await adapter.get_latest_releases(self)
 
+        return await self._latest_html()
+
+    async def _latest_html(self) -> List[AnimeResult]:
         rel_path = self.recipe.latest_request_path or self.recipe.popular_request_path or "/"
         target_url = urljoin(self.base_url, rel_path)
         html = await self._fetch_html(target_url)
@@ -287,8 +281,8 @@ class AniyomiContainerSource:
             if not link_el or not link_el.get("href"):
                 continue
             href = urljoin(self.base_url, link_el.get("href"))
-            title_el = _safe_select_one(it, "h2, h3, .title, .movie-title") or link_el
-            title = title_el.get_text().strip() if title_el else ""
+            title_el = _safe_select_one(it, self.recipe.item_title_selector or "h2, h3, .title, .movie-title") or link_el
+            title = (title_el.get_text().strip() or title_el.get("alt", "")) if title_el else ""
             img_el = _safe_select_one(it, "img[src], img[data-src]")
             img_url = urljoin(self.base_url, img_el.get("src") or img_el.get("data-src", "")) if img_el else ""
 
@@ -359,31 +353,42 @@ class AniyomiContainerSource:
                 # Si option a une url ou un index d'épisode
                 if val.startswith("http") or val.startswith("/"):
                     href = urljoin(self.base_url, val)
+                elif "vostfree" in self.pkg:
+                    match = re.search(r"\d+", ep_title)
+                    if not match and ep_title.casefold() != "film":
+                        continue
+                    from urllib.parse import urlencode, parse_qsl, urlunparse
+                    parsed = urlparse(anime_url)
+                    params = dict(parse_qsl(parsed.query))
+                    params["episode"] = match.group(0) if match else "1"
+                    href = urlunparse(parsed._replace(query=urlencode(params)))
                 else:
-                    href = f"{anime_url}?episode={val or ep_idx}"
+                    continue
             else:
                 a_tag = ep_el if ep_el.name == "a" else ep_el.select_one("a[href]")
                 if a_tag and a_tag.get("href"):
-                    href = urljoin(self.base_url, a_tag.get("href"))
+                    href = urljoin(anime_url, a_tag.get("href"))
 
             if not href:
                 continue
 
             # Numéro d'épisode extrait par regex
-            num_match = re.search(r"(?:ep|épisode|episode|ch)[\s\-_]*(\d+)", ep_title, re.IGNORECASE)
+            num_match = re.search(r"(?:ep|épisode|episode|ch)[\s\-_]*(\d+)", ep_title + " " + href, re.IGNORECASE)
             ep_num = int(num_match.group(1)) if num_match else ep_idx
 
             episodes.append(
                 Episode(
                     number=ep_num,
                     title=ep_title or f"Épisode {ep_num}",
-                    version=self.lang.upper(),
+                    version="VF" if re.search(r"(?<![a-z])vf(?![a-z])", anime_url + " " + title, re.I) else "VOSTFR",
                     downloadPageUrl=href,
                     playerUrl=href,
                     thumbnailUrl=img_url,
                 )
             )
             ep_idx += 1
+
+        episodes.sort(key=lambda ep: ep.number)
 
         # Extraction spécifique Anime-Sama via panneauAnime et episodes.js
         if not episodes and ("anime-sama" in self.base_url or "animesama" in (self.pkg or "").lower()):
@@ -413,7 +418,7 @@ class AniyomiContainerSource:
                             break
 
         # Si aucun épisode trouvé via sélecteur, créer un épisode 1 par défaut sur la page
-        if not episodes:
+        if not episodes and soup.select_one("iframe, video, #playeroptionsul"):
             episodes.append(
                 Episode(
                     number=1,
@@ -474,13 +479,59 @@ class AniyomiContainerSource:
         # 1. Détection des balises iframe vidéo
         regex = self.recipe.video_iframe_regex or r'<iframe[^>]*\ssrc=["\']([^"\']+)["\']'
         iframes = re.findall(regex, html, re.IGNORECASE)
+        soup = BeautifulSoup(html, "html.parser")
+        iframes.extend(tag.get("src") or tag.get("data-src") for tag in soup.select("iframe[src], iframe[data-src]"))
+        for player in soup.select("#playeroptionsul li[data-post][data-nume]"):
+            if player.get("data-nume") == "trailer":
+                continue
+            from urllib.parse import urlencode
+            endpoint = urljoin(self.base_url, f"/wp-json/dooplayer/v1/post/{player['data-post']}")
+            payload = await self._fetch_html(endpoint + "?" + urlencode({"type": player.get("data-type", "tv"), "source": player["data-nume"]}))
+            try:
+                embed = json.loads(payload).get("embed_url", "")
+                if embed.startswith("<"):
+                    tag = BeautifulSoup(embed, "html.parser").find("iframe")
+                    embed = tag.get("src", "") if tag else ""
+                if embed:
+                    iframes.append(embed)
+            except (ValueError, AttributeError):
+                pass
+
+        if "vostfree" in self.pkg:
+            from urllib.parse import parse_qs
+            number = parse_qs(urlparse(play_url).query).get("episode", ["1"])[0]
+            prefixes = {"ok": "https://ok.ru/videoembed/", "sibnet": "https://video.sibnet.ru/shell.php?videoid=", "uqload": "https://uqload.io/embed-"}
+            for button in soup.select(f"div[id='buttons_{number}'] div[id]"):
+                content = soup.find("div", id="content_" + button["id"])
+                if not content:
+                    continue
+                link = content.get_text(strip=True)
+                name = button.get_text(strip=True).lower()
+                if link and not link.startswith(("http://", "https://")):
+                    link = prefixes.get(name, "") + link + (".html" if name == "uqload" else "")
+                if link.startswith(("http://", "https://")):
+                    iframes.append(link)
+        if "animevostfr" in self.pkg:
+            from urllib.parse import parse_qs, urlencode
+            shortlink = soup.select_one('link[rel="shortlink"]')
+            film_id = parse_qs(urlparse(shortlink.get("href", "") if shortlink else "").query).get("p", [""])[0]
+            if film_id:
+                for server in soup.select(".list-server select option[value]"):
+                    endpoint = urljoin(self.base_url, "/ajax-get-link-stream/") + "?" + urlencode({"server": server["value"], "filmId": film_id})
+                    raw = await self._fetch_html(endpoint)
+                    try:
+                        raw = json.loads(raw)
+                    except ValueError:
+                        raw = raw.strip()
+                    if isinstance(raw, str) and raw.startswith(("http://", "https://")):
+                        iframes.append(raw)
 
         # 2. Détection d'hébergeurs courants (Vidmoly, Streamtape, Uqload, Sendvid, Sibnet, Voe, etc.)
         for iframe_url in set(iframes):
             if iframe_url.startswith("//"):
                 iframe_url = "https:" + iframe_url
             elif not iframe_url.startswith("http"):
-                iframe_url = urljoin(self.base_url, iframe_url)
+                iframe_url = urljoin(play_url, iframe_url)
 
             # Identification du nom de l'hébergeur
             matched_ext = extractor_registry.find_extractor(iframe_url)
@@ -517,7 +568,7 @@ class AniyomiContainerSource:
                 })
             m_mp4 = re.findall(r'<video[^>]*src=["\']([^"\']+\.mp4[^"\']*)["\']', html) or re.findall(r'<source[^>]*src=["\']([^"\']+\.mp4[^"\']*)["\']', html)
             for mp4_url in set(m_mp4):
-                full_mp4 = urljoin(self.base_url, mp4_url)
+                full_mp4 = urljoin(play_url, mp4_url)
                 sources.append({
                     "name": f"{self.name} - MP4",
                     "server": "Direct",

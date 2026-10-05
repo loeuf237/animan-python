@@ -15,10 +15,10 @@
         <span>{{ i18nStore.t('nav_home') || 'Accueil' }}</span>
       </router-link>
 
-      <button type="button" class="side-link side-button" @click="emitOpenPalette">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
-        <span>{{ i18nStore.t('nav_search') || 'Recherche' }}</span>
-      </button>
+      <router-link to="/sources" class="side-link" active-class="active">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Sources</span>
+      </router-link>
 
       <router-link to="/downloads" class="side-link" active-class="active">
         <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
@@ -57,11 +57,4 @@ import { useI18nStore } from '@/stores/i18n';
 
 const downloadStore = useDownloadStore();
 const i18nStore = useI18nStore();
-const emit = defineEmits<{
-  (e: 'open-palette', query?: string): void;
-}>();
-
-function emitOpenPalette() {
-  emit('open-palette', '');
-}
 </script>

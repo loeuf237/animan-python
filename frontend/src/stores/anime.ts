@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/api/client';
 import type { AnimeDetailResponse, AnimeResult, HomeFeedResponse } from '@/types';
+import type { SourceChallenge } from '@/types';
+import { useVerificationStore, challengeFromError } from './verification';
 
 export const useAnimeStore = defineStore('anime', () => {
   const homeFeed = ref<HomeFeedResponse | null>(null);
@@ -12,6 +14,9 @@ export const useAnimeStore = defineStore('anime', () => {
   const isLoading = ref(false);
   const isDetailLoading = ref(false);
   const error = ref<string | null>(null);
+  const searchChallenges = ref<SourceChallenge[]>([]);
+  const searchWarnings = ref<{source: string; message: string}[]>([]);
+  let searchSequence = 0;
 
   async function fetchHomeFeed(force = false) {
     if (homeFeed.value && !force) return;
@@ -28,22 +33,45 @@ export const useAnimeStore = defineStore('anime', () => {
   }
 
   async function search(query: string, source: string = 'all') {
+    const sequence = ++searchSequence;
+    const verification = useVerificationStore();
+    verification.clearPending('anime-search');
+    searchChallenges.value = [];
+    searchWarnings.value = [];
     searchQuery.value = query;
     selectedSource.value = source;
     if (!query.trim()) {
       searchResults.value = [];
+      isLoading.value = false;
+      error.value = null;
       return;
     }
 
     isLoading.value = true;
     error.value = null;
     try {
-      searchResults.value = await api.searchAnime(query, source);
+      const response = await api.searchAnimeDetailed(query, source);
+      if (sequence !== searchSequence) return;
+      searchResults.value = response.results;
+      searchChallenges.value = response.challenges;
+      searchWarnings.value = response.errors;
+      verification.waitForVerification('anime-search', [...response.challenges, ...response.errors.flatMap(e => e.domain ? [{domain: e.domain}] : [])], async () => {
+        if (sequence === searchSequence) await search(query, source);
+      });
     } catch (err: any) {
+      if (sequence !== searchSequence) return;
+      searchResults.value = [];
+      const challenge = challengeFromError(err);
+      if (challenge) {
+        searchChallenges.value = [challenge];
+        verification.waitForVerification('anime-search', [challenge], async () => {
+          if (sequence === searchSequence) await search(query, source);
+        });
+      }
       error.value = err.message || 'Erreur lors de la recherche';
       console.error('[useAnimeStore] search error:', err);
     } finally {
-      isLoading.value = false;
+      if (sequence === searchSequence) isLoading.value = false;
     }
   }
 
@@ -76,6 +104,7 @@ export const useAnimeStore = defineStore('anime', () => {
     isLoading,
     isDetailLoading,
     error,
+    searchChallenges, searchWarnings,
     fetchHomeFeed,
     search,
     fetchAnimeDetail,

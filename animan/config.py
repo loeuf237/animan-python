@@ -61,7 +61,7 @@ class Settings:
     VOIRANIME_DEFAULT_SERVER: str = os.getenv("ANIMAN_VOIRANIME_DEFAULT_SERVER", "auto")
 
     # TMDB (The Movie Database)
-    TMDB_API_KEY: str = os.getenv("TMDB_API_KEY", "4e44d9029b1270a757cddc766a1bcb63")
+    TMDB_API_KEY: str = os.getenv("TMDB_API_KEY", "")
     TMDB_ENABLED: bool = os.getenv("ANIMAN_TMDB_ENABLED", "true").lower() in ("1", "true", "yes")
 
     # Miroirs VoirAnime

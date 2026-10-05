@@ -57,12 +57,14 @@ async def import_repo_api(payload: dict = Body(...)):
 @router.post("/api/extensions/{ext_id}/toggle")
 async def toggle_extension_api(ext_id: int, payload: dict = Body(...)):
     """Active ou désactive une extension à la demande de l'utilisateur."""
-    enabled = bool(payload.get("enabled", False))
+    enabled = payload.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="enabled doit être un booléen.")
     try:
         result = await extension_service.toggle_extension(ext_id, enabled)
         return JSONResponse(content=result)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("[router.extensions] Error toggling extension %d: %s", ext_id, e)
         raise HTTPException(status_code=500, detail=f"Error toggling extension: {e}")
@@ -82,3 +84,30 @@ async def list_extensions_api(
         "count": len(extensions),
         "extensions": extensions
     })
+
+
+@router.post("/api/extensions/refresh")
+async def refresh_extensions_api():
+    repo = extension_service.get_active_repository()
+    if not repo:
+        raise HTTPException(status_code=400, detail="Aucun dépôt actif.")
+    try:
+        return await extension_service.import_repository(repo["url"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.put("/api/extensions/{ext_id}/recipe")
+async def configure_extension_api(ext_id: int, payload: dict = Body(...)):
+    try:
+        return await extension_service.configure_extension(ext_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/extensions/{ext_id}/diagnose")
+async def diagnose_extension_api(ext_id: int):
+    try:
+        return await extension_service.diagnose_extension(ext_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

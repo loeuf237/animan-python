@@ -87,7 +87,7 @@ async def test_hanime_adapter_search_detail_sources():
         mock_api_resp = MagicMock(status_code=200)
         mock_api_resp.json.return_value = fake_api_manifest
 
-        with patch("httpx.AsyncClient.get", return_value=mock_api_resp):
+        with patch("animan.services.source_http.AsyncSourceClient.get", new_callable=AsyncMock, return_value=mock_api_resp):
             sources = await adapter.get_episode_sources("https://hanime.tv/videos/hentai/overflow-season-1", container)
             assert len(sources) == 2
             assert sources[0]["server"] == "Server 1"

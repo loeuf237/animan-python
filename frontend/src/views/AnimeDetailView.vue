@@ -228,6 +228,10 @@
             <button type="button" class="btn btn-sm" @click="selectNotDownloadedEpisodes">Non téléchargés</button>
             <button type="button" class="btn btn-sm" @click="invertSelection">Inverser</button>
 
+            <select v-model="versionFilter" class="input-premium" aria-label="Version des épisodes">
+              <option value="">Toutes les versions</option>
+              <option v-for="version in episodeVersions" :key="version" :value="version">{{ version }}</option>
+            </select>
             <!-- Qualité par lot -->
             <select v-model="batchQuality" class="input-premium" style="padding: 4px 8px; font-size: 0.8rem; height: 30px;">
               <option value="auto">Qualité : Auto</option>
@@ -261,11 +265,11 @@
         <div class="episode-list">
           <div
             v-for="ep in filteredEpisodes"
-            :key="ep.number"
+            :key="episodeKey(ep)"
             class="episode-item tachiyomi-episode-item"
             :class="{
               'ep-downloaded': ep.isDownloaded,
-              'ep-watched': isWatched(ep.number)
+              'ep-watched': isWatched(ep)
             }"
             @click="playEpisode(ep)"
           >
@@ -274,12 +278,12 @@
               <input
                 type="checkbox"
                 class="episode-check"
-                :checked="selectedEpisodes.has(String(ep.number))"
+                :checked="selectedEpisodes.has(episodeKey(ep))"
                 @click.stop
-                @change="toggleEpisodeSelection(String(ep.number))"
+                @change="toggleEpisodeSelection(episodeKey(ep))"
               />
 
-              <span class="tachiyomi-unread-dot" :style="{ visibility: isWatched(ep.number) ? 'hidden' : 'visible' }"></span>
+              <span class="tachiyomi-unread-dot" :style="{ visibility: isWatched(ep) ? 'hidden' : 'visible' }"></span>
 
               <div v-if="ep.thumbnailUrl" class="tachiyomi-ep-thumb-wrap">
                 <img :src="ep.thumbnailUrl" class="tachiyomi-ep-thumb" alt="" loading="lazy" />
@@ -345,11 +349,11 @@
                 v-else
                 type="button"
                 class="tachiyomi-circle-btn btn-download-ep"
-                :class="{ 'is-loading': downloadingEpisodes.has(String(ep.number)) }"
+                :class="{ 'is-loading': downloadingEpisodes.has(episodeKey(ep)) }"
                 title="Télécharger l'épisode"
                 @click.stop="downloadEp(ep)"
               >
-                <svg v-if="!downloadingEpisodes.has(String(ep.number))" viewBox="0 0 24 24">
+                <svg v-if="!downloadingEpisodes.has(episodeKey(ep))" viewBox="0 0 24 24">
                   <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.8"/>
                   <path d="M12 7v7m-3-3 3 3 3-3M8 17h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -386,6 +390,7 @@ import { useAnimeStore } from '@/stores/anime';
 import { usePlayerStore } from '@/stores/player';
 import { useDownloadStore } from '@/stores/downloads';
 import { useLibraryStore } from '@/stores/library';
+import { episodeKey, episodeFileName } from '@/utils/episodes';
 import type { Episode } from '@/types';
 
 const router = useRouter();
@@ -399,6 +404,8 @@ const isBatchMenuOpen = ref(false);
 const isOverflowMenuOpen = ref(false);
 const isSynopsisExpanded = ref(false);
 const epFilter = ref('');
+const versionFilter = ref('');
+const episodeVersions = computed(() => [...new Set(detail.value?.anime.episodes.map(ep => ep.version || '') || [])].filter(Boolean));
 
 const epSubtitles = ref<Record<string, boolean>>({});
 const batchSubtitles = ref(false);
@@ -425,12 +432,12 @@ const animeTitle = computed(() => detail.value?.anime.title || 'Fiche animé');
 
 const watchedCount = computed(() => {
   if (!detail.value) return 0;
-  return detail.value.anime.episodes.filter((e) => isWatched(e.number)).length;
+  return detail.value.anime.episodes.filter((e) => isWatched(e)).length;
 });
 
 const filteredEpisodes = computed(() => {
   if (!detail.value) return [];
-  const list = detail.value.anime.episodes;
+  const list = detail.value.anime.episodes.filter(ep => !versionFilter.value || ep.version === versionFilter.value);
   if (!epFilter.value.trim()) return list;
   const q = epFilter.value.trim().toLowerCase();
   return list.filter((e) => String(e.number).includes(q) || (e.title && e.title.toLowerCase().includes(q)));
@@ -440,7 +447,7 @@ const selectedCount = computed(() => selectedEpisodes.value.size);
 
 const nextUnwatchedEpisode = computed(() => {
   if (!detail.value) return null;
-  return detail.value.anime.episodes.find((e) => !isWatched(e.number)) || detail.value.anime.episodes[0];
+  return detail.value.anime.episodes.find((e) => !isWatched(e)) || detail.value.anime.episodes[0];
 });
 
 const fabText = computed(() => {
@@ -456,16 +463,15 @@ function onFabClick() {
   }
 }
 
-function isWatched(epNum: string | number) {
+function isWatched(ep: Episode) {
   if (!detail.value) return false;
-  return (
-    detail.value.watchedEpisodes.map(String).includes(String(epNum)) ||
-    libraryStore.isWatched(detail.value.anime.url, String(epNum))
-  );
+  const version = ep.version || detail.value.anime.version || '';
+  const override = libraryStore.isWatched(detail.value.anime.url, ep.number, version);
+  return override ?? ep.isWatched ?? detail.value.watchedEpisodes.map(String).includes(`${ep.number}-${version}`);
 }
 
 function isSubEnabled(ep: Episode) {
-  const num = String(ep.number);
+  const num = episodeKey(ep);
   if (epSubtitles.value[num] !== undefined) {
     return epSubtitles.value[num];
   }
@@ -473,7 +479,7 @@ function isSubEnabled(ep: Episode) {
 }
 
 function toggleEpSub(ep: Episode) {
-  const num = String(ep.number);
+  const num = episodeKey(ep);
   const current = isSubEnabled(ep);
   epSubtitles.value[num] = !current;
 }
@@ -481,8 +487,8 @@ function toggleEpSub(ep: Episode) {
 function toggleBatchSubtitles() {
   const val = batchSubtitles.value;
   if (detail.value) {
-    for (const ep of detail.value.anime.episodes) {
-      epSubtitles.value[String(ep.number)] = val;
+    for (const ep of filteredEpisodes.value) {
+      epSubtitles.value[episodeKey(ep)] = val;
     }
   }
 }
@@ -498,16 +504,16 @@ function toggleEpisodeSelection(num: string) {
 function selectAllEpisodes() {
   if (!detail.value) return;
   for (const ep of filteredEpisodes.value) {
-    selectedEpisodes.value.add(String(ep.number));
+    selectedEpisodes.value.add(episodeKey(ep));
   }
 }
 
 function selectUnwatchedEpisodes() {
   if (!detail.value) return;
   selectedEpisodes.value.clear();
-  for (const ep of detail.value.anime.episodes) {
-    if (!isWatched(ep.number)) {
-      selectedEpisodes.value.add(String(ep.number));
+  for (const ep of filteredEpisodes.value) {
+    if (!isWatched(ep)) {
+      selectedEpisodes.value.add(episodeKey(ep));
     }
   }
 }
@@ -515,9 +521,9 @@ function selectUnwatchedEpisodes() {
 function selectNotDownloadedEpisodes() {
   if (!detail.value) return;
   selectedEpisodes.value.clear();
-  for (const ep of detail.value.anime.episodes) {
+  for (const ep of filteredEpisodes.value) {
     if (!ep.isDownloaded) {
-      selectedEpisodes.value.add(String(ep.number));
+      selectedEpisodes.value.add(episodeKey(ep));
     }
   }
 }
@@ -525,7 +531,7 @@ function selectNotDownloadedEpisodes() {
 function invertSelection() {
   if (!detail.value) return;
   for (const ep of filteredEpisodes.value) {
-    const num = String(ep.number);
+    const num = episodeKey(ep);
     if (selectedEpisodes.value.has(num)) {
       selectedEpisodes.value.delete(num);
     } else {
@@ -534,7 +540,13 @@ function invertSelection() {
   }
 }
 
+watch(versionFilter, () => selectedEpisodes.value.clear());
+
 function fetchDetail() {
+  selectedEpisodes.value.clear();
+  versionFilter.value = '';
+  epSubtitles.value = {};
+  downloadingEpisodes.value.clear();
   const url = route.query.url as string;
   const source = (route.query.source as string) || 'french-manga';
   if (url) {
@@ -543,7 +555,7 @@ function fetchDetail() {
 }
 
 watch(
-  () => route.query.url,
+  () => [route.query.url, route.query.source],
   () => fetchDetail()
 );
 
@@ -564,7 +576,7 @@ function playEpisode(ep: Episode) {
 
 async function downloadEp(ep: Episode) {
   if (!detail.value) return;
-  const numStr = String(ep.number);
+  const numStr = episodeKey(ep);
   downloadingEpisodes.value.add(numStr);
   const targetUrl = ep.downloadPageUrl || ep.playerUrl || detail.value.anime.url;
   const subEnabled = isSubEnabled(ep);
@@ -573,8 +585,10 @@ async function downloadEp(ep: Episode) {
     const res = await downloadStore.startDownload({
       animeName: detail.value.anime.title,
       episodeNumber: ep.number,
+      version: ep.version || detail.value.anime.version || '',
+      animeUrl: detail.value.anime.url,
       url: targetUrl,
-      fileName: `${detail.value.anime.title} - Episode ${ep.number}.mp4`,
+      fileName: episodeFileName(detail.value.anime.title, ep),
       subtitleUrl: ep.subtitleUrl || undefined,
       downloadSubtitles: subEnabled,
       source: detail.value.source,
@@ -593,12 +607,14 @@ async function downloadSelectedEpisodes() {
   if (!detail.value || selectedEpisodes.value.size === 0) return;
   isBatchDownloading.value = true;
 
-  const targetEps = detail.value.anime.episodes.filter((e) => selectedEpisodes.value.has(String(e.number)));
+  const targetEps = detail.value.anime.episodes.filter((e) => selectedEpisodes.value.has(episodeKey(e)));
   const epsPayload = targetEps.map((e) => ({
     number: e.number,
+    version: e.version || detail.value!.anime.version || '',
+    animeUrl: detail.value!.anime.url,
     url: e.downloadPageUrl || e.playerUrl || detail.value!.anime.url,
     title: e.title,
-    fileName: `${detail.value!.anime.title} - Episode ${e.number}.mp4`,
+    fileName: episodeFileName(detail.value!.anime.title, e),
     subtitleUrl: e.subtitleUrl || undefined,
     downloadSubtitles: isSubEnabled(e),
   }));
@@ -623,20 +639,20 @@ async function downloadSelectedEpisodes() {
 async function triggerBatchPreset(mode: string) {
   if (!detail.value) return;
   isBatchMenuOpen.value = false;
-  const all = detail.value.anime.episodes;
+  const all = filteredEpisodes.value;
   let targetEps: Episode[] = [];
 
   if (mode === 'next-1') {
-    const next = all.find((e) => !isWatched(e.number) && !e.isDownloaded);
+    const next = all.find((e) => !isWatched(e) && !e.isDownloaded);
     if (next) targetEps = [next];
   } else if (mode === 'next-5') {
-    targetEps = all.filter((e) => !isWatched(e.number) && !e.isDownloaded).slice(0, 5);
+    targetEps = all.filter((e) => !isWatched(e) && !e.isDownloaded).slice(0, 5);
   } else if (mode === 'next-10') {
-    targetEps = all.filter((e) => !isWatched(e.number) && !e.isDownloaded).slice(0, 10);
+    targetEps = all.filter((e) => !isWatched(e) && !e.isDownloaded).slice(0, 10);
   } else if (mode === 'next-25') {
-    targetEps = all.filter((e) => !isWatched(e.number) && !e.isDownloaded).slice(0, 25);
+    targetEps = all.filter((e) => !isWatched(e) && !e.isDownloaded).slice(0, 25);
   } else if (mode === 'unwatched') {
-    targetEps = all.filter((e) => !isWatched(e.number));
+    targetEps = all.filter((e) => !isWatched(e));
   } else if (mode === 'not-downloaded') {
     targetEps = all.filter((e) => !e.isDownloaded);
   } else if (mode === 'all') {
@@ -650,9 +666,11 @@ async function triggerBatchPreset(mode: string) {
 
   const epsPayload = targetEps.map((e) => ({
     number: e.number,
+    version: e.version || detail.value!.anime.version || '',
+    animeUrl: detail.value!.anime.url,
     url: e.downloadPageUrl || e.playerUrl || detail.value!.anime.url,
     title: e.title,
-    fileName: `${detail.value!.anime.title} - Episode ${e.number}.mp4`,
+    fileName: episodeFileName(detail.value!.anime.title, e),
     subtitleUrl: e.subtitleUrl || undefined,
     downloadSubtitles: isSubEnabled(e),
   }));
@@ -693,10 +711,11 @@ async function toggleAutoDl() {
 async function markAll(watched: boolean) {
   if (!detail.value) return;
   isOverflowMenuOpen.value = false;
-  for (const ep of detail.value.anime.episodes) {
-    await libraryStore.markWatched(detail.value.anime.url, String(ep.number), watched);
+  for (const ep of filteredEpisodes.value) {
+    await libraryStore.markWatched(detail.value.anime.url, ep.number, watched, ep.version || detail.value.anime.version || '', detail.value.anime.title);
+    ep.isWatched = watched;
   }
-  detail.value.watchedEpisodes = watched ? detail.value.anime.episodes.map((e) => e.number) : [];
+  detail.value.watchedEpisodes = watched ? detail.value.anime.episodes.map((e) => `${e.number}-${e.version || detail.value!.anime.version || ''}`) : [];
 }
 </script>
 

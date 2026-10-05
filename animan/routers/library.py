@@ -150,8 +150,11 @@ async def mark_watched(request: Request):
     anime_name = body.get("animeName", "")
     ep_num = int(body.get("episodeNumber", 0))
     version = body.get("version", "")
+    watched = body.get("watched", True)
+    if not isinstance(watched, bool):
+        return JSONResponse(status_code=400, content={"error": "watched doit être un booléen"})
     if anime_url:
-        library_service.mark_as_watched(anime_url, anime_name, ep_num, version)
+        library_service.mark_as_watched(anime_url, anime_name, ep_num, version, watched=watched)
     return {"success": True}
 
 @router.get("/api/progress")

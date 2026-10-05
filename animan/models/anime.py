@@ -2,11 +2,11 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 if not hasattr(BaseModel, "model_dump"):
-    setattr(BaseModel, "model_dump", lambda self, **kwargs: self.dict(**kwargs))
+    setattr(BaseModel, "model_dump", lambda self, **kwargs: getattr(self, "dict")(**kwargs))
 if not hasattr(BaseModel, "model_dump_json"):
-    setattr(BaseModel, "model_dump_json", lambda self, **kwargs: self.json(**kwargs))
+    setattr(BaseModel, "model_dump_json", lambda self, **kwargs: getattr(self, "json")(**kwargs))
 if not hasattr(BaseModel, "model_validate"):
-    setattr(BaseModel, "model_validate", classmethod(lambda cls, obj, **kwargs: cls.parse_obj(obj)))
+    setattr(BaseModel, "model_validate", classmethod(lambda cls, obj, **kwargs: getattr(cls, "parse_obj")(obj)))
 
 class Episode(BaseModel):
     number: int
@@ -28,6 +28,7 @@ class AnimeResult(BaseModel):
     type: str = "Anime"
     episodeInfo: str = ""
     source: str = ""
+    genres: List[str] = Field(default_factory=list)
 
 class AnimeDetail(BaseModel):
     title: str

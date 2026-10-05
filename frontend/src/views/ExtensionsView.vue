@@ -64,14 +64,14 @@
           class="speed-preset-chip"
           @click="setRepoPreset('https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json')"
         >
-          ⚡ Yuzono Anime Repo (254 extensions)
+          ⚡ Yuzono Anime Repo
         </button>
         <button
           type="button"
           class="speed-preset-chip"
-          @click="setRepoPreset('https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json')"
+          @click="setRepoPreset('https://raw.githubusercontent.com/aniyomiorg/aniyomi-extensions/repo/index.min.json')"
         >
-          📦 Keiyoushi Repo
+          📦 Aniyomi Repo
         </button>
       </div>
 
@@ -94,6 +94,7 @@
         </div>
       </div>
       <div style="font-size: 0.85rem; color: #9ca3af; display: flex; align-items: center; gap: 16px;">
+<button class="btn btn-sm" :disabled="isImporting" @click="refreshRepo">Actualiser le dépôt</button>
         <span>Catalogue : {{ totalCount }} sources</span>
         <span>Actives : {{ enabledCount }}</span>
       </div>
@@ -202,10 +203,13 @@
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+          <button class="btn btn-sm" :disabled="busyExtensions.has(ext.id)" @click="diagnose(ext)">Tester</button>
+          <button class="btn btn-sm" @click="editRecipe(ext)">Configurer</button>
           <label class="toggle-switch">
             <input
               type="checkbox"
               :checked="isExtensionActive(ext)"
+              :disabled="busyExtensions.has(ext.id)"
               @change="handleToggleExtension(ext, ($event.target as HTMLInputElement).checked)"
             />
             <span class="toggle-slider"></span>
@@ -237,6 +241,13 @@
       </button>
     </div>
 
+    <section v-if="editingExtension" class="settings-card-pro" style="padding:20px;margin-top:20px">
+      <h2>Recette de {{ editingExtension.name }}</h2>
+      <p>Modifiez l’adresse du site et ses sélecteurs si son fonctionnement a changé. Les extensions utilisant une API nécessitent un adaptateur compatible.</p>
+      <textarea v-model="recipeText" class="input-premium" style="width:100%;min-height:240px" aria-label="Recette JSON"></textarea>
+      <button class="btn btn-primary" :disabled="busyExtensions.has(editingExtension.id)" @click="saveRecipe">Enregistrer</button>
+      <button class="btn" @click="editingExtension = null">Fermer</button>
+    </section>
     <!-- Notification Toast -->
     <div v-if="toastMessage" class="toast-notification" :class="`toast-${toastType}`">
       <span>{{ toastMessage }}</span>
@@ -247,9 +258,46 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { api } from '@/api/client';
+import { useAnimeStore } from '@/stores/anime';
+const animeStore = useAnimeStore();
 import type { ExtensionSource } from '@/types';
 
 const extensions = ref<ExtensionSource[]>([]);
+const busyExtensions = ref(new Set<number | string>());
+const editingExtension = ref<ExtensionSource | null>(null);
+const recipeText = ref('');
+
+function editRecipe(ext: ExtensionSource) {
+  editingExtension.value = ext;
+  recipeText.value = JSON.stringify(ext.recipe_json ? JSON.parse(ext.recipe_json) : {base_url: ext.base_url || '', search_request_path: '/?s={query}', search_selector: 'article', episode_list_selector: '.episodes a'}, null, 2);
+}
+async function saveRecipe() {
+  const ext = editingExtension.value;
+  if (!ext) return;
+  busyExtensions.value.add(ext.id);
+  try {
+    await api.configureExtension(ext.id, JSON.parse(recipeText.value));
+    animeStore.homeFeed = null;
+    await fetchExtensions();
+    editingExtension.value = null;
+    showToast('Recette enregistrée.', 'success');
+  } catch (e: any) { showToast(e.message, 'error'); }
+  finally { busyExtensions.value.delete(ext.id); }
+}
+async function diagnose(ext: ExtensionSource) {
+  busyExtensions.value.add(ext.id);
+  try {
+    const result = await api.diagnoseExtension(ext.id);
+    showToast(`${ext.name} : ${result.message}`, result.success ? 'success' : 'error');
+  } catch (e: any) { showToast(e.message, 'error'); }
+  finally { busyExtensions.value.delete(ext.id); }
+}
+async function refreshRepo() {
+  isImporting.value = true;
+  try { await api.refreshExtensions(); animeStore.homeFeed = null; await fetchExtensions(); showToast('Dépôt actualisé.', 'success'); }
+  catch (e: any) { showToast(e.message, 'error'); }
+  finally { isImporting.value = false; }
+}
 const activeRepo = ref<any>(null);
 const isLoading = ref(false);
 const isImporting = ref(false);
@@ -331,6 +379,7 @@ async function handleImportRepo() {
   isImporting.value = true;
   try {
     const res = await api.importExtensionRepo(url);
+    animeStore.homeFeed = null;
     showToast(`Dépôt "${res.repo_name || 'Aniyomi'}" importé avec succès (${res.count || 0} extensions) !`, 'success');
     await fetchExtensions();
   } catch (e: any) {
@@ -341,14 +390,18 @@ async function handleImportRepo() {
 }
 
 async function handleToggleExtension(ext: ExtensionSource, enabled: boolean) {
+  busyExtensions.value.add(ext.id);
   try {
     await api.toggleExtension(ext.id, enabled);
+    animeStore.homeFeed = null;
+    await fetchExtensions();
     ext.enabled = enabled;
     ext.is_enabled = enabled;
     showToast(`${ext.name} ${enabled ? 'activée' : 'désactivée'}.`, 'success');
   } catch (e: any) {
     showToast(e.message || "Erreur lors de l'activation/désactivation de l'extension.", 'error');
-  }
+    await fetchExtensions();
+  } finally { busyExtensions.value.delete(ext.id); }
 }
 
 onMounted(() => {

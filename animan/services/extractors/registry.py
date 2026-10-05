@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
@@ -16,6 +17,7 @@ from animan.services.extractors.mailru import MailRuExtractor
 from animan.services.extractors.kwik import KwikExtractor
 from animan.services.extractors.ytdlp_fallback import YtDlpFallbackExtractor
 from animan.services.proxy_service import proxy_service
+from animan.services.source_http import USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ class ExtractorRegistry:
         """
         Génère les en-têtes HTTP requis pour une URL donnée en déléguant à l'extracteur correspondant.
         """
-        ua = proxy_service.get_user_agent()
+        ua = USER_AGENT
         headers = {"User-Agent": ua}
         u_lower = (url or "").lower()
         s_lower = (server_type or "").lower()
@@ -89,7 +91,7 @@ class ExtractorRegistry:
             headers["Referer"] = "https://gn1r5n.org/"
             headers["X-Embed-Origin"] = "voir-anime.to"
             headers["X-Embed-Referer"] = "https://voir-anime.to/"
-        elif s_lower == "kwik":
+        elif s_lower == "kwik" or "owocdn" in u_lower:
             headers["Referer"] = "https://kwik.cx/"
         elif "vidzy" in u_lower or s_lower == "vidzy":
             headers["Referer"] = "https://vidzy.live/"
@@ -100,6 +102,8 @@ class ExtractorRegistry:
                     headers["Referer"] = f"{parsed.scheme}://{parsed.netloc}/"
                 else:
                     headers["Referer"] = "https://vidzy.live/"
+            except VerificationRequired:
+                raise
             except Exception:
                 headers["Referer"] = "https://vidzy.live/"
 
@@ -124,6 +128,8 @@ class ExtractorRegistry:
                 res = await extractor.extract(url, referer=referer, preferred_quality=preferred_quality)
                 if res and res.video_url:
                     return res
+            except VerificationRequired:
+                raise
             except Exception as e:
                 logger.debug("Échec de l'extracteur %s: %s", extractor.name, e)
 
@@ -133,6 +139,8 @@ class ExtractorRegistry:
             res_ytdl = await self._fallback_extractor.extract(url, referer=referer, preferred_quality=preferred_quality)
             if res_ytdl and res_ytdl.video_url:
                 return res_ytdl
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Échec du repli yt-dlp: %s", e)
 

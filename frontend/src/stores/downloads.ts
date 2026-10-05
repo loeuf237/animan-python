@@ -9,6 +9,7 @@ function normalizeStatus(status: any): string {
   if (s === 'DOWNLOADING' || s === 'MUXING') return 'downloading';
   if (s === 'PENDING' || s === 'SCHEDULED' || s === 'RETRYING') return 'queued';
   if (s === 'PAUSED') return 'paused';
+  if (s === 'VERIFICATION_REQUIRED') return 'verification_required';
   if (s === 'COMPLETED') return 'completed';
   if (s === 'FAILED' || s === 'ERROR') return 'error';
   if (s === 'CANCELLED') return 'cancelled';
@@ -162,6 +163,8 @@ export const useDownloadStore = defineStore('downloads', () => {
   async function startDownload(payload: {
     animeName: string;
     episodeNumber: number | string;
+    version?: string;
+    animeUrl?: string;
     url: string;
     fileName?: string;
     subtitleUrl?: string;
@@ -182,6 +185,8 @@ export const useDownloadStore = defineStore('downloads', () => {
     source: string;
     episodes: {
       number: number | string;
+      version?: string;
+      animeUrl?: string;
       url: string;
       title?: string;
       fileName?: string;

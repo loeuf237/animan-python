@@ -117,40 +117,13 @@
           </div>
         </div>
 
-        <!-- User-Agent -->
         <div class="setting-row-pro">
           <div class="setting-meta-pro">
-            <label class="setting-title-pro" style="display:block;cursor:pointer;">User-Agent du Scraper</label>
-            <div class="setting-desc-pro">Identité transmise aux serveurs d'hébergement et sites distants.</div>
-          </div>
-          <div class="setting-ctrl-pro">
-            <select v-model="uaSelection" class="input-premium setting-select-pro">
-              <option value="Random (Rotator)">Aléatoire (Rotator)</option>
-              <option value="Chrome">Google Chrome (Windows)</option>
-              <option value="Firefox">Mozilla Firefox (Windows)</option>
-              <option value="Safari">Apple Safari (macOS)</option>
-              <option value="Edge">Microsoft Edge (Windows)</option>
-              <option value="Custom">Personnalisé / Custom...</option>
-            </select>
+            <label class="setting-title-pro">Profil réseau des sources</label>
+            <div class="setting-desc-pro">Profil Chrome stable ; l’identité HTTP correspond à l’empreinte TLS et reste la même pendant les sessions.</div>
           </div>
         </div>
 
-        <!-- Custom User-Agent -->
-        <div v-if="uaSelection === 'Custom'" class="setting-row-pro">
-          <div class="setting-meta-pro">
-            <label class="setting-title-pro" style="display:block;cursor:pointer;">User-Agent personnalisé</label>
-            <div class="setting-desc-pro">Chaîne exacte du User-Agent HTTP à envoyer.</div>
-          </div>
-          <div class="setting-ctrl-pro" style="flex:1;max-width:440px;">
-            <input
-              v-model="customUa"
-              type="text"
-              class="input-premium"
-              style="width:100%;"
-              placeholder="Mozilla/5.0 (X11; Linux x86_64)..."
-            />
-          </div>
-        </div>
 
         <!-- Organisation Plex / Jellyfin -->
         <div class="setting-row-pro">

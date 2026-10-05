@@ -1,3 +1,4 @@
+from animan.services.source_http import VerificationRequired
 import logging
 import re
 from typing import Dict, Optional
@@ -70,6 +71,8 @@ class MailRuExtractor(BaseVideoExtractor):
                     qualities=qualities,
                     headers={"Referer": "https://my.mail.ru/"},
                 )
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Erreur extraction MailRu pour %s: %s", url, e)
             return None

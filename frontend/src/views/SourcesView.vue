@@ -1,186 +1,207 @@
 <template>
   <div class="sources-view">
-    <div class="view-header">
-      <div>
-        <h1>Recherche & Catalogues</h1>
-        <p class="subtitle">Explorez les catalogues multi-sources ou recherchez vos animés préférés.</p>
-      </div>
-    </div>
-
-    <!-- Search Controls Bar -->
-    <div class="search-bar-row glass-panel">
-      <!-- Query input -->
-      <div class="input-wrapper">
-        <input
-          v-model="query"
-          type="text"
-          placeholder="Titre d'animé (ex: Jujutsu Kaisen, Frieren)..."
-          class="input-field"
-          @keydown.enter="doSearch"
-        />
-      </div>
-
-      <!-- Source selection -->
-      <select v-model="selectedSource" class="source-select" @change="doSearch">
-        <option value="all">Toutes les sources (Multi)</option>
-        <option value="french-manga">French-Manga</option>
-        <option value="voir-anime">VoirAnime</option>
-        <option value="animepahe">AnimePahe</option>
-        <option
-          v-for="ext in enabledExtensions"
-          :key="ext.id || ext.pkg"
-          :value="ext.id || ext.pkg"
-        >
-          Extension: {{ ext.name }}
-        </option>
-      </select>
-
-      <button class="btn-primary" @click="doSearch">
-        Rechercher
-      </button>
-    </div>
-
-    <!-- Results section -->
-    <div class="results-section">
-      <div v-if="animeStore.isLoading" class="loading-state">
-        <div class="spinner"></div>
-        <p>Recherche en cours sur les sources...</p>
-      </div>
-
-      <div v-else-if="animeStore.searchResults.length > 0" class="results-container">
-        <div class="results-header">
-          <h2>Résultats pour "{{ animeStore.searchQuery }}"</h2>
-          <span class="badge badge-source">{{ animeStore.searchResults.length }} animés trouvés</span>
+    <template v-if="!sourceId">
+      <header class="source-heading"><div><h1>Sources</h1><p>Parcourez vos catalogues et les extensions installées.</p></div><router-link to="/extensions" class="btn btn-secondary">Gérer les extensions</router-link></header>
+      <input v-model="sourceQuery" class="input" type="search" placeholder="Filtrer les sources par nom ou langue" aria-label="Filtrer les sources" />
+      <p v-if="listError" role="alert">{{ listError }} <button class="btn btn-secondary" @click="loadSources">Réessayer</button></p>
+      <p v-if="listLoading" role="status">Chargement des sources…</p>
+      <section v-for="group in groups" :key="group.type" class="source-group">
+        <h2>{{ group.label }}</h2>
+        <div v-if="group.sources.length" class="source-list">
+          <article v-for="item in group.sources" :key="item.id" class="source-card">
+            <div class="source-identity"><span class="source-avatar">{{ item.name.replace(/^Aniyomi:\s*/i, '').slice(0, 2).toUpperCase() }}</span><div><h3>{{ item.name }}</h3><p>{{ item.lang.toUpperCase() }} · {{ host(item.baseUrl) }}</p></div><span v-if="!item.isEnabled" class="badge">Désactivée</span></div>
+            <div v-if="item.isEnabled" class="source-card-actions">
+              <button v-for="view in item.views" :key="view.id" class="btn btn-secondary" @click="openSource(item.id, view.id)">{{ view.label }}</button>
+            </div>
+            <router-link v-else to="/extensions" class="btn btn-secondary">Activer dans Extensions</router-link>
+          </article>
         </div>
+        <p v-else class="source-empty">{{ group.type === 'native' ? 'Aucune source ne correspond.' : 'Aucune extension installée ne correspond. Ajoutez et activez une extension depuis Extensions.' }}</p>
+      </section>
+    </template>
 
-        <div class="anime-grid">
-          <AnimeCard
-            v-for="anime in animeStore.searchResults"
-            :key="anime.url"
-            :anime="anime"
-          />
-        </div>
-      </div>
-
-      <div v-else-if="hasSearched" class="empty-state glass-panel">
-        <p>Aucun résultat trouvé pour "{{ query }}".</p>
-      </div>
-
-      <div v-else class="initial-state glass-panel">
-        <p>Entrez un terme de recherche ci-dessus pour interroger les catalogues disponibles.</p>
-      </div>
-    </div>
+    <template v-else>
+      <router-link to="/sources" class="source-back">← Toutes les sources</router-link>
+      <header class="source-heading"><div><h1>{{ currentSource?.name || 'Catalogue' }}</h1><p>{{ currentSource ? host(currentSource.baseUrl) : sourceId }}</p></div><button class="btn btn-secondary" :disabled="loading" @click="refreshCatalogue">Actualiser</button></header>
+      <p v-if="listError" role="alert">{{ listError }}</p>
+      <template v-if="currentSource?.isEnabled">
+        <nav class="catalogue-tabs" aria-label="Catalogues de la source">
+          <button v-for="view in currentSource.views" :key="view.id" class="btn" :class="mode === view.id ? 'btn-primary' : 'btn-secondary'" :aria-pressed="mode === view.id" @click="changeMode(view.id)">{{ view.label }}</button>
+        </nav>
+        <form class="catalogue-controls" @submit.prevent="applyFilters">
+          <div class="catalogue-search"><input v-model="query" class="input" type="search" :placeholder="selectedTags.length && !currentSource.multiTags ? 'Rechercher dans la page filtrée' : 'Rechercher un animé dans cette source'" aria-label="Rechercher dans cette source" @input="invalidatePending" /><button class="btn btn-primary" type="submit">Rechercher</button></div>
+          <div class="catalogue-tools">
+            <button class="btn btn-secondary" type="button" :aria-expanded="filtersOpen" @click="filtersOpen = !filtersOpen">Genres et filtres{{ selectedTags.length ? ` (${selectedTags.length})` : '' }}</button>
+            <label>Tri <select v-model="order" @change="applyFilters"><option v-for="option in filters.orders" :key="option.id" :value="option.id">{{ option.label }}</option></select></label>
+            <button v-if="selectedTags.length || order !== 'source'" type="button" class="btn btn-secondary" @click="resetFilters">Réinitialiser</button>
+          </div>
+          <div v-if="filtersOpen" class="source-filters">
+            <p v-if="filtersLoading" role="status">Chargement des filtres…</p>
+            <p v-if="filtersError" role="alert">{{ filtersError }} <button class="btn btn-secondary" type="button" @click="loadFilters">Réessayer</button></p>
+            <template v-if="filters.tags.length">
+              <input v-model="tagQuery" type="search" class="input" placeholder="Trouver un genre ou un tag" aria-label="Rechercher un tag" />
+              <p v-if="!currentSource.multiTags">Cette source accepte un filtre à la fois.</p>
+              <div v-for="group in tagGroups" :key="group.name" class="tag-group">
+                <strong>{{ group.name }}</strong>
+                <div class="tag-options"><label v-for="tag in group.tags" :key="tag.id" class="tag-option" :class="{selected: selectedTags.includes(tag.id)}"><input type="checkbox" :checked="selectedTags.includes(tag.id)" @change="toggleTag(tag.id)" />{{ tag.label }}</label></div>
+              </div>
+              <button type="submit" class="btn btn-primary">Appliquer les filtres</button>
+            </template>
+            <p v-else-if="!filtersLoading && !filtersError">Cette source ne propose pas de filtres par genre ou tag dans ce catalogue.</p>
+          </div>
+        </form>
+        <VerificationPrompt :challenges="challenges" />
+        <p v-if="pageError" class="catalogue-error" role="alert">{{ pageError }} <button class="btn btn-secondary" @click="refreshCatalogue">Réessayer</button></p>
+        <p v-if="queryScope === 'page'" class="source-hint">Le titre est filtré dans la page affichée. Chargez la suite pour parcourir les autres résultats du tag.</p>
+        <div class="catalogue-result-heading"><h2>{{ currentSource.views.find(v => v.id === mode)?.label }}</h2><span>{{ results.length }} résultat(s) chargé(s)</span></div>
+        <p v-if="loading && !results.length" role="status">Chargement du catalogue…</p>
+        <div class="anime-grid"><AnimeCard v-for="anime in results" :key="`${anime.source}:${anime.url}`" :anime="anime" /></div>
+        <p v-if="!loading && !results.length && !pageError && !pageChallenges.length" class="source-empty">{{ mode === 'search' && !query.trim() && !selectedTags.length ? 'Saisissez un titre pour lancer la recherche.' : 'Aucun résultat avec ces critères.' }}</p>
+        <p v-if="hasUnappliedFilters" class="source-hint">Appliquez vos critères pour actualiser les résultats.</p>
+        <button v-if="nextCursor && !hasUnappliedFilters" class="btn btn-secondary catalogue-more" :disabled="loading" @click="fetchPage(nextCursor, true)">{{ loading ? 'Chargement…' : 'Charger la suite' }}</button>
+      </template>
+      <p v-else-if="!listLoading" role="alert">Cette source est introuvable ou désactivée. <router-link to="/extensions">Gérer les extensions</router-link></p>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
-import { useAnimeStore } from '@/stores/anime';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { api } from '@/api/client';
+import { useVerificationStore, challengeFromError } from '@/stores/verification';
 import AnimeCard from '@/components/AnimeCard.vue';
+import VerificationPrompt from '@/components/VerificationPrompt.vue';
+import type { AnimeResult, CatalogueSource, CatalogueFilters, SourceChallenge } from '@/types';
 
-const route = useRoute();
-const animeStore = useAnimeStore();
-
-const query = ref('');
-const selectedSource = ref('all');
-const hasSearched = ref(false);
-
-const enabledExtensions = computed(() => {
-  return animeStore.homeFeed?.enabledExtensions || [];
-});
-
-onMounted(() => {
-  if (!animeStore.homeFeed) {
-    animeStore.fetchHomeFeed();
-  }
-  const q = route.query.q as string;
-  if (q) {
-    query.value = q;
-    doSearch();
-  }
-});
-
-async function doSearch() {
-  if (!query.value.trim()) return;
-  hasSearched.value = true;
-  await animeStore.search(query.value.trim(), selectedSource.value);
+const route = useRoute(), router = useRouter();
+const verification = useVerificationStore();
+const sources = ref<CatalogueSource[]>([]), sourceQuery = ref('');
+const sourceId = computed(() => String(route.params.sourceId || ''));
+const currentSource = computed(() => sources.value.find(s => s.id === sourceId.value));
+const mode = ref('latest'), query = ref(''), order = ref('source'), selectedTags = ref<string[]>([]);
+const filters = ref<CatalogueFilters>({tags: [], orders: [{id: 'source', label: 'Ordre de la source'}]});
+const filtersOpen = ref(false), tagQuery = ref(''), filtersLoading = ref(false);
+const listLoading = ref(false), loading = ref(false), listError = ref(''), pageError = ref(''), filtersError = ref('');
+const results = ref<AnimeResult[]>([]), nextCursor = ref<string | null>(null), queryScope = ref('catalogue');
+const pageChallenges = ref<SourceChallenge[]>([]), filterChallenges = ref<SourceChallenge[]>([]);
+const challenges = computed(() => [...pageChallenges.value, ...filterChallenges.value]);
+const appliedCriteria = ref('');
+const criteria = computed(() => JSON.stringify([mode.value, query.value.trim(), order.value, [...selectedTags.value].sort()]));
+const hasUnappliedFilters = computed(() => criteria.value !== appliedCriteria.value);
+let generation = 0, pageSequence = 0, filterSequence = 0, disposed = false;
+const groups = computed(() => ['native', 'imported'].map(type => ({type, label: type === 'native' ? 'Préinstallées' : 'Extensions installées', sources: sources.value.filter(s => s.type === type && `${s.name} ${s.lang}`.toLocaleLowerCase().includes(sourceQuery.value.toLocaleLowerCase()))})));
+const tagGroups = computed(() => [...new Set(filters.value.tags.map(t => t.group))].map(name => ({name, tags: filters.value.tags.filter(t => t.group === name && t.label.toLocaleLowerCase().includes(tagQuery.value.toLocaleLowerCase()))})).filter(g => g.tags.length));
+function host(url: string) { try { return new URL(url).host; } catch { return ''; } }
+function invalidatePending() {
+  pageSequence++;
+  loading.value = false;
+  verification.clearPending('source-page');
+  pageChallenges.value = [];
 }
+async function loadSources() {
+  listLoading.value = true; listError.value = '';
+  try { sources.value = (await api.getSources()).sources; }
+  catch (exc) { listError.value = exc instanceof Error ? exc.message : 'Impossible de charger les sources.'; }
+  finally { listLoading.value = false; }
+}
+function openSource(id: string, view: string) { void router.push({name: 'sources', params: {sourceId: id}, query: {mode: view}}); }
+function applyFilters() {
+  const selectedMode = query.value.trim() && !selectedTags.value.length && sourceId.value !== 'voir-anime' ? 'search' : mode.value;
+  void router.push({name: 'sources', params: {sourceId: sourceId.value}, query: {mode: selectedMode, q: query.value.trim() || undefined, order: order.value, tags: selectedTags.value.length ? selectedTags.value : undefined}}).then(() => {
+    // Submitting unchanged criteria is an explicit retry.
+    if (!loading.value) void fetchPage();
+  });
+}
+function changeMode(value: string) { mode.value = value; query.value = ''; selectedTags.value = []; order.value = 'source'; applyFilters(); }
+function toggleTag(id: string) {
+  invalidatePending();
+  selectedTags.value = selectedTags.value.includes(id) ? selectedTags.value.filter(t => t !== id) : currentSource.value?.multiTags ? [...selectedTags.value, id] : [id];
+}
+function resetFilters() { selectedTags.value = []; order.value = 'source'; applyFilters(); }
+async function loadFilters() {
+  const current = generation, source = sourceId.value, sequence = ++filterSequence;
+  verification.clearPending('source-filters'); filtersLoading.value = true; filtersError.value = ''; filterChallenges.value = [];
+  try {
+    const response = await api.getCatalogueFilters(source);
+    if (current === generation && sequence === filterSequence && !disposed) filters.value = response;
+  } catch (exc) {
+    if (current !== generation || sequence !== filterSequence || disposed) return;
+    const challenge = challengeFromError(exc);
+    if (challenge) {
+      filterChallenges.value = [challenge];
+      verification.waitForVerification('source-filters', [challenge], async () => { if (current === generation && !disposed) await loadFilters(); });
+    } else filtersError.value = exc instanceof Error ? exc.message : 'Filtres indisponibles.';
+  } finally { if (current === generation && sequence === filterSequence) filtersLoading.value = false; }
+}
+async function fetchPage(cursor?: string | null, append = false) {
+  const current = generation, source = sourceId.value, sequence = ++pageSequence;
+  const params = {mode: mode.value, q: query.value.trim(), tags: [...selectedTags.value], order: order.value, cursor: cursor || undefined};
+  verification.clearPending('source-page'); loading.value = true; pageError.value = ''; pageChallenges.value = [];
+  if (!append) { results.value = []; nextCursor.value = null; }
+  try {
+    const response = await api.browseCatalogue(source, params);
+    if (current !== generation || sequence !== pageSequence || disposed) return;
+    const combined = append ? [...results.value, ...response.results] : response.results;
+    results.value = combined.filter((item, index) => combined.findIndex(x => x.url === item.url) === index);
+    nextCursor.value = response.nextCursor; queryScope.value = response.queryScope;
+  } catch (exc) {
+    if (current !== generation || sequence !== pageSequence || disposed) return;
+    const challenge = challengeFromError(exc);
+    if (challenge) {
+      pageChallenges.value = [challenge];
+      verification.waitForVerification('source-page', [challenge], async () => { if (current === generation && sequence === pageSequence && !disposed) await fetchPage(cursor, append); });
+    } else pageError.value = exc instanceof Error ? exc.message : 'Catalogue indisponible.';
+  } finally { if (current === generation && sequence === pageSequence) loading.value = false; }
+}
+async function readRoute() {
+  generation++; pageSequence++; filterSequence++;
+  verification.clearPending('source-page'); verification.clearPending('source-filters');
+  pageChallenges.value = []; filterChallenges.value = []; pageError.value = ''; filtersError.value = '';
+  results.value = []; nextCursor.value = null; loading.value = false;
+  mode.value = typeof route.query.mode === 'string' ? route.query.mode : 'latest';
+  query.value = typeof route.query.q === 'string' ? route.query.q : '';
+  order.value = typeof route.query.order === 'string' ? route.query.order : 'source';
+  selectedTags.value = (Array.isArray(route.query.tags) ? route.query.tags : route.query.tags ? [route.query.tags] : []).filter((t): t is string => typeof t === 'string');
+  appliedCriteria.value = criteria.value;
+  filters.value = {tags: [], orders: [{id: 'source', label: 'Ordre de la source'}]};
+  if (currentSource.value?.isEnabled) await Promise.all([loadFilters(), fetchPage()]);
+}
+function refreshCatalogue() { applyFilters(); }
+watch(() => route.fullPath, () => { void readRoute(); });
+onMounted(async () => { await loadSources(); await readRoute(); });
+onUnmounted(() => { disposed = true; generation++; verification.clearPending('source-page'); verification.clearPending('source-filters'); });
 </script>
-
 <style scoped>
-.sources-view {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 30px 24px 60px;
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-}
-
-.view-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.subtitle {
-  color: var(--text-muted);
-  font-size: 0.95rem;
-}
-
-.search-bar-row {
-  display: flex;
-  gap: 14px;
-  padding: 16px 20px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.input-wrapper {
-  flex: 1;
-  min-width: 260px;
-}
-
-.source-select {
-  padding: 12px 16px;
-  background: rgba(16, 21, 34, 0.8);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  color: var(--text-main);
-  font-size: 0.95rem;
-  outline: none;
-}
-
-.results-section {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.results-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.anime-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 20px;
-}
-
-.empty-state,
-.initial-state,
-.loading-state {
-  padding: 80px 20px;
-  text-align: center;
-  color: var(--text-muted);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-}
+.sources-view { max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; padding: 8px 0 32px; }
+.input, select { min-height: 42px; padding: 10px 14px; background: var(--input-bg, var(--panel)); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-md, 10px); font: inherit; font-size: 14px; }
+.input { width: 100%; }
+.input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.source-heading, .source-identity, .catalogue-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.source-heading h1 { margin: 0 0 8px; font-size: 30px; }
+.source-heading p, .source-identity p, .source-hint, .source-empty { color: var(--muted); line-height: 1.5; }
+.source-group h2 { font-size: 19px; margin-bottom: 14px; }
+.source-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 370px), 1fr)); gap: 16px; }
+.source-card { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius-lg); padding: 20px; }
+.source-identity { justify-content: flex-start; flex-wrap: nowrap; }
+.source-identity h3 { margin: 0 0 6px; font-size: 18px; }
+.source-identity p { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.source-avatar { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; background: var(--panel-subtle); border-radius: 12px; font-weight: 800; color: var(--accent); }
+.source-card-actions, .catalogue-tabs, .catalogue-tools, .tag-options { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.source-card-actions { margin-top: 18px; }
+.catalogue-controls { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); }
+.catalogue-search { display: flex; gap: 10px; margin-bottom: 14px; }
+.catalogue-search input { flex: 1; min-width: 0; }
+.catalogue-tools label { display: flex; gap: 10px; align-items: center; }
+.source-filters { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+.tag-group { display: flex; flex-direction: column; gap: 10px; }
+.tag-option { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 13px; }
+.tag-option.selected { border-color: var(--accent); background: var(--panel-subtle); }
+.anime-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 20px; }
+.catalogue-result-heading h2 { font-size: 20px; }
+.catalogue-result-heading span { color: var(--muted); font-size: 13px; }
+.catalogue-more { align-self: center; }
+.catalogue-error { color: var(--yellow, #d9a441); }
+.source-back { color: var(--muted); text-decoration: none; }
+@media (max-width: 600px) { .anime-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .catalogue-search { flex-wrap: wrap; } .catalogue-search input { flex-basis: 100%; } }
 </style>

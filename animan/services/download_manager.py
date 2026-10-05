@@ -1,4 +1,6 @@
+from animan.services.source_http import source_http, VerificationRequired, RateLimited, PROFILE
 import asyncio
+from animan.services.background import spawn
 import json
 import logging
 import math
@@ -6,26 +8,31 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import xml.sax.saxutils as saxutils
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from animan.config import settings
-from animan.models.download_task import DownloadTask, DownloadStatus, format_bytes
+from animan.models.download_task import DownloadTask, DownloadStatus, format_bytes, ensure_utc
 from animan.services.library_service import library_service
 from animan.services.proxy_service import proxy_service
 from animan.services.scraping_service import scraping_service
 from animan.services.voiranime_service import voiranime_service
 from animan.services.verification_service import verification_service, VerificationResult
 from animan.services.extractors import extractor_registry
-from animan.security import is_safe_path
+from animan.services.subtitle_service import normalize_subtitles, subtitle_extension, subtitle_language
+from animan.security import is_safe_path, is_safe_url
 
 logger = logging.getLogger("animan.download_manager")
+
+class SubtitleError(ValueError):
+    """A known subtitle track could not be downloaded or validated."""
 
 class ResolvedVideoInfo:
     def __init__(self):
@@ -66,29 +73,12 @@ class DownloadManagerService:
         timeout: Any = 10.0,
         follow_redirects: bool = True,
     ) -> httpx.AsyncClient:
-        proxy_val = proxy or proxy_service.get_random_proxy()
-        try:
-            return httpx.AsyncClient(
-                headers=headers,
-                proxy=proxy_val,
-                timeout=timeout,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-            )
-        except Exception as e:
-            logger.warning("[download_manager] HTTP proxy client init error (%s): %s - falling back to direct connection without proxy", proxy_val, e)
-            return httpx.AsyncClient(
-                headers=headers,
-                timeout=timeout,
-                follow_redirects=follow_redirects,
-                verify=settings.SSL_VERIFY,
-                trust_env=False,
-            )
+        return source_http.async_client(headers=headers, timeout=timeout, follow_redirects=follow_redirects)
 
     def _trigger_process_queue(self):
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.process_queue())
+            spawn(self.process_queue(), name="process-queue")
         except RuntimeError:
             pass
 
@@ -130,15 +120,28 @@ class DownloadManagerService:
     def init_from_db(self):
         try:
             unfinished = library_service.get_unfinished_tasks()
-            for entity in unfinished:
-                task = entity.to_task()
+            restored = [entity.to_task() for entity in unfinished]
+            for task in restored:
+                if task.status == DownloadStatus.VERIFICATION_REQUIRED and task.verificationUrl:
+                    source_http.state(task.verificationUrl).blocked_url = task.verificationUrl
+            destinations = {}
+            for task in restored:
+                if task.savePath:
+                    destinations.setdefault(task.savePath, set()).add(task.downloadPageUrl or task.fileUrl)
+            conflicts = {path for path, urls in destinations.items() if len(urls) > 1}
+            for task in restored:
+                if task.savePath in conflicts:
+                    self._pause_destination_conflict(task)
+                    self.tasks[task.id] = task
+                    self.task_order.append(task.id)
+                    continue
                 # Vérifier si le fichier final est en réalité déjà complet et valide sur disque
                 if task.savePath:
                     out_path = Path(task.savePath)
                     part_path = Path(task.savePath + ".part")
                     if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
                         verif = verification_service.verify_file(str(out_path), task.animeName, task.fileName)
-                        if verif.valid:
+                        if verif.valid and not self._has_pending_subtitles(task):
                             task.status = DownloadStatus.COMPLETED
                             task.progress = 100.0
                             task.downloadedBytes = out_path.stat().st_size
@@ -147,7 +150,7 @@ class DownloadManagerService:
                             task.videoDuration = verif.duration
                             task.error = None
                             library_service.save_task(task)
-                            library_service.mark_as_downloaded(task.downloadPageUrl or "", task.animeName, task.episodeNumber, "")
+                            library_service.mark_as_downloaded(task.animeUrl or task.downloadPageUrl or "", task.animeName, task.episodeNumber, task.version)
                             self.tasks[task.id] = task
                             self.task_order.append(task.id)
                             continue
@@ -176,6 +179,7 @@ class DownloadManagerService:
             "globalSpeedLimit": self.global_speed_limit,
             "plexOrganization": self.plex_organization,
             "selectedUserAgent": proxy_service.get_selected_user_agent(),
+            "networkProfile": PROFILE,
             "voiranimeDefaultServer": self.voiranime_default_server,
             "ffmpegAvailable": self.is_ffmpeg_available(),
             "proxy": proxy_service.get_proxy_settings(),
@@ -217,15 +221,49 @@ class DownloadManagerService:
     # Vérification Doublon & Taille distante
     # -------------------------------------------------------------------------
 
-    def check_existing_file(self, anime_name: str, file_name: str, episode_number: int) -> Optional[Path]:
+    def _pause_destination_conflict(self, task):
+        task.paused = True
+        task.status = DownloadStatus.PAUSED
+        task.speed = 0
+        task.error = "Plusieurs liens partagent ce fichier. Relancez la version souhaitée depuis la fiche animé."
+        library_service.save_task(task)
+        self.broadcast_update(task)
+
+    def _has_destination_conflict(self, task):
+        return bool(task.savePath and any(
+            other.id != task.id and other.savePath == task.savePath
+            and other.status != DownloadStatus.CANCELLED
+            and (other.downloadPageUrl or other.fileUrl) != (task.downloadPageUrl or task.fileUrl)
+            for other in self.tasks.values()))
+
+    def _active_episode_task(self, url: str, source: str, version: str):
+        active = {DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.SCHEDULED,
+                  DownloadStatus.PAUSED, DownloadStatus.RETRYING, DownloadStatus.MUXING}
+        return next((task for task in self.tasks.values()
+                     if task.status in active and task.downloadPageUrl == url
+                     and task.source == source and task.version == version), None)
+
+    def _version_suffix(self, version: str) -> str:
+        clean = self.sanitize_file_name(version) if version else ""
+        return f" [{clean}]" if clean else ""
+
+    def _versioned_filename(self, name: str, version: str) -> str:
+        suffix = self._version_suffix(version)
+        path = Path(name)
+        if suffix and not path.stem.endswith(suffix):
+            return f"{path.stem}{suffix}{path.suffix or '.mp4'}"
+        return name
+
+    def check_existing_file(self, anime_name: str, file_name: str, episode_number: int, version: str = "") -> Optional[Path]:
         if not anime_name or not file_name:
             return None
 
+        file_name = self._versioned_filename(file_name, version)
         clean_anime = self.sanitize_file_name(anime_name)
         if self.plex_organization:
             anime_dir = Path(self.download_dir) / clean_anime / "Season 01"
             ext = Path(file_name).suffix or ".mp4"
-            final_name = f"{clean_anime} - S01E{episode_number:02d}{ext}"
+            final_name = f"{clean_anime} - S01E{episode_number:02d}{self._version_suffix(version)}{ext}"
         else:
             anime_dir = Path(self.download_dir) / clean_anime
             final_name = self.sanitize_file_name(file_name)
@@ -269,6 +307,8 @@ class DownloadManagerService:
                         cl = resp.headers.get("Content-Length")
                         if cl and cl.isdigit() and int(cl) > 1024:
                             return int(cl)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -283,8 +323,12 @@ class DownloadManagerService:
                     cl2 = range_resp.headers.get("Content-Length")
                     if cl2 and cl2.isdigit() and int(cl2) > 0 and range_resp.status_code == 200:
                         return int(cl2)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Error in get_remote_file_size for %s: %s", url, e)
         return -1
@@ -365,6 +409,8 @@ class DownloadManagerService:
                         cl = hr.headers.get("Content-Length")
                         if cl and cl.isdigit() and int(cl) > 0:
                             return int(cl)
+                    except VerificationRequired:
+                        raise
                     except Exception:
                         pass
                     return -1
@@ -378,6 +424,8 @@ class DownloadManagerService:
                 if total_duration > 0:
                     return int((1_800_000 * total_duration) / 8)
 
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("Error in estimate_hls_size for %s: %s", m3u8_url, e)
 
@@ -471,6 +519,8 @@ class DownloadManagerService:
                             if cs.base_url and u_host in cs.base_url.lower():
                                 matched_container = cs
                                 break
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -488,6 +538,8 @@ class DownloadManagerService:
                     if matched_container and not is_known_embed:
                         try:
                             video_sources = await matched_container.get_episode_sources(download_page_url)
+                        except VerificationRequired:
+                            raise
                         except Exception as e:
                             logger.debug("[download_manager] Error getting episode sources: %s", e)
                             video_sources = []
@@ -536,25 +588,18 @@ class DownloadManagerService:
                             if cand_res and cand_res.get("videoUrl"):
                                 resolved = cand_res
                                 break
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             pass
 
                     if resolved and resolved.get("videoUrl"):
                         dl_info = resolved
                     else:
-                        clean_direct = target_url.split("#")[0]
-                        dl_info = {
-                            "videoUrl": clean_direct,
-                            "serverType": "imported",
-                            "selectedQuality": preferred_quality or "HD",
-                            "videoQualities": json.dumps({"HD": clean_direct}),
-                        }
+                        raise ValueError("Aucun flux vidéo résolu pour cette extension.")
                     info.server_type = dl_info.get("serverType", "imported")
                     info.available_servers = avail_servers if avail_servers else [info.server_type]
-                    if qualities:
-                        info.video_qualities_json = json.dumps(qualities)
-                    else:
-                        info.video_qualities_json = dl_info.get("videoQualities", "{}")
+                    info.video_qualities_json = dl_info.get("videoQualities", "{}")
                     info.selected_server = info.server_type
                     info.selected_quality = dl_info.get("selectedQuality", "HD")
                     if dl_info.get("size"):
@@ -574,6 +619,8 @@ class DownloadManagerService:
                     if isinstance(raw_avail, str):
                         try:
                             info.available_servers = json.loads(raw_avail)
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             info.available_servers = []
                     elif isinstance(raw_avail, list):
@@ -664,7 +711,7 @@ class DownloadManagerService:
 
                 info.direct_url = dl_info.get("videoUrl", "")
                 info.subtitle_url = dl_info.get("subtitleUrl", "")
-                info.subtitles_json = dl_info.get("subtitles", "[]")
+                info.subtitles_json = json.dumps(normalize_subtitles(dl_info.get("subtitles", []), download_page_url))
 
                 # Si la taille n'est pas encore déterminée
                 if info.size <= 0 and info.direct_url:
@@ -684,6 +731,8 @@ class DownloadManagerService:
                     self.resolved_info_cache[cache_key] = info
 
                 return info
+            except VerificationRequired:
+                raise
             except Exception as e:
                 logger.error("Error in get_or_resolve_episode_info: %s", e)
                 return None
@@ -705,7 +754,13 @@ class DownloadManagerService:
         selected_server: Optional[str] = None,
         selected_quality: Optional[str] = None,
         source: str = "french-manga",
+        version: str = "",
+        anime_url: str = "",
     ) -> DownloadTask:
+        existing_task = self._active_episode_task(download_page_url, source, version)
+        if existing_task:
+            return existing_task
+        file_name = self._versioned_filename(file_name, version)
         cache_key = f"{download_page_url}::{source}::{selected_server or ''}::{selected_quality or ''}"
         cached = self.resolved_info_cache.get(cache_key)
         if not cached and not (selected_server or selected_quality):
@@ -713,15 +768,17 @@ class DownloadManagerService:
         initial_total_bytes = cached.size if cached and cached.size > 0 else 0
         resolved_subs = cached.subtitles_json if cached else "[]"
 
-        now = datetime.now(timezone.utc) if (scheduled_start_time and scheduled_start_time.tzinfo) else datetime.now()
+        scheduled_start_time = ensure_utc(scheduled_start_time)
+        now = datetime.now(timezone.utc)
         is_scheduled = scheduled_start_time is not None and scheduled_start_time > now
         status = DownloadStatus.SCHEDULED if is_scheduled else DownloadStatus.PENDING
 
+        file_name = self._versioned_filename(file_name, version)
         clean_anime = self.sanitize_file_name(anime_name)
         if self.plex_organization:
             anime_dir = Path(self.download_dir) / clean_anime / "Season 01"
             ext = Path(file_name).suffix or ".mp4"
-            final_file_name = f"{clean_anime} - S01E{episode_number:02d}{ext}"
+            final_file_name = f"{clean_anime} - S01E{episode_number:02d}{self._version_suffix(version)}{ext}"
         else:
             anime_dir = Path(self.download_dir) / clean_anime
             final_file_name = self.sanitize_file_name(file_name)
@@ -749,6 +806,8 @@ class DownloadManagerService:
             selectedServer=selected_server,
             selectedQuality=selected_quality,
             source=source,
+            version=version,
+            animeUrl=anime_url,
         )
 
         self.tasks[task.id] = task
@@ -778,24 +837,27 @@ class DownloadManagerService:
             if not url:
                 continue
             ep_source = ep.get("source") or source
-            name = ep.get("fileName", f"{anime_name} - Episode {ep_num}.mp4")
+            version = ep.get("version") or ""
+            if self._active_episode_task(url, ep_source, version):
+                continue
+            name = self._versioned_filename(ep.get("fileName", f"{anime_name} - Episode {ep_num}.mp4"), version)
             sub_url = ep.get("subtitleUrl")
             dl_subs = str(ep.get("downloadSubtitles", "false")).lower() == "true"
             sel_server = ep.get("selectedServer")
             sel_quality = ep.get("selectedQuality")
 
             # Check duplicate
-            existing = self.check_existing_file(anime_name, name, ep_num)
+            existing = self.check_existing_file(anime_name, name, ep_num, version)
             if existing and existing.exists() and existing.stat().st_size > 1024 * 1024:
                 verif = verification_service.verify_file(str(existing), anime_name, name)
                 if verif.valid:
                     logger.info("Batch: %s Ep%d already exists and is valid (%s), skipping",
                                 anime_name, ep_num, format_bytes(existing.stat().st_size))
-                    library_service.mark_as_downloaded(url, anime_name, ep_num, "")
+                    library_service.mark_as_downloaded(ep.get("animeUrl") or url, anime_name, ep_num, version)
                     continue
 
             if existing:
-                cache_key = f"{url}::{sel_server or ''}::{sel_quality or ''}"
+                cache_key = f"{url}::{ep_source}::{sel_server or ''}::{sel_quality or ''}"
                 cached = self.resolved_info_cache.get(cache_key)
                 if not cached and not (sel_server or sel_quality):
                     cached = self.resolved_info_cache.get(url)
@@ -817,20 +879,21 @@ class DownloadManagerService:
                 except Exception:
                     pass
 
-            cache_key = f"{url}::{sel_server or ''}::{sel_quality or ''}"
+            cache_key = f"{url}::{ep_source}::{sel_server or ''}::{sel_quality or ''}"
             cached = self.resolved_info_cache.get(cache_key)
             if not cached and not (sel_server or sel_quality):
                 cached = self.resolved_info_cache.get(url)
             initial_total_bytes = cached.size if cached and cached.size > 0 else 0
             resolved_subs = cached.subtitles_json if cached else "[]"
 
-            now = datetime.now(timezone.utc) if (sched_time and sched_time.tzinfo) else datetime.now()
+            sched_time = ensure_utc(sched_time)
+            now = datetime.now(timezone.utc)
             is_scheduled = sched_time is not None and sched_time > now
             status = DownloadStatus.SCHEDULED if is_scheduled else DownloadStatus.PENDING
 
             if self.plex_organization:
                 ext = Path(name).suffix or ".mp4"
-                final_file_name = f"{clean_anime} - S01E{ep_num:02d}{ext}"
+                final_file_name = f"{clean_anime} - S01E{ep_num:02d}{self._version_suffix(version)}{ext}"
             else:
                 final_file_name = self.sanitize_file_name(name)
 
@@ -853,6 +916,8 @@ class DownloadManagerService:
                 selectedServer=sel_server,
                 selectedQuality=sel_quality,
                 source=ep_source,
+                version=version,
+                animeUrl=ep.get("animeUrl") or "",
             )
 
             self.tasks[task.id] = task
@@ -898,6 +963,12 @@ class DownloadManagerService:
             return True
         return False
 
+    def resume_verified_domain(self, domain: str) -> int:
+        ids = [task.id for task in self.tasks.values()
+               if task.status == DownloadStatus.VERIFICATION_REQUIRED
+               and urlparse(task.verificationUrl or "").hostname == domain]
+        return sum(self.resume_download(task_id) for task_id in ids)
+
     def resume_download(self, task_id: str) -> bool:
         t = self.tasks.get(task_id)
         if not t:
@@ -908,6 +979,14 @@ class DownloadManagerService:
                 if t.id not in self.task_order:
                     self.task_order.append(t.id)
 
+        if t and t.status == DownloadStatus.VERIFICATION_REQUIRED:
+            if not t.verificationUrl or source_http.state(t.verificationUrl).blocked_url:
+                return False
+            t.verificationUrl = None
+            t.status = DownloadStatus.PAUSED
+        if t and self._has_destination_conflict(t):
+            self._pause_destination_conflict(t)
+            return False
         if t and t.status in [DownloadStatus.PAUSED, DownloadStatus.FAILED, DownloadStatus.CANCELLED, DownloadStatus.COMPLETED]:
             t.paused = False
             t.cancelled = False
@@ -921,7 +1000,7 @@ class DownloadManagerService:
                 out_path = Path(t.savePath)
                 if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
                     verif = verification_service.verify_file(str(out_path), t.animeName, t.fileName)
-                    if verif.valid:
+                    if verif.valid and not self._has_pending_subtitles(t):
                         t.status = DownloadStatus.COMPLETED
                         t.progress = 100.0
                         t.downloadedBytes = out_path.stat().st_size
@@ -930,7 +1009,7 @@ class DownloadManagerService:
                         t.videoDuration = verif.duration
                         self.broadcast_update(t)
                         library_service.save_task(t)
-                        library_service.mark_as_downloaded(t.downloadPageUrl or "", t.animeName, t.episodeNumber, "")
+                        library_service.mark_as_downloaded(t.animeUrl or t.downloadPageUrl or "", t.animeName, t.episodeNumber, t.version)
                         return True
 
                 if part_path.exists() and part_path.stat().st_size > 0:
@@ -972,6 +1051,7 @@ class DownloadManagerService:
             DownloadStatus.RETRYING,
             DownloadStatus.SCHEDULED,
             DownloadStatus.PAUSED,
+            DownloadStatus.VERIFICATION_REQUIRED,
             DownloadStatus.MUXING,
         ]
         if t and t.status in cancellable_statuses:
@@ -1009,6 +1089,7 @@ class DownloadManagerService:
             DownloadStatus.RETRYING,
             DownloadStatus.SCHEDULED,
             DownloadStatus.PAUSED,
+            DownloadStatus.VERIFICATION_REQUIRED,
             DownloadStatus.MUXING
         ]
         cancelled_tasks = []
@@ -1078,6 +1159,9 @@ class DownloadManagerService:
             logger.warning("Error reloading DB tasks for resume: %s", e)
 
         for t in list(self.tasks.values()):
+            if self._has_destination_conflict(t):
+                self._pause_destination_conflict(t)
+                continue
             if t.status in [DownloadStatus.PAUSED, DownloadStatus.FAILED]:
                 t.paused = False
                 t.cancelled = False
@@ -1090,7 +1174,7 @@ class DownloadManagerService:
                     part_path = Path(t.savePath + ".part")
                     if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
                         verif = verification_service.verify_file(str(out_path), t.animeName, t.fileName)
-                        if verif.valid:
+                        if verif.valid and not self._has_pending_subtitles(t):
                             t.status = DownloadStatus.COMPLETED
                             t.progress = 100.0
                             t.downloadedBytes = out_path.stat().st_size
@@ -1099,7 +1183,7 @@ class DownloadManagerService:
                             t.videoDuration = verif.duration
                             self.broadcast_update(t)
                             library_service.save_task(t)
-                            library_service.mark_as_downloaded(t.downloadPageUrl or "", t.animeName, t.episodeNumber, "")
+                            library_service.mark_as_downloaded(t.animeUrl or t.downloadPageUrl or "", t.animeName, t.episodeNumber, t.version)
                             continue
                     elif part_path.exists() and part_path.stat().st_size > 0:
                         if t.totalBytes > 0 and part_path.stat().st_size > t.totalBytes:
@@ -1174,18 +1258,7 @@ class DownloadManagerService:
     # Vérification d'intégrité & Re-téléchargement
     # -------------------------------------------------------------------------
 
-    def verify_task(self, task_id: str) -> Optional[VerificationResult]:
-        task = self.get_task(task_id)
-        if not task:
-            return None
-
-        verif = verification_service.verify_file(
-            file_path_str=task.savePath,
-            anime_name=task.animeName,
-            file_name=task.fileName,
-            expected_size=task.totalBytes
-        )
-
+    def _apply_verification(self, task: DownloadTask, verif: VerificationResult) -> None:
         if verif.relocatedPath and verif.relocatedPath != task.savePath:
             task.savePath = verif.relocatedPath
 
@@ -1199,10 +1272,38 @@ class DownloadManagerService:
             self.tasks[task.id] = task
             self.broadcast_update(task)
 
+    def verify_task(self, task_id: str) -> Optional[VerificationResult]:
+        task = self.get_task(task_id)
+        if not task:
+            return None
+
+        verif = verification_service.verify_file(
+            file_path_str=task.savePath,
+            anime_name=task.animeName,
+            file_name=task.fileName,
+            expected_size=task.totalBytes
+        )
+        self._apply_verification(task, verif)
         return verif
 
-    def verify_all_completed(self) -> Dict[str, Any]:
-        """Vérifie l'intégrité de l'ensemble des téléchargements terminés."""
+    async def verify_task_async(self, task_id: str) -> Optional[VerificationResult]:
+        """Variante non bloquante : ffprobe/ffmpeg tournent dans un thread."""
+        task = self.get_task(task_id)
+        if not task:
+            return None
+
+        verif = await asyncio.to_thread(
+            verification_service.verify_file,
+            file_path_str=task.savePath,
+            anime_name=task.animeName,
+            file_name=task.fileName,
+            expected_size=task.totalBytes,
+        )
+        # Mutations d'état et broadcast SSE (asyncio.Queue) : uniquement dans la boucle
+        self._apply_verification(task, verif)
+        return verif
+
+    def _collect_completed_tasks(self) -> Dict[str, DownloadTask]:
         completed_tasks: Dict[str, DownloadTask] = {}
 
         # 1. Tâches en mémoire
@@ -1214,36 +1315,14 @@ class DownloadManagerService:
         for entity in library_service.get_history():
             if entity.id not in completed_tasks and entity.status in [DownloadStatus.COMPLETED.value, DownloadStatus.FAILED.value]:
                 completed_tasks[entity.id] = entity.to_task()
+        return completed_tasks
 
-        total = len(completed_tasks)
-        valid_count = 0
-        missing_count = 0
-        empty_count = 0
-        incomplete_count = 0
-        corrupted_count = 0
+    @staticmethod
+    def _summarize_verifications(pairs: List[Tuple[DownloadTask, VerificationResult]]) -> Dict[str, Any]:
+        valid_count = missing_count = empty_count = incomplete_count = corrupted_count = 0
         results_list = []
 
-        for task in completed_tasks.values():
-            verif = verification_service.verify_file(
-                file_path_str=task.savePath,
-                anime_name=task.animeName,
-                file_name=task.fileName,
-                expected_size=task.totalBytes
-            )
-
-            if verif.relocatedPath and verif.relocatedPath != task.savePath:
-                task.savePath = verif.relocatedPath
-
-            task.verificationStatus = verif.status
-            task.verifiedAt = datetime.now(timezone.utc)
-            task.videoDuration = verif.duration
-            task.verificationError = verif.error
-
-            library_service.save_task(task)
-            if task.id in self.tasks:
-                self.tasks[task.id] = task
-                self.broadcast_update(task)
-
+        for task, verif in pairs:
             if verif.valid:
                 valid_count += 1
             elif verif.status == "MISSING":
@@ -1271,7 +1350,7 @@ class DownloadManagerService:
             })
 
         return {
-            "total": total,
+            "total": len(pairs),
             "valid": valid_count,
             "missing": missing_count,
             "empty": empty_count,
@@ -1279,6 +1358,36 @@ class DownloadManagerService:
             "corrupted": corrupted_count,
             "results": results_list,
         }
+
+    def verify_all_completed(self) -> Dict[str, Any]:
+        """Vérifie l'intégrité de l'ensemble des téléchargements terminés."""
+        pairs: List[Tuple[DownloadTask, VerificationResult]] = []
+        for task in self._collect_completed_tasks().values():
+            verif = verification_service.verify_file(
+                file_path_str=task.savePath,
+                anime_name=task.animeName,
+                file_name=task.fileName,
+                expected_size=task.totalBytes
+            )
+            self._apply_verification(task, verif)
+            pairs.append((task, verif))
+        return self._summarize_verifications(pairs)
+
+    async def verify_all_completed_async(self) -> Dict[str, Any]:
+        """Variante non bloquante de verify_all_completed (ffprobe/ffmpeg dans des threads)."""
+        tasks = await asyncio.to_thread(self._collect_completed_tasks)
+        pairs: List[Tuple[DownloadTask, VerificationResult]] = []
+        for task in tasks.values():
+            verif = await asyncio.to_thread(
+                verification_service.verify_file,
+                file_path_str=task.savePath,
+                anime_name=task.animeName,
+                file_name=task.fileName,
+                expected_size=task.totalBytes,
+            )
+            self._apply_verification(task, verif)
+            pairs.append((task, verif))
+        return self._summarize_verifications(pairs)
 
     def redownload_task(self, task_id: str, force: bool = False) -> Optional[DownloadTask]:
         """Relance un téléchargement en reprenant si possible ou en nettoyant si corrompu."""
@@ -1366,12 +1475,17 @@ class DownloadManagerService:
                 return
 
             pending = [self.tasks[tid] for tid in self.task_order if tid in self.tasks and self.tasks[tid].status == DownloadStatus.PENDING]
-            for i in range(min(slots, len(pending))):
-                task = pending[i]
+            for task in pending:
+                if slots <= 0:
+                    break
+                if self._has_destination_conflict(task):
+                    self._pause_destination_conflict(task)
+                    continue
+                slots -= 1
                 task.status = DownloadStatus.DOWNLOADING
                 self.broadcast_update(task)
                 library_service.save_task(task)
-                asyncio.create_task(self._execute_download(task))
+                spawn(self._execute_download(task), name=f"download-{task.id}")
 
     # -------------------------------------------------------------------------
     # Exécution du téléchargement
@@ -1379,7 +1493,7 @@ class DownloadManagerService:
 
     async def _execute_download(self, task: DownloadTask):
         try:
-            max_retries = 15  # Tolérance robuste face aux coupures réseau et expirations CDN
+            max_retries = 5  # Tolérance robuste face aux coupures réseau et expirations CDN
             task.retryCount = 0
             need_resolve = True
 
@@ -1433,10 +1547,14 @@ class DownloadManagerService:
                                     if cs.base_url and u_host in cs.base_url.lower():
                                         matched_container = cs
                                         break
+                        except VerificationRequired:
+                            raise
                         except Exception:
                             pass
 
                         target_url = direct_url
+                        video_sources = []
+                        target = None
                         if matched_container and not is_known_embed:
                             video_sources = await matched_container.get_episode_sources(direct_url)
                             target = None
@@ -1475,6 +1593,8 @@ class DownloadManagerService:
                                 if cand_res and cand_res.get("videoUrl"):
                                     resolved = cand_res
                                     break
+                            except VerificationRequired:
+                                raise
                             except Exception:
                                 pass
 
@@ -1493,6 +1613,8 @@ class DownloadManagerService:
                         server_type = resolved.get("serverType", "imported")
                         task.selectedServer = server_type
                         task.directDownloadUrl = direct_url
+                        task.subtitlesJson = json.dumps(normalize_subtitles(resolved.get("subtitles", []), target_url))
+                        task.subtitleUrl = resolved.get("subtitleUrl") or task.subtitleUrl
                         if resolved.get("size") and task.totalBytes <= 0:
                             task.totalBytes = resolved["size"]
                     elif is_voir_anime:
@@ -1535,6 +1657,7 @@ class DownloadManagerService:
                         task.directDownloadUrl = direct_url
                         if not task.subtitleUrl and info.get("subtitleUrl"):
                             task.subtitleUrl = info["subtitleUrl"]
+                        task.subtitlesJson = json.dumps(normalize_subtitles(info.get("subtitles", []), task.fileUrl))
                     elif is_animepahe:
                         from animan.services.animepahe_service import animepahe_service
                         server_type = "kwik"
@@ -1575,7 +1698,7 @@ class DownloadManagerService:
                         if not task.subtitleUrl and info.get("subtitleUrl"):
                             task.subtitleUrl = info["subtitleUrl"]
                         if not task.subtitlesJson or task.subtitlesJson == "[]":
-                            task.subtitlesJson = info.get("subtitles", "[]")
+                            task.subtitlesJson = json.dumps(normalize_subtitles(info.get("subtitles", []), task.fileUrl))
                     else:
                         task.directDownloadUrl = direct_url
 
@@ -1596,7 +1719,29 @@ class DownloadManagerService:
                     await self._download_single_file(task, direct_url)
                     break
 
+                except VerificationRequired as exc:
+                    task.status = DownloadStatus.VERIFICATION_REQUIRED
+                    task.verificationUrl = exc.url
+                    task.error = str(exc)
+                    task.speed = 0
+                    self.broadcast_update(task)
+                    library_service.save_task(task)
+                    return
                 except Exception as e:
+                    if isinstance(e, RateLimited):
+                        # A large Retry-After should not consume all download attempts.
+                        task.status = DownloadStatus.PAUSED
+                        task.error = f"Limitation de débit ; réessayez après {int(e.retry_after)} secondes"
+                        task.speed = 0
+                        self.broadcast_update(task)
+                        library_service.save_task(task)
+                        return
+                    if isinstance(e, SubtitleError):
+                        task.status = DownloadStatus.FAILED
+                        task.error = str(e)
+                        self.broadcast_update(task)
+                        library_service.save_task(task)
+                        return
                     if task.cancelled:
                         task.status = DownloadStatus.CANCELLED
                         task.speed = 0
@@ -1733,6 +1878,8 @@ class DownloadManagerService:
                         if b"<html" in h or b"<!doctype" in h:
                             logger.warning("Corrupted final file (HTML) detected and deleted for %s", task.fileName)
                             output_path.unlink(missing_ok=True)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
 
@@ -1748,6 +1895,10 @@ class DownloadManagerService:
                     logger.info("Final file already exists and is valid for %s (%s)",
                                 task.fileName, format_bytes(output_path.stat().st_size))
                     part_path.unlink(missing_ok=True)
+                    if task.downloadSubtitles:
+                        await self._download_subtitles(task)
+                        await self._finalize_task(task)
+                        return
                     task.status = DownloadStatus.COMPLETED
                     task.progress = 100.0
                     task.verificationStatus = verif.status
@@ -1759,10 +1910,10 @@ class DownloadManagerService:
                     self.broadcast_update(task)
                     library_service.save_task(task)
                     library_service.mark_as_downloaded(
-                        task.downloadPageUrl or "",
+                        task.animeUrl or task.downloadPageUrl or "",
                         task.animeName,
                         task.episodeNumber,
-                        ""
+                        task.version
                     )
                     return
                 else:
@@ -1779,6 +1930,8 @@ class DownloadManagerService:
                         if b"<html" in h or b"<!doctype" in h:
                             logger.warning("Corrupted .part file (HTML) detected and deleted for %s", task.fileName)
                             part_path.unlink(missing_ok=True)
+                except VerificationRequired:
+                    raise
                 except Exception:
                     pass
             elif task.totalBytes and task.totalBytes > 0 and part_size > task.totalBytes:
@@ -2082,20 +2235,14 @@ class DownloadManagerService:
 
     async def _download_hls_stream(self, task: DownloadTask, m3u8_url: str):
         logger.info("HLS download for %s from %s", task.fileName, m3u8_url)
-        # Si le flux provient de Kwik / Owocdn HLS, le router via le proxy HLS local
-        # pour bénéficier du contournement Cloudflare TLS et du déchiffrement transparent AES-128
-        is_kwik_owocdn = any(d in m3u8_url for d in ["owocdn.top", "kwik.cx", "kwik."])
-        if is_kwik_owocdn and "/api/media/hls-proxy" not in m3u8_url:
-            from urllib.parse import quote
-            m3u8_url = f"http://127.0.0.1:{settings.PORT}/api/media/hls-proxy/playlist.m3u8?url={quote(m3u8_url)}"
-            logger.info("Routing AnimePahe HLS via local proxy: %s", task.fileName)
-
         if task.totalBytes <= 0:
             try:
                 est_sz = await self.estimate_hls_size(m3u8_url)
                 if est_sz > 0:
                     task.totalBytes = est_sz
                     self.broadcast_update(task)
+            except VerificationRequired:
+                raise
             except Exception:
                 pass
 
@@ -2134,11 +2281,32 @@ class DownloadManagerService:
                         raise ConnectionError(f"HTTP {sub_resp.status_code} on HLS sub-playlist")
                     playlist_text = sub_resp.text
 
-            segments = [
-                urljoin(sub_url, line.strip())
-                for line in playlist_text.splitlines()
-                if line.strip() and not line.strip().startswith("#")
-            ]
+            segments = []
+            encryption = []
+            current_key = None
+            sequence = 0
+            for line in playlist_text.splitlines():
+                line = line.strip()
+                if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
+                    sequence = int(line.split(":", 1)[1])
+                elif line.startswith("#EXT-X-KEY:"):
+                    attrs = dict(re.findall(r'(\w+)=("[^"\n]*"|[^,\n]*)', line.split(":", 1)[1]))
+                    method = attrs.get("METHOD", "NONE")
+                    if method == "NONE":
+                        current_key = None
+                    elif method == "AES-128" and attrs.get("URI"):
+                        key_url = urljoin(sub_url, attrs["URI"].strip('"'))
+                        iv = bytes.fromhex(attrs["IV"].removeprefix("0x").zfill(32)) if attrs.get("IV") else None
+                        if iv is not None and len(iv) != 16:
+                            raise ValueError("IV AES-128 HLS invalide")
+                        current_key = (key_url, iv)
+                    else:
+                        raise ValueError("Méthode de chiffrement HLS non prise en charge")
+                elif line and not line.startswith("#"):
+                    segments.append(urljoin(sub_url, line))
+                    encryption.append((current_key[0], current_key[1] or sequence.to_bytes(16, "big")) if current_key else None)
+                    sequence += 1
+            keys = {}
 
             if not segments:
                 raise ValueError("No segments found in HLS playlist")
@@ -2250,6 +2418,21 @@ class DownloadManagerService:
                             return
 
                         if seg_tmp.exists() and seg_tmp.stat().st_size > 0:
+                            if encryption[idx]:
+                                from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                                from cryptography.hazmat.primitives.padding import PKCS7
+                                key_url, iv = encryption[idx]
+                                if key_url not in keys:
+                                    key_response = await client.get(key_url)
+                                    key_response.raise_for_status()
+                                    if len(key_response.content) != 16:
+                                        raise ValueError("Clé AES-128 HLS invalide")
+                                    keys[key_url] = key_response.content
+                                decryptor = Cipher(algorithms.AES(keys[key_url]), modes.CBC(iv)).decryptor()
+                                plaintext = decryptor.update(seg_tmp.read_bytes()) + decryptor.finalize()
+                                unpadder = PKCS7(128).unpadder()
+                                plaintext = unpadder.update(plaintext) + unpadder.finalize()
+                                seg_tmp.write_bytes(plaintext)
                             seg_tmp.replace(seg_file)
                             completed_indices.add(idx)
                             seg_success = True
@@ -2257,6 +2440,8 @@ class DownloadManagerService:
                         else:
                             raise ConnectionError(f"Segment {idx} downloaded empty (0 bytes)")
 
+                    except (VerificationRequired, RateLimited):
+                        raise
                     except Exception as seg_err:
                         if seg_bytes_this_attempt > 0:
                             downloaded -= seg_bytes_this_attempt
@@ -2369,6 +2554,11 @@ class DownloadManagerService:
             task.throttleBytesWritten = 0
 
     async def _finalize_task(self, task: DownloadTask):
+        if task.cancelled or task.paused:
+            task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
+            library_service.save_task(task)
+            self.broadcast_update(task)
+            return
         task.progress = 100.0
         task.speed = 0
 
@@ -2377,7 +2567,20 @@ class DownloadManagerService:
             task.status = DownloadStatus.MUXING
             self.broadcast_update(task)
             library_service.save_task(task)
-            await asyncio.to_thread(self._mux_subtitles_with_ffmpeg, task)
+            try:
+                await asyncio.to_thread(self._mux_subtitles_with_ffmpeg, task)
+            except Exception as exc:
+                task.status = DownloadStatus.FAILED
+                task.error = f"Échec de fusion des sous-titres : {exc}"
+                self.broadcast_update(task)
+                library_service.save_task(task)
+                return
+
+        if task.cancelled or task.paused:
+            task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
+            library_service.save_task(task)
+            self.broadcast_update(task)
+            return
 
         # Vérification d'intégrité automatique du fichier téléchargé
         verif = await asyncio.to_thread(
@@ -2407,10 +2610,10 @@ class DownloadManagerService:
 
             # Progression
             library_service.mark_as_downloaded(
-                task.downloadPageUrl or "",
+                task.animeUrl or task.downloadPageUrl or "",
                 task.animeName,
                 task.episodeNumber,
-                ""
+                task.version
             )
             logger.info("Download completed and verified: %s (%s, duration: %s)", task.fileName, task.formattedTotalSize, verif.formattedDuration)
 
@@ -2427,105 +2630,166 @@ class DownloadManagerService:
     # Sous-titres & FFmpeg
     # -------------------------------------------------------------------------
 
+    def _has_pending_subtitles(self, task: DownloadTask) -> bool:
+        if not task.downloadSubtitles:
+            return False
+        if task.savePathSubtitle:
+            return True
+        try:
+            tracks = normalize_subtitles(task.subtitlesJson)
+        except (ValueError, TypeError):
+            return True
+        return not tracks or any(not track.get("muxed") for track in tracks)
+
     async def _download_subtitles(self, task: DownloadTask):
-        subs: List[Dict[str, str]] = []
-        if task.subtitlesJson:
-            try:
-                subs = json.loads(task.subtitlesJson)
-            except Exception:
-                pass
-
+        base_url = task.downloadPageUrl or task.fileUrl or task.directDownloadUrl or ""
+        try:
+            subs = normalize_subtitles(task.subtitlesJson, base_url)
+        except (ValueError, TypeError) as exc:
+            raise SubtitleError(f"Métadonnées de sous-titres invalides : {exc}") from exc
         if not subs and task.subtitleUrl:
-            subs.append({"url": task.subtitleUrl, "label": "Sous-titres", "lang": "fr"})
-
+            subs = normalize_subtitles([{"url": task.subtitleUrl}], base_url)
+        subs = [sub for sub in subs if not sub.get("muxed")]
         if not subs:
             return
 
         downloaded_paths = []
-        headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://vidzy.live/"}
-        proxy = proxy_service.get_random_proxy()
+        errors = []
 
-        async with self._create_async_client(headers=headers, proxy=proxy, timeout=15.0) as client:
-            for sub in subs:
-                url = sub.get("url", "")
-                label = sub.get("label", "Sous-titres")
-                if not url:
-                    continue
+        async def validate_request(request):
+            if not is_safe_url(str(request.url)):
+                raise ValueError("URL de sous-titres non autorisée")
 
+        headers = self.get_headers_for_url(base_url, task.selectedServer)
+        if base_url:
+            headers["Referer"] = base_url
+        async with self._create_async_client(headers=headers, timeout=15.0) as client:
+            client.event_hooks.setdefault("request", []).append(validate_request)
+            for index, sub in enumerate(subs):
+                if task.cancelled or task.paused:
+                    return
+                url, label = sub["url"], sub["label"]
                 try:
-                    ext = ".srt" if ".srt" in url else ".ass" if ".ass" in url else ".vtt"
-                    clean_lbl = re.sub(r'[<>:"/\\|?*]', "_", label)
-                    base_filename = re.sub(r'\.(mp4|mkv|avi)$', '', task.fileName)
-                    sub_name = f"{base_filename}.{clean_lbl}{ext}"
-                    sub_path = str(Path(task.savePath).parent / sub_name)
+                    # Validate here as well, so alternate HTTP client wrappers
+                    # cannot bypass the request hook.
+                    if not is_safe_url(url):
+                        raise ValueError("URL de sous-titres non autorisée")
+                    request_headers = dict(sub.get("headers") or {})
+                    if sub.get("referer"):
+                        request_headers["Referer"] = sub["referer"]
+                    resp = await client.get(url, headers=request_headers)
+                    resp.raise_for_status()
+                    if not resp.content or len(resp.content) > 10 * 1024 * 1024:
+                        raise ValueError("Sous-titres vides ou trop volumineux")
+                    ext = subtitle_extension(resp.content)
+                    clean_label = self.sanitize_file_name(str(label)) or "Sous-titres"
+                    sub_name = f"{Path(task.savePath).stem}.sub{index + 1}.{clean_label}{ext}"
+                    sub_path = Path(task.savePath).parent / sub_name
+                    if not is_safe_path(sub_path, [Path(task.savePath).parent]):
+                        raise ValueError("Chemin de sous-titres non autorisé")
+                    sub_path.write_bytes(resp.content)
+                    sub["path"] = str(sub_path)
+                    downloaded_paths.append(str(sub_path))
+                    logger.info("Subtitles downloaded: %s", sub_name)
+                except (VerificationRequired, RateLimited):
+                    raise
+                except Exception as exc:
+                    errors.append(f"{label}: {exc}")
+                    logger.warning("Error downloading subtitles %s: %s", label, exc)
 
-                    resp = await client.get(url)
-                    if resp.status_code == 200:
-                        with open(sub_path, "wb") as f:
-                            f.write(resp.content)
-                        downloaded_paths.append(sub_path)
-                        logger.info("Subtitles downloaded: %s", sub_name)
-                except Exception as e:
-                    logger.warning("Error downloading subtitles %s: %s", label, e)
-
-        if downloaded_paths:
-            task.savePathSubtitle = json.dumps(downloaded_paths)
+        task.subtitlesJson = json.dumps(subs)
+        task.savePathSubtitle = json.dumps(downloaded_paths) if downloaded_paths else None
+        if errors:
+            raise SubtitleError("Échec du téléchargement des sous-titres : " + "; ".join(errors))
 
     def is_ffmpeg_available(self) -> bool:
         return shutil.which("ffmpeg") is not None
 
     def _mux_subtitles_with_ffmpeg(self, task: DownloadTask):
         if not self.is_ffmpeg_available():
-            return
+            raise RuntimeError("FFmpeg indisponible")
         video_path = Path(task.savePath)
-        if not video_path.exists():
-            return
-
-        sub_paths = []
-        if task.savePathSubtitle:
-            try:
-                sub_paths = json.loads(task.savePathSubtitle)
-            except Exception:
-                sub_paths = [task.savePathSubtitle]
-
-        existing_subs = [Path(sp) for sp in sub_paths if Path(sp).exists()]
-        if not existing_subs:
-            return
-
-        base_name = re.sub(r"\.(mp4|mkv|avi)$", "", str(video_path))
-        output_path = f"{base_name}.mkv"
-
-        cmd = ["ffmpeg", "-y", "-i", str(video_path)]
-        for sf in existing_subs:
-            cmd.extend(["-i", str(sf)])
-
-        cmd.extend(["-map", "0:v", "-map", "0:a"])
-        for i in range(len(existing_subs)):
-            cmd.extend(["-map", str(i + 1)])
-
-        cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "srt"])
-
-        for i, sf in enumerate(existing_subs):
-            lbl = sf.stem.replace(video_path.stem, "").strip(".") or f"Sous-titres {i + 1}"
-            lang = "fre" if "fr" in lbl.lower() else "und"
-            cmd.extend([f"-metadata:s:s:{i}", f"language={lang}", f"-metadata:s:s:{i}", f"title={lbl}"])
-
-        cmd.append(output_path)
+        if not video_path.is_file():
+            raise ValueError("Vidéo introuvable")
 
         try:
-            logger.info("FFmpeg muxing with command: %s", " ".join(cmd))
-            ret = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if ret.returncode == 0 and Path(output_path).exists() and Path(output_path).stat().st_size > 0:
-                task.fileName = Path(output_path).name
-                task.savePath = output_path
-                task.savePathSubtitle = None
+            sub_paths = json.loads(task.savePathSubtitle or "[]")
+        except (ValueError, TypeError):
+            sub_paths = [task.savePathSubtitle]
+        if not isinstance(sub_paths, list):
+            sub_paths = [sub_paths]
+        existing_subs = [Path(sp) for sp in sub_paths if sp and Path(sp).is_file()]
+        if not existing_subs or len(existing_subs) != len(sub_paths):
+            raise ValueError("Fichier de sous-titres introuvable")
+        metadata = {s.get("path"): s for s in normalize_subtitles(task.subtitlesJson)}
+
+        original = verification_service.verify_file(str(video_path), expected_size=task.totalBytes)
+        if not original.valid:
+            raise ValueError(f"Vidéo source invalide : {original.error}")
+        probe_path = shutil.which("ffprobe")
+        if not probe_path:
+            raise RuntimeError("FFprobe requis pour valider les pistes fusionnées")
+
+        def probe(path):
+            result = subprocess.run([probe_path, "-v", "error", "-show_streams", "-of", "json", str(path)],
+                                    capture_output=True, text=True, check=True, timeout=30)
+            return json.loads(result.stdout).get("streams", [])
+
+        embedded = [s for s in probe(video_path) if s.get("codec_type") == "subtitle"]
+        output_path = video_path.with_suffix(".mkv")
+        if output_path != video_path and output_path.exists():
+            raise FileExistsError(f"Le fichier de sortie existe déjà : {output_path.name}")
+        with tempfile.NamedTemporaryFile(dir=video_path.parent, prefix=".animan-mux-", suffix=".mkv", delete=False) as temp:
+            staging = Path(temp.name)
+        try:
+            cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(video_path)]
+            for sf in existing_subs:
+                cmd.extend(["-i", str(sf)])
+            cmd.extend(["-map", "0:v", "-map", "0:a?", "-map", "0:s?",
+                        "-c:v", "copy", "-c:a", "copy", "-c:s", "copy"])
+            for index, stream in enumerate(embedded):
+                if stream.get("codec_name") == "mov_text":
+                    cmd.extend([f"-c:s:{index}", "srt"])
+            for index, sf in enumerate(existing_subs):
+                cmd.extend(["-map", f"{index + 1}:s:0"])
+                stream_index = len(embedded) + index
+                if sf.suffix.lower() == ".vtt":
+                    cmd.extend([f"-c:s:{stream_index}", "srt"])
+                track = metadata.get(str(sf), {})
+                title = track.get("label") or sf.stem
+                lang = subtitle_language(track.get("lang") or track.get("srclang"))
+                cmd.extend([f"-metadata:s:s:{stream_index}", f"language={lang}",
+                            f"-metadata:s:s:{stream_index}", f"title={title}"])
+            cmd.append(str(staging))
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip()[-1000:] or "FFmpeg a échoué")
+            verification = verification_service.verify_file(str(staging))
+            if not verification.valid:
+                raise ValueError(f"Vidéo fusionnée invalide : {verification.error}")
+            subtitles = [s for s in probe(staging) if s.get("codec_type") == "subtitle"]
+            if len(subtitles) != len(embedded) + len(existing_subs):
+                raise ValueError("Pistes de sous-titres manquantes après fusion")
+            if task.cancelled or task.paused:
+                return
+            staging.replace(output_path)
+            task.fileName = output_path.name
+            task.savePath = str(output_path)
+            task.totalBytes = task.downloadedBytes = output_path.stat().st_size
+            task.savePathSubtitle = None
+            tracks = normalize_subtitles(task.subtitlesJson)
+            for track in tracks:
+                if track.get("path") in sub_paths:
+                    track["muxed"] = True
+            task.subtitlesJson = json.dumps(tracks)
+            library_service.save_task(task)
+            if video_path != output_path:
                 video_path.unlink(missing_ok=True)
-                for sf in existing_subs:
-                    sf.unlink(missing_ok=True)
-                library_service.save_task(task)
-                logger.info("FFmpeg muxing succeeded: %s", Path(output_path).name)
-        except Exception as e:
-            logger.error("FFmpeg error: %s", e)
+            for sf in existing_subs:
+                sf.unlink(missing_ok=True)
+            logger.info("FFmpeg muxing succeeded: %s", output_path.name)
+        finally:
+            staging.unlink(missing_ok=True)
 
     # -------------------------------------------------------------------------
     # Plex / Jellyfin NFO
@@ -2607,12 +2871,10 @@ class DownloadManagerService:
     # -------------------------------------------------------------------------
 
     async def check_scheduled_tasks(self):
-        now_naive = datetime.now()
-        now_utc = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
         for t in self.tasks.values():
             if t.status == DownloadStatus.SCHEDULED and t.scheduledStartTime:
-                now = now_utc if t.scheduledStartTime.tzinfo else now_naive
-                if t.scheduledStartTime <= now:
+                if ensure_utc(t.scheduledStartTime) <= now:
                     t.status = DownloadStatus.PENDING
                     self.broadcast_update(t)
         await self.process_queue()

@@ -1,3 +1,4 @@
+from animan.services.source_http import source_http, VerificationRequired
 import html
 import logging
 import re
@@ -24,6 +25,8 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                 res = await container._fetch_html(url)
                 if res:
                     return res
+            except VerificationRequired:
+                raise
             except Exception as e:
                 logger.debug("[animesama_adapter] container._fetch_html error on %s: %s", url, e)
 
@@ -33,10 +36,12 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                 "User-Agent": proxy_service.get_user_agent(),
                 "Referer": getattr(container, "base_url", "https://anime-sama.fr/") + "/",
             }
-            async with httpx.AsyncClient(timeout=12.0, proxy=proxy, headers=headers, follow_redirects=True) as client:
+            async with source_http.async_client(timeout=12.0, proxy=proxy, headers=headers, follow_redirects=True) as client:
                 resp = await client.get(url)
                 if resp.status_code == 200:
                     return resp.text
+        except VerificationRequired:
+            raise
         except Exception as e:
             logger.debug("[animesama_adapter] Erreur fetch %s: %s", url, e)
         return ""
@@ -329,6 +334,8 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                     })
                 if sources:
                     return sources
+            except VerificationRequired:
+                raise
             except Exception as e:
                 logger.debug("[animesama_adapter] Error decoding servers fragment: %s", e)
 

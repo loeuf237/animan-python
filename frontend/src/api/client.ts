@@ -7,6 +7,7 @@ import type {
   HistoryItem,
   HomeFeedResponse,
   VideoStreamInfo,
+  SearchResponse, CatalogueSource, CatalogueFilters, CataloguePage,
 } from '@/types';
 
 class ApiError extends Error {
@@ -55,6 +56,20 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  getNetworkSessions() {
+    return request<{browsers: {name: string}[]; webviewAvailable: boolean; sessions: {domain: string; verificationRequired: boolean; usesProxy: boolean}[]}>('/api/network/sessions');
+  },
+  startNetworkVerification(domain: string, browser: string, mode: string) {
+    return request<{id: string; domain: string}>('/api/network/verification', {
+      method: 'POST', body: JSON.stringify({domain, browser, mode}),
+    });
+  },
+  completeNetworkVerification(id: string) {
+    return request<{success: boolean; resumed: number; domain: string}>(`/api/network/verification/${encodeURIComponent(id)}/complete`, {method: 'POST'});
+  },
+  cancelNetworkVerification(id: string) {
+    return request(`/api/network/verification/${encodeURIComponent(id)}`, {method: 'DELETE'});
+  },
   // --- Feed & Home ---
   async getHomeFeed(): Promise<HomeFeedResponse> {
     return request<HomeFeedResponse>('/api/home/feed');
@@ -73,6 +88,22 @@ export const api = {
   async searchAnime(query: string, source: string = 'all'): Promise<AnimeResult[]> {
     const q = `?q=${encodeURIComponent(query)}&source=${encodeURIComponent(source)}`;
     return request<AnimeResult[]>(`/api/search${q}`);
+  },
+
+  searchAnimeDetailed(query: string, source = 'all') {
+    return request<SearchResponse>(`/api/search?${new URLSearchParams({q: query, source, include_challenges: 'true'})}`);
+  },
+  getSources() {
+    return request<{sources: CatalogueSource[]}>('/api/sources');
+  },
+  getCatalogueFilters(source: string) {
+    return request<CatalogueFilters>(`/api/sources/${encodeURIComponent(source)}/filters`);
+  },
+  browseCatalogue(source: string, params: {mode: string; q: string; tags: string[]; order: string; cursor?: string}) {
+    const query = new URLSearchParams({mode: params.mode, q: params.q, order: params.order});
+    params.tags.forEach(tag => query.append('tags', tag));
+    if (params.cursor) query.set('cursor', params.cursor);
+    return request<CataloguePage>(`/api/sources/${encodeURIComponent(source)}/catalogue?${query}`);
   },
 
   async getAnimeDetail(url: string, source: string = 'french-manga'): Promise<AnimeDetailResponse> {
@@ -131,6 +162,7 @@ export const api = {
         animeName: payload.animeName || '',
         episodeNumber: parseInt(String(payload.episodeNumber), 10) || 0,
         version: payload.version || '',
+        watched: payload.watched,
       }),
     });
   },
@@ -168,6 +200,8 @@ export const api = {
   async startEpisodeDownload(payload: {
     animeName: string;
     episodeNumber: number | string;
+    version?: string;
+    animeUrl?: string;
     url: string;
     fileName?: string;
     subtitleUrl?: string;
@@ -184,6 +218,8 @@ export const api = {
         animeName: payload.animeName,
         episodeNumber: parseInt(String(payload.episodeNumber), 10) || 0,
         url: payload.url,
+        version: payload.version || '',
+        animeUrl: payload.animeUrl || '',
         fileName: payload.fileName,
         subtitleUrl: payload.subtitleUrl,
         downloadSubtitles: Boolean(payload.downloadSubtitles),
@@ -201,6 +237,8 @@ export const api = {
     source: string;
     episodes: {
       number: number | string;
+      version?: string;
+      animeUrl?: string;
       url: string;
       title?: string;
       fileName?: string;
@@ -422,6 +460,15 @@ export const api = {
     });
   },
 
+  async configureExtension(id: number | string, recipe: Record<string, unknown>): Promise<{success: boolean}> {
+    return request(`/api/extensions/${id}/recipe`, {method: 'PUT', body: JSON.stringify(recipe)});
+  },
+  async diagnoseExtension(id: number | string): Promise<{success: boolean; count: number; message: string}> {
+    return request(`/api/extensions/${id}/diagnose`, {method: 'POST'});
+  },
+  async refreshExtensions(): Promise<{success: boolean}> {
+    return request('/api/extensions/refresh', {method: 'POST'});
+  },
   async importExtensionRepo(url: string): Promise<{ success: boolean; repo_name?: string; count?: number }> {
     return request('/api/extensions/import-repo', {
       method: 'POST',

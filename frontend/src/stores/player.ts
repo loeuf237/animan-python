@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api } from '@/api/client';
+import { episodeKey } from '@/utils/episodes';
 import type { Episode, SubtitleTrack } from '@/types';
 
 export const usePlayerStore = defineStore('player', () => {
@@ -25,13 +26,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   const hasNext = computed(() => {
     if (!currentEpisode.value || !episodes.value.length) return false;
-    const idx = episodes.value.findIndex((e) => String(e.number) === String(currentEpisode.value?.number));
+    const idx = episodes.value.findIndex((e) => currentEpisode.value !== null && episodeKey(e) === episodeKey(currentEpisode.value));
     return idx >= 0 && idx < episodes.value.length - 1;
   });
 
   const hasPrev = computed(() => {
     if (!currentEpisode.value || !episodes.value.length) return false;
-    const idx = episodes.value.findIndex((e) => String(e.number) === String(currentEpisode.value?.number));
+    const idx = episodes.value.findIndex((e) => currentEpisode.value !== null && episodeKey(e) === episodeKey(currentEpisode.value));
     return idx > 0;
   });
 
@@ -98,7 +99,7 @@ export const usePlayerStore = defineStore('player', () => {
     animeUrl.value = url;
     source.value = src;
     currentEpisode.value = episode;
-    episodes.value = allEps;
+    episodes.value = allEps.filter((e) => (e.version || '') === (episode.version || ''));
     isOpen.value = true;
     selectedServer.value = 'auto';
     selectedQuality.value = 'HD';
@@ -118,7 +119,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function playNext() {
     if (!hasNext.value) return;
-    const idx = episodes.value.findIndex((e) => String(e.number) === String(currentEpisode.value?.number));
+    const idx = episodes.value.findIndex((e) => currentEpisode.value !== null && episodeKey(e) === episodeKey(currentEpisode.value));
     if (idx >= 0 && idx < episodes.value.length - 1) {
       currentEpisode.value = episodes.value[idx + 1];
       await resolveStream();
@@ -127,7 +128,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function playPrev() {
     if (!hasPrev.value) return;
-    const idx = episodes.value.findIndex((e) => String(e.number) === String(currentEpisode.value?.number));
+    const idx = episodes.value.findIndex((e) => currentEpisode.value !== null && episodeKey(e) === episodeKey(currentEpisode.value));
     if (idx > 0) {
       currentEpisode.value = episodes.value[idx - 1];
       await resolveStream();
