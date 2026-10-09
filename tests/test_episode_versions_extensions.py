@@ -173,7 +173,8 @@ async def test_source_http_blocks_redirect_to_private_host(isolated, monkeypatch
     monkeypatch.setattr('animan.services.aniyomi_container.source_http', transport)
     source = AniyomiContainerSource(SourceRecipe(pkg='test', base_url='https://source.example'))
     try:
-        assert await source._fetch_html('https://source.example') == ''
+        with pytest.raises(ValueError, match='URL source non autorisée'):
+            await source._fetch_html('https://source.example')
         assert len(calls) == 1 and 'non autorisée' in source.last_error
     finally:
         transport.close()

@@ -1,9 +1,11 @@
 from animan.services.source_http import source_http, VerificationRequired, RateLimited, PROFILE
 import asyncio
+import errno
 from animan.services.background import spawn
 import json
 import logging
 import math
+import os
 import re
 import shutil
 import socket
@@ -12,6 +14,7 @@ import tempfile
 import time
 import xml.sax.saxutils as saxutils
 from datetime import datetime, timezone
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urljoin, urlparse
@@ -27,12 +30,17 @@ from animan.services.voiranime_service import voiranime_service
 from animan.services.verification_service import verification_service, VerificationResult
 from animan.services.extractors import extractor_registry
 from animan.services.subtitle_service import normalize_subtitles, subtitle_extension, subtitle_language
+from animan.services.download_resume import (RESUME_OVERLAP, ResumeMismatch, read_metadata,
+                                            write_metadata, representation, response_range, prepare_hls_cache)
 from animan.security import is_safe_path, is_safe_url
 
 logger = logging.getLogger("animan.download_manager")
 
 class SubtitleError(ValueError):
     """A known subtitle track could not be downloaded or validated."""
+    def __init__(self, message: str, refresh_required: bool = False):
+        super().__init__(message)
+        self.refresh_required = refresh_required
 
 class ResolvedVideoInfo:
     def __init__(self):
@@ -1129,6 +1137,7 @@ class DownloadManagerService:
             if t.savePath:
                 out_p = Path(t.savePath)
                 Path(t.savePath + ".part").unlink(missing_ok=True)
+                Path(t.savePath + ".part.resume.json").unlink(missing_ok=True)
                 out_p.with_suffix(".tmp.mp4").unlink(missing_ok=True)
                 seg_d = out_p.parent / f".{out_p.stem}_segments"
                 if seg_d.exists():
@@ -1437,6 +1446,7 @@ class DownloadManagerService:
                 part_p = Path(task.savePath + ".part")
                 if part_p.exists() and part_p.is_file():
                     part_p.unlink()
+                Path(task.savePath + ".part.resume.json").unlink(missing_ok=True)
             except Exception as e:
                 logger.warning("Unable to delete corrupted file %s: %s", task.savePath, e)
 
@@ -1483,6 +1493,7 @@ class DownloadManagerService:
                     continue
                 slots -= 1
                 task.status = DownloadStatus.DOWNLOADING
+                task.phase = "resolving"
                 self.broadcast_update(task)
                 library_service.save_task(task)
                 spawn(self._execute_download(task), name=f"download-{task.id}")
@@ -1496,6 +1507,7 @@ class DownloadManagerService:
             max_retries = 5  # Tolérance robuste face aux coupures réseau et expirations CDN
             task.retryCount = 0
             need_resolve = True
+            skip_local = False
 
             while True:
                 if task.cancelled:
@@ -1510,7 +1522,20 @@ class DownloadManagerService:
                     library_service.save_task(task)
                     return
 
+                local_finalization = False
                 try:
+                    # Retry finalization locally before asking a possibly expired player
+                    # for another video URL. The file is still verified by the downloader.
+                    await asyncio.to_thread(self._recover_muxed_file, task)
+                    if not skip_local and task.savePath and Path(task.savePath).is_file():
+                        local = await asyncio.to_thread(verification_service.verify_file, task.savePath,
+                                                       expected_size=task.totalBytes or None)
+                        if local.valid:
+                            local_finalization = True
+                            await self._download_single_file(task, task.directDownloadUrl or task.fileUrl or "")
+                            return
+                    task.phase = "resolving"
+                    self.broadcast_update(task)
                     direct_url = task.fileUrl
                     clean_direct = (direct_url or "").split("#")[0].strip()
                     parsed_u = urlparse(clean_direct)
@@ -1613,7 +1638,7 @@ class DownloadManagerService:
                         server_type = resolved.get("serverType", "imported")
                         task.selectedServer = server_type
                         task.directDownloadUrl = direct_url
-                        task.subtitlesJson = json.dumps(normalize_subtitles(resolved.get("subtitles", []), target_url))
+                        self._update_resolved_subtitles(task, resolved.get("subtitles", []), target_url)
                         task.subtitleUrl = resolved.get("subtitleUrl") or task.subtitleUrl
                         if resolved.get("size") and task.totalBytes <= 0:
                             task.totalBytes = resolved["size"]
@@ -1655,9 +1680,9 @@ class DownloadManagerService:
                         server_type = info.get("serverType", "unknown")
                         chunks_json = info.get("videoChunks", "[]")
                         task.directDownloadUrl = direct_url
-                        if not task.subtitleUrl and info.get("subtitleUrl"):
+                        if (skip_local or not task.subtitleUrl) and info.get("subtitleUrl"):
                             task.subtitleUrl = info["subtitleUrl"]
-                        task.subtitlesJson = json.dumps(normalize_subtitles(info.get("subtitles", []), task.fileUrl))
+                        self._update_resolved_subtitles(task, info.get("subtitles", []), task.fileUrl)
                     elif is_animepahe:
                         from animan.services.animepahe_service import animepahe_service
                         server_type = "kwik"
@@ -1695,10 +1720,10 @@ class DownloadManagerService:
                         if not direct_url:
                             raise ValueError(f"Impossible d'extraire l'URL vidéo directe pour {task.fileName}")
                         task.directDownloadUrl = direct_url
-                        if not task.subtitleUrl and info.get("subtitleUrl"):
+                        if (skip_local or not task.subtitleUrl) and info.get("subtitleUrl"):
                             task.subtitleUrl = info["subtitleUrl"]
-                        if not task.subtitlesJson or task.subtitlesJson == "[]":
-                            task.subtitlesJson = json.dumps(normalize_subtitles(info.get("subtitles", []), task.fileUrl))
+                        if skip_local or not task.subtitlesJson or task.subtitlesJson == "[]":
+                            self._update_resolved_subtitles(task, info.get("subtitles", []), task.fileUrl)
                     else:
                         task.directDownloadUrl = direct_url
 
@@ -1728,6 +1753,10 @@ class DownloadManagerService:
                     library_service.save_task(task)
                     return
                 except Exception as e:
+                    if isinstance(e, (httpx.RequestError, httpx.HTTPStatusError)) and not isinstance(e, RateLimited):
+                        request = getattr(e, "request", None)
+                        if request is not None:
+                            task.verificationUrl = str(request.url)
                     if isinstance(e, RateLimited):
                         # A large Retry-After should not consume all download attempts.
                         task.status = DownloadStatus.PAUSED
@@ -1737,6 +1766,10 @@ class DownloadManagerService:
                         library_service.save_task(task)
                         return
                     if isinstance(e, SubtitleError):
+                        if local_finalization and e.refresh_required:
+                            skip_local = True
+                            need_resolve = True
+                            continue
                         task.status = DownloadStatus.FAILED
                         task.error = str(e)
                         self.broadcast_update(task)
@@ -1862,11 +1895,11 @@ class DownloadManagerService:
             self._trigger_process_queue()
 
     async def _download_single_file(self, task: DownloadTask, direct_url: str):
-        if not direct_url:
-            raise ValueError("URL directe introuvable")
-
+        task.phase = "video"
+        self.broadcast_update(task)
         output_path = Path(task.savePath)
         part_path = Path(task.savePath + ".part")
+        metadata_path = Path(task.savePath + ".part.resume.json")
 
         # 1. Gestion propre du fichier existant et reprise
         existing_len = 0
@@ -1921,6 +1954,9 @@ class DownloadManagerService:
                                    task.fileName, format_bytes(output_path.stat().st_size), verif.error)
                     output_path.unlink(missing_ok=True)
 
+        if not direct_url:
+            raise ValueError("URL directe introuvable")
+
         if part_path.exists():
             part_size = part_path.stat().st_size
             if part_size < 1024 * 1024:
@@ -1948,9 +1984,14 @@ class DownloadManagerService:
         timeout = httpx.Timeout(connect=20.0, read=60.0, write=30.0, pool=None)
         async with self._create_async_client(headers=headers, proxy=proxy, timeout=timeout) as client:
             req_headers = dict(headers)
+            req_headers["Accept-Encoding"] = "identity"
             is_resume = existing_len > 0
+            previous = read_metadata(metadata_path) if is_resume else {}
+            request_start = max(0, existing_len - RESUME_OVERLAP) if is_resume else 0
             if is_resume:
-                req_headers["Range"] = f"bytes={existing_len}-"
+                req_headers["Range"] = f"bytes={request_start}-"
+                if previous.get("validator"):
+                    req_headers["If-Range"] = previous["validator"]
                 logger.info("Resume attempt for %s from %s", task.fileName, format_bytes(existing_len))
 
             while True:
@@ -1959,18 +2000,22 @@ class DownloadManagerService:
                     if stream_resp.status_code == 416:
                         logger.warning("HTTP 416 (Range Not Satisfiable) for %s with existing_len=%s",
                                        task.fileName, format_bytes(existing_len))
-                        if part_path.exists():
+                        unsatisfied = re.fullmatch(r"bytes\s+\*/(\d+)",
+                                                   stream_resp.headers.get("Content-Range", ""), re.IGNORECASE)
+                        if part_path.exists() and unsatisfied and int(unsatisfied[1]) == existing_len:
                             verif_part = await asyncio.to_thread(
                                 verification_service.verify_file,
                                 file_path_str=str(part_path),
                                 anime_name=task.animeName,
-                                file_name=task.fileName
+                                file_name=task.fileName,
+                                expected_size=existing_len,
                             )
                             if verif_part.valid:
                                 logger.info(".part file is actually complete and valid for %s, finalizing", task.fileName)
                                 if output_path.exists():
                                     output_path.unlink(missing_ok=True)
                                 shutil.move(str(part_path), str(output_path))
+                                metadata_path.unlink(missing_ok=True)
                                 await self._finalize_task(task)
                                 return
                             else:
@@ -1980,7 +2025,13 @@ class DownloadManagerService:
                         existing_len = 0
                         is_resume = False
                         task.downloadedBytes = 0
+                        request_start = 0
+                        had_range = "Range" in req_headers
                         req_headers.pop("Range", None)
+                        req_headers.pop("If-Range", None)
+                        metadata_path.unlink(missing_ok=True)
+                        if had_range:
+                            continue
                         raise ConnectionError("HTTP 416 (Range Not Satisfiable): Plage invalide, re-résolution requise")
 
                     if stream_resp.status_code not in [200, 206]:
@@ -1996,30 +2047,29 @@ class DownloadManagerService:
                         logger.warning("Server does not support resume for %s, downloading from beginning", task.fileName)
                         existing_len = 0
                         is_resume = False
+                        request_start = 0
 
                     # Extraction et validation de la taille via Content-Range ou Content-Length
                     total_bytes = 0
-                    content_range = stream_resp.headers.get("Content-Range", "")
-                    if stream_resp.status_code == 206 and content_range:
-                        match = re.search(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", content_range, re.IGNORECASE)
-                        if match:
-                            range_start = int(match.group(1))
-                            total_str = match.group(3)
-                            if total_str != "*":
-                                total_bytes = int(total_str)
-
-                            if range_start != existing_len:
-                                logger.warning("Content-Range misalignment for %s: server at %d, local at %d",
-                                               task.fileName, range_start, existing_len)
-                                if part_path.exists() and part_path.stat().st_size > range_start:
-                                    with open(part_path, "r+b") as f_adj:
-                                        f_adj.truncate(range_start)
-                                existing_len = range_start
-
-                    if total_bytes == 0:
+                    response_length = None
+                    if stream_resp.status_code == 206:
+                        total_bytes, response_length = response_range(stream_resp.headers, request_start)
+                    else:
                         cl = stream_resp.headers.get("Content-Length")
                         if cl and cl.isdigit():
-                            total_bytes = int(cl) + existing_len
+                            total_bytes = response_length = int(cl)
+
+                    current = representation(stream_resp.headers, total_bytes)
+                    if is_resume and ((previous.get("validator") and current["validator"]
+                                       and previous["validator"] != current["validator"])
+                                      or (previous.get("total") and total_bytes
+                                          and previous["total"] != total_bytes)):
+                        # Keep the old partial intact until a full response is accepted.
+                        existing_len = request_start = 0
+                        is_resume = False
+                        req_headers.pop("Range", None)
+                        req_headers.pop("If-Range", None)
+                        continue
 
                     if total_bytes > 0:
                         task.totalBytes = total_bytes
@@ -2033,6 +2083,8 @@ class DownloadManagerService:
                         existing_len = 0
                         is_resume = False
                         req_headers.pop("Range", None)
+                        req_headers.pop("If-Range", None)
+                        request_start = 0
                         continue
 
                     accept_ranges = "bytes" in stream_resp.headers.get("Accept-Ranges", "").lower() or stream_resp.status_code == 206
@@ -2052,6 +2104,7 @@ class DownloadManagerService:
                                 if output_path.exists():
                                     output_path.unlink(missing_ok=True)
                                 shutil.move(str(part_path), str(output_path))
+                                metadata_path.unlink(missing_ok=True)
                                 await self._finalize_task(task)
                                 return
                             else:
@@ -2060,6 +2113,8 @@ class DownloadManagerService:
                                 existing_len = 0
                                 is_resume = False
                                 req_headers.pop("Range", None)
+                                req_headers.pop("If-Range", None)
+                                request_start = 0
                                 continue
 
                     # Check disk space
@@ -2076,55 +2131,87 @@ class DownloadManagerService:
                         task.speed_tracker.add_sample(downloaded)
                     last_time = time.time()
                     first_chunk = True
+                    overlap = b""
+                    if is_resume:
+                        with open(part_path, "rb") as existing_file:
+                            existing_file.seek(request_start)
+                            overlap = existing_file.read(existing_len - request_start)
+                    overlap_position = received = 0
+                    metadata_written = False
 
                     if task.status != DownloadStatus.DOWNLOADING:
                         task.status = DownloadStatus.DOWNLOADING
                         task.error = None
                         self.broadcast_update(task)
 
-                    with open(part_path, mode) as f:
-                        async for chunk in stream_resp.aiter_bytes(chunk_size=65536):
-                            # Vérification des premiers octets pour s'assurer que ce n'est pas du HTML
-                            if first_chunk and not is_resume:
-                                head_chk = chunk[:100].lower()
-                                if b"<html" in head_chk or b"<!doctype" in head_chk:
-                                    raise ValueError("Contenu reçu est du HTML et non un flux vidéo")
-                                first_chunk = False
+                    try:
+                        with open(part_path, mode) as f:
+                            async for chunk in stream_resp.aiter_bytes(chunk_size=65536):
+                                received += len(chunk)
+                                if response_length is not None and received > response_length:
+                                    raise ConnectionError("Media response exceeds its declared byte range")
+                                if overlap_position < len(overlap):
+                                    count = min(len(chunk), len(overlap) - overlap_position)
+                                    if chunk[:count] != overlap[overlap_position:overlap_position + count]:
+                                        raise ResumeMismatch("Media identity changed during resume")
+                                    overlap_position += count
+                                    chunk = chunk[count:]
+                                    if not chunk:
+                                        continue
+                                if not metadata_written:
+                                    write_metadata(metadata_path, current)
+                                    metadata_written = True
+                                # Vérification des premiers octets pour s'assurer que ce n'est pas du HTML
+                                if first_chunk and not is_resume:
+                                    head_chk = chunk[:100].lower()
+                                    if b"<html" in head_chk or b"<!doctype" in head_chk:
+                                        raise ValueError("Contenu reçu est du HTML et non un flux vidéo")
+                                    first_chunk = False
 
-                            if task.cancelled:
-                                task.status = DownloadStatus.CANCELLED
-                                task.reset_speed()
-                                task.downloadedBytes = downloaded
-                                self.broadcast_update(task)
-                                library_service.save_task(task)
-                                logger.info("Cancelled %s — .part file kept (%s)",
-                                            task.fileName, format_bytes(downloaded))
-                                return
-                            if task.paused:
-                                task.status = DownloadStatus.PAUSED
-                                task.reset_speed()
-                                task.downloadedBytes = downloaded
-                                self.broadcast_update(task)
-                                library_service.save_task(task)
-                                logger.info("Paused %s — progress saved (%s)",
-                                            task.fileName, format_bytes(downloaded))
-                                return
+                                if task.cancelled:
+                                    task.status = DownloadStatus.CANCELLED
+                                    task.reset_speed()
+                                    task.downloadedBytes = downloaded
+                                    self.broadcast_update(task)
+                                    library_service.save_task(task)
+                                    logger.info("Cancelled %s — .part file kept (%s)",
+                                                task.fileName, format_bytes(downloaded))
+                                    return
+                                if task.paused:
+                                    task.status = DownloadStatus.PAUSED
+                                    task.reset_speed()
+                                    task.downloadedBytes = downloaded
+                                    self.broadcast_update(task)
+                                    library_service.save_task(task)
+                                    logger.info("Paused %s — progress saved (%s)",
+                                                task.fileName, format_bytes(downloaded))
+                                    return
 
-                            f.write(chunk)
-                            downloaded += len(chunk)
+                                f.write(chunk)
+                                downloaded += len(chunk)
 
-                            # Throttling
-                            await self._apply_throttle(task, len(chunk))
+                                # Throttling
+                                await self._apply_throttle(task, len(chunk))
 
-                            now = time.time()
-                            task.update_progress(downloaded, now)
-                            if total_bytes > 0:
-                                task.progress = min(100.0, (downloaded / total_bytes) * 100.0)
+                                now = time.time()
+                                task.update_progress(downloaded, now)
+                                if total_bytes > 0:
+                                    task.progress = min(100.0, (downloaded / total_bytes) * 100.0)
 
-                            if now - last_time >= 0.5:
-                                last_time = now
-                                f.flush()
-                                self.broadcast_update(task)
+                                if now - last_time >= 0.5:
+                                    last_time = now
+                                    f.flush()
+                                    self.broadcast_update(task)
+                    except ResumeMismatch:
+                        logger.warning("Different media bytes after reconnect for %s; restarting safely", task.fileName)
+                        existing_len = request_start = 0
+                        is_resume = False
+                        req_headers.pop("Range", None)
+                        req_headers.pop("If-Range", None)
+                        continue
+
+                    if overlap_position < len(overlap) or (response_length is not None and received != response_length):
+                        raise ConnectionError("Incomplete media response during resume")
 
                     if total_bytes > 0 and downloaded < total_bytes:
                         raise ConnectionError(f"Incomplete download: {downloaded}/{total_bytes} bytes")
@@ -2140,6 +2227,7 @@ class DownloadManagerService:
                 output_path.unlink(missing_ok=True)
             shutil.move(str(part_path), str(output_path))
             logger.info(".part file renamed to final file: %s (%s)", output_path.name, format_bytes(downloaded))
+        metadata_path.unlink(missing_ok=True)
 
         # Sous-titres
         if task.downloadSubtitles:
@@ -2148,6 +2236,8 @@ class DownloadManagerService:
         await self._finalize_task(task)
 
     async def _download_mytv_chunks(self, task: DownloadTask, chunks: List[str]):
+        task.phase = "video"
+        self.broadcast_update(task)
         logger.info("myTV: %d chunk(s) to download for %s", len(chunks), task.fileName)
         base_path = re.sub(r"\.(mp4|mkv)$", "", task.savePath)
         chunk_files = []
@@ -2250,6 +2340,8 @@ class DownloadManagerService:
         await self._download_hls_segments_native(task, m3u8_url)
 
     async def _download_hls_segments_native(self, task: DownloadTask, m3u8_url: str):
+        task.phase = "video"
+        self.broadcast_update(task)
         logger.info("Segmented HLS download (with resume) for %s", task.fileName)
         output_path = Path(task.savePath)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2310,6 +2402,8 @@ class DownloadManagerService:
 
             if not segments:
                 raise ValueError("No segments found in HLS playlist")
+
+            prepare_hls_cache(segments_dir, sub_url, playlist_text)
 
             total_segments = len(segments)
 
@@ -2385,6 +2479,10 @@ class DownloadManagerService:
                                             last_time = now
                                             task.progress = min(99.0, (len(completed_indices) / total_segments) * 100.0)
                                             self.broadcast_update(task)
+                                declared_length = seg_resp.headers.get("Content-Length")
+                                if not (task.cancelled or task.paused) and declared_length is not None and (
+                                        not declared_length.isdigit() or int(declared_length) != seg_bytes_this_attempt):
+                                    raise ConnectionError(f"Incomplete HLS segment {idx}")
                         else:
                             seg_resp = await client.get(seg_url)
                             if seg_resp.status_code != 200:
@@ -2472,6 +2570,10 @@ class DownloadManagerService:
                 if now - last_time >= 0.5:
                     last_time = now
                     self.broadcast_update(task)
+
+        task.phase = "assembling"
+        task.reset_speed()
+        self.broadcast_update(task)
 
         # Assemblage final sans perte des segments HLS
         logger.info("Assembling %d HLS segments to %s", total_segments, task.fileName)
@@ -2565,6 +2667,7 @@ class DownloadManagerService:
         # Muxing FFmpeg si sous-titres présents
         if task.savePathSubtitle and self.is_ffmpeg_available():
             task.status = DownloadStatus.MUXING
+            task.phase = "muxing"
             self.broadcast_update(task)
             library_service.save_task(task)
             try:
@@ -2581,6 +2684,9 @@ class DownloadManagerService:
             library_service.save_task(task)
             self.broadcast_update(task)
             return
+
+        task.phase = "verifying"
+        self.broadcast_update(task)
 
         # Vérification d'intégrité automatique du fichier téléchargé
         verif = await asyncio.to_thread(
@@ -2630,6 +2736,60 @@ class DownloadManagerService:
     # Sous-titres & FFmpeg
     # -------------------------------------------------------------------------
 
+    def _update_resolved_subtitles(self, task: DownloadTask, value, base_url: str):
+        tracks = normalize_subtitles(value, base_url)
+        # A failed/empty re-extraction must not erase known pending subtitles.
+        if not tracks:
+            return
+        previous = {track["url"]: track for track in normalize_subtitles(task.subtitlesJson)}
+        for track in tracks:
+            cached = previous.get(track["url"], {})
+            for key in ("path", "muxed"):
+                if key in cached:
+                    track[key] = cached[key]
+        task.subtitlesJson = json.dumps(tracks)
+
+    def _recover_muxed_file(self, task: DownloadTask) -> bool:
+        """Recover a legacy task whose MP4 was removed after a successful MKV export.
+
+        Only the exact sibling destination is considered, and every requested track
+        must be present with its title and language. Never adopt an arbitrary MKV.
+        """
+        if not task.savePath or Path(task.savePath).exists():
+            return False
+        candidate = Path(task.savePath).with_suffix(".mkv")
+        if not candidate.is_file() or not shutil.which("ffprobe"):
+            return False
+        try:
+            tracks = normalize_subtitles(task.subtitlesJson)
+            if task.downloadSubtitles and not tracks:
+                return False
+            result = verification_service.verify_file(str(candidate), expected_size=task.totalBytes or None)
+            if not result.valid:
+                return False
+            probe = subprocess.run([shutil.which("ffprobe"), "-v", "error", "-show_streams",
+                                    "-of", "json", str(candidate)], capture_output=True,
+                                   text=True, check=True, timeout=30)
+            present = Counter((stream.get("tags", {}).get("title", ""),
+                               stream.get("tags", {}).get("language", "und"))
+                              for stream in json.loads(probe.stdout).get("streams", [])
+                              if stream.get("codec_type") == "subtitle")
+            expected = Counter((track["label"], subtitle_language(track.get("lang"))) for track in tracks)
+            if task.downloadSubtitles and any(present[key] < count for key, count in expected.items()):
+                return False
+            for track in tracks:
+                track["muxed"] = True
+            task.subtitlesJson = json.dumps(tracks)
+            task.savePathSubtitle = None
+            task.savePath = str(candidate)
+            task.fileName = candidate.name
+            task.totalBytes = task.downloadedBytes = candidate.stat().st_size
+            library_service.save_task(task)
+            return True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            logger.warning("Unable to recover existing mux for %s", task.fileName, exc_info=True)
+            return False
+
     def _has_pending_subtitles(self, task: DownloadTask) -> bool:
         if not task.downloadSubtitles:
             return False
@@ -2649,12 +2809,17 @@ class DownloadManagerService:
             raise SubtitleError(f"Métadonnées de sous-titres invalides : {exc}") from exc
         if not subs and task.subtitleUrl:
             subs = normalize_subtitles([{"url": task.subtitleUrl}], base_url)
-        subs = [sub for sub in subs if not sub.get("muxed")]
-        if not subs:
+        pending = [(index, sub) for index, sub in enumerate(subs) if not sub.get("muxed")]
+        if not pending:
             return
 
+        task.phase = "subtitles"
+        task.reset_speed()
+        self.broadcast_update(task)
         downloaded_paths = []
         errors = []
+        refresh_required = False
+        parent = Path(task.savePath).parent
 
         async def validate_request(request):
             if not is_safe_url(str(request.url)):
@@ -2663,44 +2828,85 @@ class DownloadManagerService:
         headers = self.get_headers_for_url(base_url, task.selectedServer)
         if base_url:
             headers["Referer"] = base_url
-        async with self._create_async_client(headers=headers, timeout=15.0) as client:
-            client.event_hooks.setdefault("request", []).append(validate_request)
-            for index, sub in enumerate(subs):
-                if task.cancelled or task.paused:
-                    return
-                url, label = sub["url"], sub["label"]
-                try:
-                    # Validate here as well, so alternate HTTP client wrappers
-                    # cannot bypass the request hook.
-                    if not is_safe_url(url):
-                        raise ValueError("URL de sous-titres non autorisée")
-                    request_headers = dict(sub.get("headers") or {})
-                    if sub.get("referer"):
-                        request_headers["Referer"] = sub["referer"]
-                    resp = await client.get(url, headers=request_headers)
-                    resp.raise_for_status()
-                    if not resp.content or len(resp.content) > 10 * 1024 * 1024:
-                        raise ValueError("Sous-titres vides ou trop volumineux")
-                    ext = subtitle_extension(resp.content)
-                    clean_label = self.sanitize_file_name(str(label)) or "Sous-titres"
-                    sub_name = f"{Path(task.savePath).stem}.sub{index + 1}.{clean_label}{ext}"
-                    sub_path = Path(task.savePath).parent / sub_name
-                    if not is_safe_path(sub_path, [Path(task.savePath).parent]):
-                        raise ValueError("Chemin de sous-titres non autorisé")
-                    sub_path.write_bytes(resp.content)
-                    sub["path"] = str(sub_path)
-                    downloaded_paths.append(str(sub_path))
-                    logger.info("Subtitles downloaded: %s", sub_name)
-                except (VerificationRequired, RateLimited):
-                    raise
-                except Exception as exc:
-                    errors.append(f"{label}: {exc}")
-                    logger.warning("Error downloading subtitles %s: %s", label, exc)
-
-        task.subtitlesJson = json.dumps(subs)
-        task.savePathSubtitle = json.dumps(downloaded_paths) if downloaded_paths else None
+        try:
+            async with self._create_async_client(headers=headers, timeout=30.0) as client:
+                client.event_hooks.setdefault("request", []).append(validate_request)
+                for index, sub in pending:
+                    if task.cancelled or task.paused:
+                        return
+                    url, label = sub["url"], sub["label"]
+                    try:
+                        # A completed sidecar survives retries, including an expired CDN URL.
+                        cached = Path(sub["path"]) if sub.get("path") else None
+                        if cached and is_safe_path(cached, [parent]) and cached.is_file():
+                            if 0 < cached.stat().st_size <= 10 * 1024 * 1024:
+                                try:
+                                    subtitle_extension(cached.read_bytes())
+                                    downloaded_paths.append(str(cached))
+                                    continue
+                                except ValueError:
+                                    pass
+                        if not is_safe_url(url):
+                            raise ValueError("URL de sous-titres non autorisée")
+                        request_headers = dict(sub.get("headers") or {})
+                        if sub.get("referer"):
+                            request_headers["Referer"] = sub["referer"]
+                        for attempt in range(3):
+                            if task.cancelled or task.paused:
+                                return
+                            try:
+                                resp = await client.get(url, headers=request_headers)
+                                resp.raise_for_status()
+                                break
+                            except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+                                transient = (not hasattr(exc, "kind") and
+                                    (not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in (408, 500, 502, 503, 504)))
+                                if (isinstance(exc, httpx.HTTPStatusError) and hasattr(client, "service")
+                                        and exc.response.status_code in (502, 503, 504)):
+                                    transient = False  # The common transport already retried these.
+                                if not transient or attempt == 2:
+                                    raise
+                                await asyncio.sleep(2 ** attempt)
+                        if not resp.content or len(resp.content) > 10 * 1024 * 1024:
+                            raise ValueError("Sous-titres vides ou trop volumineux")
+                        ext = subtitle_extension(resp.content)
+                        clean_label = self.sanitize_file_name(str(label)) or "Sous-titres"
+                        sub_name = f"{Path(task.savePath).stem}.sub{index + 1}.{clean_label}{ext}"
+                        sub_path = parent / sub_name
+                        if not is_safe_path(sub_path, [parent]):
+                            raise ValueError("Chemin de sous-titres non autorisé")
+                        parent.mkdir(parents=True, exist_ok=True)
+                        staging = None
+                        try:
+                            with tempfile.NamedTemporaryFile(dir=parent, prefix=".animan-sub-", delete=False) as temp:
+                                staging = Path(temp.name)
+                                temp.write(resp.content)
+                            staging.replace(sub_path)
+                        finally:
+                            if staging:
+                                staging.unlink(missing_ok=True)
+                        sub["path"] = str(sub_path)
+                        downloaded_paths.append(str(sub_path))
+                        logger.info("Subtitles downloaded: %s", sub_name)
+                    except (VerificationRequired, RateLimited):
+                        raise
+                    except Exception as exc:
+                        if isinstance(exc, httpx.TimeoutException):
+                            reason = "Délai réseau dépassé après 3 tentatives"
+                        elif isinstance(exc, httpx.HTTPStatusError):
+                            reason = f"HTTP {exc.response.status_code}"
+                            refresh_required = refresh_required or exc.response.status_code in (401, 403, 404, 410)
+                        else:
+                            reason = str(exc).strip() or type(exc).__name__
+                        errors.append(f"{label}: {reason}")
+                        logger.warning("Error downloading subtitles %s: %s", label, reason)
+        finally:
+            # Persist partial success even when a later track requires verification.
+            task.subtitlesJson = json.dumps(subs)
+            task.savePathSubtitle = json.dumps(downloaded_paths) if downloaded_paths else None
+            library_service.save_task(task)
         if errors:
-            raise SubtitleError("Échec du téléchargement des sous-titres : " + "; ".join(errors))
+            raise SubtitleError("Échec du téléchargement des sous-titres : " + "; ".join(errors), refresh_required)
 
     def is_ffmpeg_available(self) -> bool:
         return shutil.which("ffmpeg") is not None
@@ -2718,7 +2924,8 @@ class DownloadManagerService:
             sub_paths = [task.savePathSubtitle]
         if not isinstance(sub_paths, list):
             sub_paths = [sub_paths]
-        existing_subs = [Path(sp) for sp in sub_paths if sp and Path(sp).is_file()]
+        existing_subs = [Path(sp) for sp in sub_paths if sp and
+                         is_safe_path(Path(sp), [video_path.parent]) and Path(sp).is_file()]
         if not existing_subs or len(existing_subs) != len(sub_paths):
             raise ValueError("Fichier de sous-titres introuvable")
         metadata = {s.get("path"): s for s in normalize_subtitles(task.subtitlesJson)}
@@ -2737,8 +2944,6 @@ class DownloadManagerService:
 
         embedded = [s for s in probe(video_path) if s.get("codec_type") == "subtitle"]
         output_path = video_path.with_suffix(".mkv")
-        if output_path != video_path and output_path.exists():
-            raise FileExistsError(f"Le fichier de sortie existe déjà : {output_path.name}")
         with tempfile.NamedTemporaryFile(dir=video_path.parent, prefix=".animan-mux-", suffix=".mkv", delete=False) as temp:
             staging = Path(temp.name)
         try:
@@ -2772,7 +2977,35 @@ class DownloadManagerService:
                 raise ValueError("Pistes de sous-titres manquantes après fusion")
             if task.cancelled or task.paused:
                 return
-            staging.replace(output_path)
+            if output_path == video_path:
+                staging.replace(output_path)
+            else:
+                # Publish atomically without overwriting another episode or a previous export.
+                # link() also handles a destination created concurrently after our check.
+                for collision in range(1000):
+                    candidate = output_path if collision == 0 else output_path.with_name(
+                        f"{output_path.stem}.subtitled-{self.sanitize_file_name(task.id)[:12]}-{collision}.mkv")
+                    try:
+                        try:
+                            os.link(staging, candidate)
+                        except OSError as exc:
+                            if exc.errno not in (errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP):
+                                raise
+                            # FAT/removable drives may not support hard links. Reserve
+                            # exclusively, then atomically replace only our placeholder.
+                            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                            os.close(fd)
+                            try:
+                                staging.replace(candidate)
+                            except BaseException:
+                                candidate.unlink(missing_ok=True)
+                                raise
+                        output_path = candidate
+                        break
+                    except FileExistsError:
+                        continue
+                else:
+                    raise FileExistsError("Impossible de réserver un nom de fichier pour la fusion")
             task.fileName = output_path.name
             task.savePath = str(output_path)
             task.totalBytes = task.downloadedBytes = output_path.stat().st_size
@@ -2783,10 +3016,11 @@ class DownloadManagerService:
                     track["muxed"] = True
             task.subtitlesJson = json.dumps(tracks)
             library_service.save_task(task)
-            if video_path != output_path:
-                video_path.unlink(missing_ok=True)
-            for sf in existing_subs:
-                sf.unlink(missing_ok=True)
+            for obsolete in ([video_path] if video_path != output_path else []) + existing_subs:
+                try:
+                    obsolete.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Export completed; unable to remove %s", obsolete.name, exc_info=True)
             logger.info("FFmpeg muxing succeeded: %s", output_path.name)
         finally:
             staging.unlink(missing_ok=True)

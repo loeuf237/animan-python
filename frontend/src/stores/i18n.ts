@@ -1,69 +1,40 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/api/client';
+import catalogs from '@/locales/catalogs.json';
+import { language, applyLanguage, type Language } from '@/utils/locale';
 
 export const useI18nStore = defineStore('i18n', () => {
-  const currentLang = ref<'fr' | 'en'>('fr');
-  const translations = ref<Record<string, string>>({});
+  const currentLang = language;
+  const translations = ref<Record<string, string>>(catalogs[currentLang.value]);
   const isLoaded = ref(false);
-
-  // Helper to read cookie
-  function getCookie(name: string): string | null {
-    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-    return match ? decodeURIComponent(match[2]) : null;
-  }
-
-  async function init() {
-    const cookieLang = getCookie('animan_lang');
-    const localLang = localStorage.getItem('animan_lang');
-    const lang = (cookieLang || localLang || 'fr') as 'fr' | 'en';
-    currentLang.value = lang === 'en' ? 'en' : 'fr';
-    localStorage.setItem('animan_lang', currentLang.value);
-
+  let generation = 0;
+  async function load(lang: Language) {
+    const current = ++generation;
+    translations.value = catalogs[lang];
     try {
-      const res = await api.getTranslations(currentLang.value);
-      if (res && res.translations) {
-        translations.value = res.translations;
-      }
-    } catch (e) {
-      console.warn('[i18n] Failed to load translations:', e);
-    } finally {
-      isLoaded.value = true;
-    }
-  }
-
-  async function changeLanguage(lang: 'fr' | 'en') {
-    currentLang.value = lang;
-    localStorage.setItem('animan_lang', lang);
-    document.cookie = `animan_lang=${lang};path=/;max-age=31536000;SameSite=Lax`;
-
-    try {
-      await api.setLanguage(lang);
       const res = await api.getTranslations(lang);
-      if (res && res.translations) {
-        translations.value = res.translations;
-      }
-    } catch (e) {
-      console.warn('[i18n] Failed to update server language:', e);
-    }
+      if (current === generation && res?.translations) translations.value = {...catalogs[lang], ...res.translations};
+    } catch { /* Bundled catalogs keep translations available offline. */ }
+    finally { if (current === generation) isLoaded.value = true; }
   }
-
+  async function init() {
+    applyLanguage(currentLang.value);
+    await load(currentLang.value);
+  }
+  async function changeLanguage(lang: Language) {
+    if (lang !== 'fr' && lang !== 'en') return;
+    applyLanguage(lang, true);
+    const loading = load(lang);
+    try { await api.setLanguage(lang); } catch { /* Local preference remains authoritative. */ }
+    await loading;
+    // Concurrent server responses must not overwrite the latest local choice.
+    applyLanguage(currentLang.value, true);
+  }
   function t(key: string, params?: Record<string, string | number>): string {
-    let str = translations.value[key] || key;
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        str = str.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
-      }
-    }
-    return str;
+    let text = translations.value[key] || key;
+    for (const [name, value] of Object.entries(params || {})) text = text.split(`{${name}}`).join(String(value));
+    return text;
   }
-
-  return {
-    currentLang,
-    translations,
-    isLoaded,
-    init,
-    changeLanguage,
-    t,
-  };
+  return {currentLang, translations, isLoaded, init, changeLanguage, t};
 });

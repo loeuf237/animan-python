@@ -2,8 +2,8 @@
   <div class="history-container">
     <div class="page-header">
       <div>
-        <h1 class="page-title">Historique de Visionnage & Téléchargements</h1>
-        <p class="page-sub">Retrouvez vos animés récemment visionnés et vos téléchargements passés.</p>
+        <h1 class="page-title">{{ tx("Historique de Visionnage & Téléchargements") }}</h1>
+        <p class="page-sub">{{ tx("Retrouvez vos animés récemment visionnés et vos téléchargements passés.") }}</p>
       </div>
 
       <div style="display: flex; gap: 10px;">
@@ -11,20 +11,16 @@
           v-if="historyItems.length > 0"
           class="btn btn-danger"
           @click="clearAllHistory"
-        >
-          Effacer l'historique
-        </button>
-        <button class="btn btn-primary" @click="fetchHistory">
-          Actualiser
-        </button>
+        > {{ tx("Effacer l'historique") }} </button>
+        <button class="btn btn-primary" @click="fetchHistory"> {{ tx("Actualiser") }} </button>
       </div>
     </div>
 
     <!-- Empty State -->
     <div v-if="!isLoading && historyItems.length === 0" class="empty-state">
-      <h3>Aucun historique enregistré</h3>
-      <p>Vos épisodes regardés ou téléchargés apparaîtront ici.</p>
-      <router-link to="/" class="btn btn-primary" style="margin-top: 14px;">Retour à l'accueil</router-link>
+      <h3>{{ tx("Aucun historique enregistré") }}</h3>
+      <p>{{ tx("Vos épisodes regardés ou téléchargés apparaîtront ici.") }}</p>
+      <router-link to="/" class="btn btn-primary" style="margin-top: 14px;">{{ tx("Retour à l'accueil") }}</router-link>
     </div>
 
     <!-- History List -->
@@ -35,24 +31,24 @@
         class="history-card"
       >
         <div class="history-info">
-          <strong class="history-anime">{{ item.animeName || item.animeTitle || 'Animé' }}</strong>
+          <strong class="history-anime">{{ tx(item.animeName || item.animeTitle || 'Animé') }}</strong>
           <div class="history-meta">
-            <span class="badge badge-source">Épisode {{ item.episodeNumber }}</span>
-            <span v-if="item.source" style="color: var(--muted); font-size: 13px;">Source : {{ item.source }}</span>
+            <span class="badge badge-source">{{ tx("Épisode") }} {{ tx(item.episodeNumber) }}</span>
+            <span v-if="item.source" style="color: var(--muted); font-size: 13px;">{{ tx("Source :") }} {{ tx(item.source) }}</span>
             <span v-if="item.createdAt || item.updatedAt" style="color: var(--faint); font-size: 12px;">
-              {{ formatDate(item.createdAt || item.updatedAt) }}
+              {{ tx(formatDate(item.createdAt || item.updatedAt)) }}
             </span>
           </div>
         </div>
 
         <div style="display: flex; gap: 8px; align-items: center;">
           <span class="badge" :class="item.status === 'completed' ? 'badge-success' : ''">
-            {{ item.status || 'Terminé' }}
+            {{ tx(item.status || 'Terminé') }}
           </span>
 
           <button
             class="icon-button"
-            title="Supprimer cette entrée"
+            :title="tx('Supprimer cette entrée')"
             @click="deleteEntry(item.id)"
           >
             ✕
@@ -64,6 +60,7 @@
 </template>
 
 <script setup lang="ts">
+import { language, tx } from '@/utils/locale';
 import { ref, onMounted } from 'vue';
 import { api } from '@/api/client';
 import type { HistoryItem } from '@/types';
@@ -92,7 +89,7 @@ async function deleteEntry(id?: string | number) {
 }
 
 async function clearAllHistory() {
-  if (confirm("Voulez-vous vraiment effacer l'ensemble de l'historique ?")) {
+  if (confirm(tx("Voulez-vous vraiment effacer l'ensemble de l'historique ?"))) {
     await api.clearHistory();
     historyItems.value = [];
   }
@@ -102,7 +99,7 @@ function formatDate(isoStr?: string): string {
   if (!isoStr) return '';
   try {
     const d = new Date(isoStr);
-    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString(language.value, { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   } catch {
     return isoStr;
   }

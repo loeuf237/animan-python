@@ -267,6 +267,8 @@ class DownloadTask:
         self.selectedServer = selectedServer
         self.selectedQuality = selectedQuality
 
+        self.phase: Optional[str] = None
+
         # Runtime control flags
         self.cancelled: bool = False
         self.paused: bool = False
@@ -324,6 +326,8 @@ class DownloadTask:
             "animeUrl": self.animeUrl,
             "fileName": self.fileName,
             "status": self.status.value,
+            "phase": self.phase,
+            "source": self.source,
             "progress": round(self.progress, 1),
             "downloadedBytes": self.downloadedBytes,
             "totalBytes": self.totalBytes,

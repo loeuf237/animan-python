@@ -1,3 +1,4 @@
+from urllib.parse import urlparse
 from animan.services.source_http import source_http, VerificationRequired
 import asyncio
 from animan.services.background import spawn
@@ -81,17 +82,21 @@ class VoirAnimeScrapingService:
         )
 
     async def get_latest_releases(self) -> List[AnimeResult]:
-        now = time.time()
-        # Stale-While-Revalidate 100% non-bloquant : renvoie immédiatement le cache mémoire
-        if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
-            if not self.is_refreshing:
-                self.is_refreshing = True
-                spawn(self._safe_refresh_cache(), name="refresh-cache")
+        state = source_http.state(self.base_url)
+        if state.blocked_url:
+            blocked = state.blocked_url
+            if not source_http.rotate_proxy(urlparse(blocked).hostname or "", automatic=True):
+                raise VerificationRequired(blocked)
+            self.last_cache_time = 0
+        if not self.latest_cache or time.time() - self.last_cache_time > 15 * 60:
+            task = getattr(self, "_refresh_task", None)
+            if task is None or task.done():
+                self._refresh_task = task = spawn(self._safe_refresh_cache(), name="refresh-cache")
+            # Keep the refresh alive if a caller times out, and share it with other callers.
+            await asyncio.shield(task)
         return list(self.latest_cache)
 
     async def _safe_refresh_cache(self):
-        if self.is_refreshing:
-            return
         self.is_refreshing = True
         try:
             await self.refresh_cache()
@@ -103,6 +108,7 @@ class VoirAnimeScrapingService:
             logger.info("[voir-anime] Loading latest releases from %s", self.base_url)
             async with self._get_async_client() as client:
                 resp = await client.get(self.base_url)
+                resp.raise_for_status()
                 if resp.status_code == 200:
                     results = self.parse_cards(resp.text)
                     if results:
@@ -114,6 +120,7 @@ class VoirAnimeScrapingService:
             raise
         except Exception as e:
             logger.error("[voir-anime] Cache update error: %s", e)
+            raise
 
     def parse_asp_html(self, html: str, default_version: str = "VOSTFR") -> List[AnimeResult]:
         if not html:
@@ -206,7 +213,7 @@ class VoirAnimeScrapingService:
                         "asp_inst_id": f"{asid}_1",
                         "options": options_str,
                     }
-                    resp = await client.post(asp_endpoint, data=data)
+                    resp = await client.post(asp_endpoint, data=data, retry_safe=True)
                     if resp.status_code == 200:
                         return resp.text
                 except VerificationRequired:
@@ -286,30 +293,36 @@ class VoirAnimeScrapingService:
                 search_url = f"{self.base_url}/?s={query.replace(' ', '+')}&post_type=wp-manga"
                 async with self._get_async_client() as client:
                     resp = await client.get(search_url)
+                    resp.raise_for_status()
                     if resp.status_code == 200:
                         results = self.parse_cards(resp.text)
                     if not results:
                         fallback_url = f"{self.base_url}/?s={query.replace(' ', '+')}"
                         resp2 = await client.get(fallback_url)
+                        resp2.raise_for_status()
                         if resp2.status_code == 200:
                             results = self.parse_cards(resp2.text)
             except VerificationRequired:
                 raise
             except Exception as e:
                 logger.error("[voir-anime] Fallback search error: %s", e)
+                raise
 
         logger.info("[voir-anime] %d result(s) for '%s'", len(results), query)
         return results
 
     def parse_cards(self, html: str) -> List[AnimeResult]:
         soup = BeautifulSoup(html, "html.parser")
-        cards = soup.select(".page-item-detail, .c-tabs-item__content, .search-wrap .row, .page-listing-item, .flw-item")
+        # Select individual cards before fallback wrappers; wrappers can contain several series.
+        cards = soup.select(".page-item-detail.video, .page-item-detail, .c-tabs-item__content, .flw-item")
+        if not cards:
+            cards = soup.select(".page-listing-item .item-summary, .search-wrap .row")
         results: List[AnimeResult] = []
         seen_urls = set()
 
         for card in cards:
             try:
-                link_el = card.select_one(".item-thumb a, .tab-thumb a, .post-title a, h3 a, h4 a, a.film-poster-ahref")
+                link_el = card.select_one(".post-title a[href], .item-thumb a[href], .tab-thumb a[href], h3 a[href], h4 a[href], a.film-poster-ahref")
                 if not link_el:
                     continue
 
@@ -351,14 +364,14 @@ class VoirAnimeScrapingService:
                 img = card.select_one("img")
                 image_url = ""
                 if img:
-                    image_url = img.get("src", "") or img.get("data-src", "")
+                    image_url = img.get("data-src", "") or img.get("data-lazy-src", "") or img.get("src", "")
                     if not image_url and img.get("srcset"):
                         image_url = img["srcset"].split()[0]
                     if image_url and not image_url.startswith("http"):
                         image_url = urljoin(self.base_url, image_url)
 
                 # Episode badge
-                ep_el = card.select_one(".btn-link, .chapter-item, .chapter, .tick-eps, .latest-chap")
+                ep_el = card.select_one(".list-chapter .chapter a, .chapter-item a.btn-link, .chapter a, .tick-eps, .latest-chap, a.btn-link, .chapter-item")
                 ep_info = ""
                 if ep_el:
                     ep_text = ep_el.get_text().strip()
@@ -477,19 +490,21 @@ class VoirAnimeScrapingService:
         episodes: List[Episode] = []
         try:
             # 1. Sélecteur principal WordPress Madara
-            ep_items = soup.select("li.wp-manga-chapter, .wp-manga-chapter, li.chapter-li")
+            ep_items = soup.select("li.wp-manga-chapter, .wp-manga-chapter, li.chapter-li, .listing-chapters .chapter-item")
 
             # 2. Fallback liens directs d'épisodes
             if not ep_items:
                 ep_items = soup.select("a[href*='/anime/'][href*='-vostfr'], a[href*='/anime/'][href*='-vf'], .ep-item, a[href*=regarder]")
 
+            if not ep_items:
+                ep_items = soup.select("select.single-chapter-select option[data-redirect], select.selectpicker_chapter option[data-redirect]")
             seen = set()
             for idx, item in enumerate(ep_items, start=1):
-                link = item if item.name == "a" else item.select_one("a")
-                if not link or not link.get("href"):
+                link = item if item.name in ("a", "option") else item.select_one("a")
+                if not link or not (link.get("href") or link.get("data-redirect")):
                     continue
 
-                ep_url = link["href"].strip()
+                ep_url = (link.get("href") or link.get("data-redirect")).strip()
                 if not ep_url.startswith("http"):
                     ep_url = urljoin(self.base_url, ep_url)
 
@@ -598,13 +613,13 @@ class VoirAnimeScrapingService:
     def _parse_episode_sources(self, html: str) -> Dict[str, str]:
         """Extrait la cartographie {nom_serveur: embed_url} depuis les scripts, sélecteurs miroirs ou iframes de la page."""
         sources: Dict[str, str] = {}
-        m = re.search(r"var\s+thisChapterSources\s*=\s*(\{.+?\});", html, re.DOTALL)
+        m = re.search(r"(?:var|let|const)\s+thisChapterSources\s*=\s*(\{.+?\})\s*;", html, re.DOTALL)
         if m:
             try:
                 raw_dict = json.loads(m.group(1))
                 for k, v in raw_dict.items():
                     raw_src = ""
-                    src_m = re.search(r"""src=["\x27]([^"\x27]+)["\x27]""", v)
+                    src_m = re.search(r"""(?:data-src|src)=["\x27]([^"\x27]+)["\x27]""", v)
                     if src_m:
                         raw_src = src_m.group(1).replace(r"\/", "/")
                     elif v.strip().startswith("http") or v.strip().startswith("//") or "/e/" in v:

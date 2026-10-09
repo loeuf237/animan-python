@@ -231,13 +231,18 @@ class DownloadVerificationService:
                             "-v", "error",
                             "-ss", str(int(check_pos)),
                             "-i", str(path),
-                            "-t", "4",
+                            "-t", "4", "-map", "0:v:0", "-map", "0:a?", "-sn", "-dn",
+                            "-fps_mode", "passthrough", "-enc_time_base", "-1",
                             "-f", "null", "-"
                         ]
                         try:
                             test_proc = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
-                            err_lines = [l.strip() for l in test_proc.stderr.splitlines() if l.strip()]
-                            if len(err_lines) > 20:
+                            # The null output may round Matroska timestamps and report DTS
+                            # collisions. These output diagnostics are not decoder errors.
+                            err_lines = [line.strip() for line in test_proc.stderr.splitlines()
+                                         if line.strip() and not ("[null @" in line and
+                                             "non monotonically increasing dts" in line)]
+                            if test_proc.returncode != 0 or err_lines:
                                 logger.warning("Corrupted video file during decoding at %ds for %s: %d errors detected",
                                                int(check_pos), path.name, len(err_lines))
                                 return VerificationResult(
@@ -247,11 +252,16 @@ class DownloadVerificationService:
                                     formattedSize=format_bytes(file_size),
                                     filePath=str(path),
                                     relocatedPath=relocated_path,
-                                    error=f"Flux vidéo endommagé ({len(err_lines)} erreurs de décodage NAL/paquets détectées à {int(check_pos)}s)",
+                                    error=f"Erreur de décodage à {int(check_pos)}s : " + (err_lines[-1][-500:] if err_lines else f"FFmpeg code {test_proc.returncode}"),
                                     verifiedAt=now_iso,
                                 )
                         except Exception as dec_err:
-                            logger.debug("Decoding verification skipped: %s", dec_err)
+                            return VerificationResult(
+                                valid=False, status="ERROR", fileSize=file_size,
+                                filePath=str(path), relocatedPath=relocated_path,
+                                error="Contrôle de décodage non terminé : " + (str(dec_err).strip() or type(dec_err).__name__),
+                                verifiedAt=now_iso,
+                            )
 
                 return VerificationResult(
                     valid=True,
@@ -274,16 +284,21 @@ class DownloadVerificationService:
                 logger.error("Timeout expired for ffprobe on %s", path.name)
                 return VerificationResult(
                     valid=False,
-                    status="CORRUPTED",
+                    status="ERROR",
                     fileSize=file_size,
                     formattedSize=format_bytes(file_size),
                     filePath=str(path),
                     relocatedPath=relocated_path,
-                    error="Timeout lors de l'analyse vidéo ffprobe (fichier potentiellement bloqué ou corrompu)",
+                    error="Délai dépassé lors de l'analyse vidéo ffprobe",
                     verifiedAt=now_iso,
                 )
             except Exception as e:
                 logger.error("Exception during ffprobe check of %s: %s", path.name, e)
+                return VerificationResult(
+                    valid=False, status="ERROR", fileSize=file_size, filePath=str(path),
+                    relocatedPath=relocated_path, verifiedAt=now_iso,
+                    error="Analyse ffprobe impossible : " + (str(e).strip() or type(e).__name__),
+                )
 
         # 4. Fallback sans ffprobe : vérification des signatures (magic numbers)
         try:

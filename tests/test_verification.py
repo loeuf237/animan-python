@@ -149,3 +149,34 @@ def test_api_redownload_task(sample_corrupted_file):
     assert data["task"]["status"] == DownloadStatus.PENDING.value
     assert data["task"]["verificationStatus"] == "UNVERIFIED"
     assert not os.path.exists(sample_corrupted_file)
+
+
+@pytest.mark.parametrize("diagnostic,code,valid", [
+    ("[null @ 0x123] Application provided invalid, non monotonically increasing dts to muxer in stream 0: 30 >= 30\n" * 30, 0, True),
+    ("[h264 @ 0x123] Invalid NAL unit size\n", 0, False),
+    ("", 1, False),
+])
+def test_decode_diagnostics_are_classified(sample_valid_mp4, monkeypatch, diagnostic, code, valid):
+    import json
+    monkeypatch.setattr(verification_service, "_ffprobe_path", "/usr/bin/ffprobe")
+    monkeypatch.setattr("animan.services.verification_service.shutil.which", lambda name: "/usr/bin/" + name)
+    calls = []
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        if "-show_entries" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps({"format": {"duration": "1200"},
+                "streams": [{"codec_type": "video"}, {"codec_type": "audio"}]}), "")
+        return subprocess.CompletedProcess(cmd, code, "", diagnostic)
+    monkeypatch.setattr("animan.services.verification_service.subprocess.run", run)
+    result = verification_service.verify_file(sample_valid_mp4)
+    assert result.valid == valid
+    assert "-sn" in calls[1] and "-fps_mode" in calls[1]
+
+
+def test_probe_exception_does_not_validate_magic_header(sample_valid_mp4, monkeypatch):
+    monkeypatch.setattr(verification_service, "_ffprobe_path", "/usr/bin/ffprobe")
+    def run(*args, **kwargs):
+        raise subprocess.TimeoutExpired("ffprobe", 30)
+    monkeypatch.setattr("animan.services.verification_service.subprocess.run", run)
+    result = verification_service.verify_file(sample_valid_mp4)
+    assert not result.valid and result.status == "ERROR"

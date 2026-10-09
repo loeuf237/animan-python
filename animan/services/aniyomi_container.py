@@ -102,6 +102,17 @@ class AniyomiContainerSource:
     """Conteneur d'exécution dynamique qui exécute une SourceRecipe extraite d'une extension Aniyomi."""
 
     def __init__(self, recipe: SourceRecipe):
+        # Upgrade the old built-in VoirAnime recipe without replacing custom selectors.
+        host = (urlparse(recipe.base_url).hostname or "").lower()
+        if host in ("voir-anime.to", "www.voir-anime.to"):
+            current_cards = ".page-item-detail.video, .page-item-detail, .c-tabs-item__content"
+            for field in ("search_selector", "popular_selector", "latest_selector"):
+                if getattr(recipe, field) in ("", "div.c-tabs-item__content, article"):
+                    setattr(recipe, field, current_cards)
+            if not recipe.item_title_selector:
+                recipe.item_title_selector = ".post-title a, h3.h5 a, h3 a"
+            if not recipe.item_link_selector:
+                recipe.item_link_selector = ".post-title a[href], .item-thumb a[href], .tab-thumb a[href]"
         self.recipe = recipe
         self.name = recipe.name or recipe.pkg.split(".")[-1].capitalize()
         self.base_url = recipe.base_url.rstrip("/")
@@ -125,7 +136,7 @@ class AniyomiContainerSource:
         try:
             # The common transport checks initial and redirected URLs before any I/O.
             async with source_http.async_client(headers=headers, timeout=timeout) as client:
-                response = await client.request(method, url, data=data)
+                response = await client.request(method, url, data=data, retry_safe=method.upper() == "POST")
                 response.raise_for_status()
                 self.last_error = None
                 return response.text
@@ -135,7 +146,7 @@ class AniyomiContainerSource:
         except Exception as exc:
             self.last_error = str(exc)
             logger.warning("[container:%s] Échec requête %s: %s", self.name, url, exc)
-        return ""
+            raise
 
     # -------------------------------------------------------------------------
     # Recherche
@@ -277,14 +288,14 @@ class AniyomiContainerSource:
 
         results: List[AnimeResult] = []
         for it in items[:18]:
-            link_el = _safe_select_one(it, "a[href]") or (it if it.name == "a" else None)
+            link_el = _safe_select_one(it, self.recipe.item_link_selector or "a[href]") or (it if it.name == "a" else None)
             if not link_el or not link_el.get("href"):
                 continue
             href = urljoin(self.base_url, link_el.get("href"))
             title_el = _safe_select_one(it, self.recipe.item_title_selector or "h2, h3, .title, .movie-title") or link_el
             title = (title_el.get_text().strip() or title_el.get("alt", "")) if title_el else ""
-            img_el = _safe_select_one(it, "img[src], img[data-src]")
-            img_url = urljoin(self.base_url, img_el.get("src") or img_el.get("data-src", "")) if img_el else ""
+            img_el = _safe_select_one(it, self.recipe.item_thumb_selector or "img[src], img[data-src]")
+            img_url = urljoin(self.base_url, img_el.get("data-src") or img_el.get("data-lazy-src") or img_el.get("src", "")) if img_el else ""
 
             if title:
                 results.append(
@@ -578,4 +589,3 @@ class AniyomiContainerSource:
                 })
 
         return sources
-

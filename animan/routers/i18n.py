@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, Response, Query
 from fastapi.responses import JSONResponse
-from animan.services.i18n_service import i18n_service, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE
+from animan.services.i18n_service import i18n_service, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, current_lang
 
 router = APIRouter(tags=["i18n"])
 
@@ -8,7 +8,7 @@ router = APIRouter(tags=["i18n"])
 async def get_translations(lang: str = Query(None)):
     """Retourne le catalogue de traductions pour le frontend."""
     if not lang or lang not in SUPPORTED_LANGUAGES:
-        lang = DEFAULT_LANGUAGE
+        lang = current_lang()
     return {
         "language": lang,
         "supported": list(SUPPORTED_LANGUAGES),

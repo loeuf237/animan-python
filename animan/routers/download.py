@@ -267,7 +267,11 @@ async def get_proxy_settings():
 async def save_proxy_settings(request: Request):
     try:
         data = await request.json()
+        previous_proxy = (proxy_service.proxy_enabled, proxy_service.get_active_proxy())
         saved = proxy_service.save_proxy_settings(data)
+        if previous_proxy != (proxy_service.proxy_enabled, proxy_service.get_active_proxy()):
+            from animan.services.source_http import source_http
+            source_http.apply_proxy_settings()
         return {"success": True, "settings": saved, "message": "Paramètres proxy enregistrés"}
     except VerificationRequired:
         raise
@@ -280,6 +284,13 @@ async def test_proxy(request: Request):
     try:
         body = await request.json()
         url = body.get("proxyUrl")
+        if isinstance(body.get("settings"), dict):
+            config = dict(body["settings"])
+            if config.get("password") == proxy_service.MASK:
+                config["password"] = proxy_service.proxy_password
+            if config.get("custom_url") == proxy_service.mask_url(proxy_service.custom_proxy_url):
+                config["custom_url"] = proxy_service.custom_proxy_url
+            url = proxy_service.build_proxy_url(config)
         res = await proxy_service.test_proxy_connection(url)
         return res
     except VerificationRequired:
@@ -428,4 +439,3 @@ async def redownload_task(task_id: str):
         "message": f"Téléchargement relancé pour : {task.fileName}",
         "task": task.to_dict(),
     }
-

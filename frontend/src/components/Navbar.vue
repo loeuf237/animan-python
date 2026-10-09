@@ -22,7 +22,7 @@
           <input
             v-model="searchQuery"
             type="text"
-            placeholder="Rechercher un animé (ex: Solo Leveling, One Piece)..."
+            :placeholder="tx('Rechercher un animé (ex: Solo Leveling, One Piece)...')"
             class="search-input"
             @input="onSearchInput"
             @focus="isSearchDropdownOpen = true"
@@ -36,8 +36,8 @@
         <!-- Search Auto-suggest dropdown -->
         <div v-if="isSearchDropdownOpen && searchStore.searchResults.length > 0" class="search-dropdown glass-panel">
           <div class="dropdown-header">
-            <span>Résultats de recherche</span>
-            <span class="results-count">{{ searchStore.searchResults.length }} animés</span>
+            <span>{{ tx("Résultats de recherche") }}</span>
+            <span class="results-count">{{ tx(searchStore.searchResults.length) }} {{ tx("animés") }}</span>
           </div>
           <div class="results-list">
             <div
@@ -48,10 +48,10 @@
             >
               <img :src="item.imageUrl || '/static/placeholder.jpg'" class="result-thumb" alt="" />
               <div class="result-details">
-                <span class="result-title">{{ item.title }}</span>
+                <span class="result-title">{{ tx(item.title) }}</span>
                 <div class="result-meta">
-                  <span class="badge badge-source">{{ item.source }}</span>
-                  <span v-if="item.latestEpisode" class="result-ep">{{ item.latestEpisode }}</span>
+                  <span class="badge badge-source">{{ tx(item.source) }}</span>
+                  <span v-if="item.latestEpisode" class="result-ep">{{ tx(item.latestEpisode) }}</span>
                 </div>
               </div>
             </div>
@@ -61,12 +61,8 @@
 
       <!-- Navigation Links -->
       <nav class="nav-links">
-        <router-link to="/" class="nav-item" active-class="active">
-          Accueil
-        </router-link>
-        <router-link to="/favorites" class="nav-item" active-class="active">
-          Favoris
-        </router-link>
+        <router-link to="/" class="nav-item" active-class="active"> {{ tx("Accueil") }} </router-link>
+        <router-link to="/favorites" class="nav-item" active-class="active"> {{ tx("Favoris") }} </router-link>
         <router-link to="/sources" class="nav-item" active-class="active">
           Sources
         </router-link>
@@ -83,9 +79,9 @@
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <span>Téléchargements</span>
+          <span>{{ tx("Téléchargements") }}</span>
           <span v-if="downloadStore.stats.activeCount > 0" class="dl-count-badge">
-            {{ downloadStore.stats.activeCount }}
+            {{ tx(downloadStore.stats.activeCount) }}
           </span>
         </button>
       </div>
@@ -94,6 +90,7 @@
 </template>
 
 <script setup lang="ts">
+import { tx } from '@/utils/locale';
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAnimeStore } from '@/stores/anime';

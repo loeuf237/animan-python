@@ -14,13 +14,27 @@ async function moduleUrl(path, replacements = {}, transform = s => s) {
   for (const [name, url] of Object.entries(replacements)) {
     code = code.replaceAll(`'${name}'`, JSON.stringify(url));
   }
+  code = code.replaceAll("'@/utils/locale'", JSON.stringify(localeUrl)).replaceAll("'@/stores/sourcePreferences'", JSON.stringify(sourcePreferencesUrl));
   return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
 }
 
+const localeSource = await readFile(new URL('../src/utils/locale.ts', import.meta.url), 'utf8');
+const english = JSON.parse(await readFile(new URL('../src/locales/en.json', import.meta.url), 'utf8'));
+const localeCode = ts.transpileModule(localeSource, {compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText
+  .replace("'vue'", JSON.stringify(import.meta.resolve('vue')))
+  .replace("import english from '@/locales/en.json';", `const english=${JSON.stringify(english)};`);
+const localeUrl = `data:text/javascript;base64,${Buffer.from(localeCode).toString('base64')}`;
+// The preference module needs only the already initialized locale.
+let sourcePreferencesUrl = '';
+sourcePreferencesUrl = await moduleUrl('../src/stores/sourcePreferences.ts', {vue:import.meta.resolve('vue'),pinia:import.meta.resolve('pinia')});
+
+const notificationsUrl = await moduleUrl('../src/stores/notifications.ts', {vue: import.meta.resolve('vue'), pinia: import.meta.resolve('pinia')});
+const {useNotifications} = await import(notificationsUrl);
 const apiUrl = await moduleUrl('../src/api/client.ts');
 const { api } = await import(apiUrl);
 const { useLibraryStore } = await import(await moduleUrl('../src/stores/library.ts', {
   '@/api/client': apiUrl,
+  '@/stores/notifications': notificationsUrl,
   vue: import.meta.resolve('vue'),
   pinia: import.meta.resolve('pinia'),
 }));
@@ -132,22 +146,105 @@ test('the actual detail view queues only the checked VF episode', async () => {
   const inline = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   const code = await moduleUrl('../src/views/AnimeDetailView.vue', {
     '@/utils/episodes': episodeUtilsUrl,
+    '@/stores/notifications': inline('export const useNotifications=()=>({notify:()=>{}});'),
+    '@/stores/searchContext': inline('export const useSearchContext=()=>({restore:()=>{}});'),
     vue: inline(`export {ref,computed} from '${import.meta.resolve('vue')}'; export const onMounted=()=>{}; export const watch=()=>{};`),
     'vue-router': inline(`export const useRouter=()=>({push:()=>{}}); export const useRoute=()=>({query:{}});`),
     '@/stores/anime': inline(`export const useAnimeStore=()=>({currentDetail:globalThis.__episodeTest.detail});`),
     '@/stores/player': inline(`export const usePlayerStore=()=>({});`),
-    '@/stores/library': inline(`export const useLibraryStore=()=>({isWatched:()=>undefined});`),
+    '@/stores/library': inline(`export const useLibraryStore=()=>({favorites:[],isWatched:()=>undefined});`),
     '@/stores/downloads': inline(`export const useDownloadStore=()=>({startBatchDownload:async p=>{globalThis.__episodeTest.captured.push(p);return {success:true};}});`),
-  }, s => s.split('<script setup lang="ts">')[1].split('</script>')[0] + '\nexport {toggleEpisodeSelection, downloadSelectedEpisodes, toggleEpSub, epSubtitles};');
+  }, s => s.split('<script setup lang="ts">')[1].split('</script>')[0]
+    .replace("import ConfirmDialog from '@/components/ConfirmDialog.vue';", '')
+    .replace("const emit = defineEmits<{(event: 'open-palette'): void}>();", 'const emit=()=>{};')
+    + '\nexport {toggleEpisodeSelection, downloadSelectedEpisodes, confirmBatchDownload, triggerBatchPreset, toggleEpSub, epSubtitles, pendingBatch, batchQuality};');
   const view = await import(code);
   view.toggleEpisodeSelection(episodeKey(detail.anime.episodes[0]));
   view.toggleEpSub(detail.anime.episodes[0]);
-  await view.downloadSelectedEpisodes();
+  view.downloadSelectedEpisodes();
+  assert.equal(captured.length, 0, 'preview must never start a download');
+  assert.equal(view.pendingBatch.value.episodes[0].version, 'VF');
+  view.batchQuality.value = '480p';
+  view.toggleEpSub(detail.anime.episodes[0]);
+  await view.confirmBatchDownload();
   assert.equal(captured.length, 1);
   assert.equal(captured[0].episodes.length, 1);
+  assert.equal(captured[0].preferredQuality, undefined, 'the confirmed request must use the previewed quality');
   assert.equal(captured[0].episodes[0].version, 'VF');
   assert.equal(captured[0].episodes[0].url, 'https://anime/vf/1');
   assert.equal(captured[0].episodes[0].downloadSubtitles, true);
   assert.equal(view.epSubtitles.value[episodeKey(detail.anime.episodes[1])], undefined);
   delete globalThis.__episodeTest;
+});
+
+
+test('favorite removal can be undone without losing automatic download preferences', async t => {
+  setActivePinia(createPinia());
+  const original = {...api};
+  const saved = {url: 'anime', title: 'Anime', imageUrl: 'cover', source: 'french-manga', autoDownload: true};
+  let records = [{...saved}], additions = 0;
+  api.getFavorites = async () => records.map(item => ({...item}));
+  api.removeFavorite = async () => { records=[]; return {success:true}; };
+  api.addFavorite = async item => { additions++; records.push({...item}); return {success:true}; };
+  const notifications = useNotifications();
+  t.after(() => { Object.assign(api, original); for (const item of [...notifications.items]) notifications.dismiss(item.id); });
+  const library = useLibraryStore();
+  await library.fetchFavorites();
+  await library.toggleFavorite(saved);
+  assert.equal(library.favorites.length, 0);
+  const undo = notifications.items[0];
+  assert.equal(undo.action.label, 'Annuler');
+  await undo.action.run();
+  await undo.action.run();
+  assert.equal(additions, 1, 'restoring twice must not create a duplicate');
+  assert.equal(library.favorites[0].autoDownload, true);
+});
+
+const downloadsUrl = await moduleUrl('../src/stores/downloads.ts', {
+  '@/api/client': apiUrl, vue: import.meta.resolve('vue'), pinia: import.meta.resolve('pinia'),
+});
+const {useDownloadStore} = await import(downloadsUrl);
+
+test('download display distinguishes finalization and unknown sizes without inventing progress', async t => {
+  setActivePinia(createPinia());
+  const original = {...api};
+  t.after(() => Object.assign(api, original));
+  api.getDownloadTasks = async () => [
+    {id:1, status:'MUXING', downloadedBytes:123, totalBytes:0, progress:100},
+    {id:2, status:'DOWNLOADING', phase:'subtitles', downloadedBytes:321, totalBytes:0, progress:0},
+  ];
+  const store = useDownloadStore();
+  await store.fetchTasks();
+  assert.equal(store.tasks[0].phase, 'muxing');
+  assert.equal(store.tasks[0].rawStatus, 'MUXING');
+  assert.equal(store.stats.activeCount, 2);
+  const inline = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  const view = await import(await moduleUrl('../src/views/DownloadsView.vue', {
+    '@/stores/downloads': downloadsUrl,
+    '@/stores/notifications': notificationsUrl,
+    '@/stores/library': inline('export const useLibraryStore=()=>({favorites:[]});'),
+    '@/stores/player': inline('export const usePlayerStore=()=>({});'),
+    vue: inline(`export {ref,computed} from '${import.meta.resolve('vue')}'; export const onMounted=()=>{}; export const onActivated=()=>{};`),
+  }, s => s.split('<script setup lang="ts">')[1].split('</script>')[0]
+    .replace("defineOptions({name: 'DownloadsView'});", '')
+    + '\nexport {getStatusLabel,progressText,getVisualProgress};'));
+  assert.equal(view.getStatusLabel(store.tasks[0]), 'Fusion des sous-titres');
+  assert.equal(view.getStatusLabel(store.tasks[1]), 'Sous-titres');
+  assert.match(view.progressText(store.tasks[0]), /taille totale inconnue/);
+  assert.doesNotMatch(view.progressText(store.tasks[0]), /0 %|100 %/);
+  assert.equal(view.getVisualProgress({status:'failed',progress:0}), 0);
+  assert.equal(view.getVisualProgress({status:'downloading',progress:100}), 99);
+  assert.equal(view.getVisualProgress({status:'completed',progress:100}), 100);
+});
+
+const searchContextUrl = await moduleUrl('../src/stores/searchContext.ts', {vue: import.meta.resolve('vue'), pinia: import.meta.resolve('pinia')});
+const {useSearchContext} = await import(searchContextUrl);
+test('only the detail opened from search can request restoration of its results', () => {
+  setActivePinia(createPinia());
+  const context = useSearchContext();
+  context.markDetail('naruto');
+  assert.equal(context.restore('other'), false);
+  assert.equal(context.restoreSequence, 0);
+  assert.equal(context.restore('naruto'), true);
+  assert.equal(context.restoreSequence, 1);
 });

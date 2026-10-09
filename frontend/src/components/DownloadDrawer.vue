@@ -4,9 +4,9 @@
       <!-- Header -->
       <div class="drawer-header">
         <div class="header-left">
-          <h2>Téléchargements</h2>
+          <h2>{{ tx("Téléchargements") }}</h2>
           <span class="sse-status" :class="{ connected: downloadStore.isConnected }">
-            {{ downloadStore.isConnected ? '● En direct' : '○ Polling' }}
+            {{ tx(downloadStore.isConnected ? '● En direct' : '○ Polling') }}
           </span>
         </div>
         <button class="btn-icon" @click="downloadStore.toggleDrawer">✕</button>
@@ -15,16 +15,16 @@
       <!-- Stats Bar -->
       <div class="drawer-stats">
         <div class="stat-item">
-          <span class="stat-label">En cours</span>
-          <span class="stat-value">{{ downloadStore.stats.activeCount }}</span>
+          <span class="stat-label">{{ tx("En cours") }}</span>
+          <span class="stat-value">{{ tx(downloadStore.stats.activeCount) }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">Vitesse</span>
-          <span class="stat-value">{{ formatSpeed(downloadStore.stats.totalSpeed) }}</span>
+          <span class="stat-label">{{ tx("Vitesse") }}</span>
+          <span class="stat-value">{{ tx(formatSpeed(downloadStore.stats.totalSpeed)) }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">Terminés</span>
-          <span class="stat-value">{{ downloadStore.stats.completedCount }}</span>
+          <span class="stat-label">{{ tx("Terminés") }}</span>
+          <span class="stat-value">{{ tx(downloadStore.stats.completedCount) }}</span>
         </div>
       </div>
 
@@ -34,12 +34,8 @@
           v-if="downloadStore.stats.completedCount > 0"
           class="btn-secondary btn-sm"
           @click="downloadStore.cleanCompleted"
-        >
-          Nettoyer terminés
-        </button>
-        <button class="btn-secondary btn-sm" @click="downloadStore.fetchTasks">
-          Actualiser
-        </button>
+        > {{ tx("Nettoyer terminés") }} </button>
+        <button class="btn-secondary btn-sm" @click="downloadStore.fetchTasks"> {{ tx("Actualiser") }} </button>
       </div>
 
       <!-- Tasks List -->
@@ -50,7 +46,7 @@
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <p>Aucun téléchargement en cours</p>
+          <p>{{ tx("Aucun téléchargement en cours") }}</p>
         </div>
 
         <div
@@ -61,11 +57,11 @@
         >
           <div class="task-top">
             <div class="task-info">
-              <span class="task-anime">{{ task.animeName }}</span>
-              <span class="task-ep">Épisode {{ task.episodeNumber }}</span>
+              <span class="task-anime">{{ tx(task.animeName) }}</span>
+              <span class="task-ep">{{ tx("Épisode") }} {{ tx(task.episodeNumber) }}</span>
             </div>
             <span class="badge" :class="getStatusBadgeClass(task.status)">
-              {{ formatStatusLabel(task.status) }}
+              {{ tx(formatStatusLabel(task.status)) }}
             </span>
           </div>
 
@@ -80,12 +76,12 @@
 
           <div class="task-bottom">
             <div class="task-details">
-              <span>{{ (task.progress || 0).toFixed(1) }}%</span>
+              <span>{{ tx((task.progress || 0).toFixed(1)) }}%</span>
               <span v-if="task.status === 'downloading'">
-                • {{ formatSpeed(task.downloadSpeed) }} • ETA {{ formatEta(task.eta) }}
+                • {{ tx(formatSpeed(task.downloadSpeed)) }} • ETA {{ tx(formatEta(task.eta)) }}
               </span>
               <span v-else-if="(task.totalBytes || 0) > 0">
-                • {{ formatBytes(task.totalBytes) }}
+                • {{ tx(formatBytes(task.totalBytes)) }}
               </span>
             </div>
 
@@ -94,7 +90,7 @@
               <button
                 v-if="task.status === 'downloading'"
                 class="btn-icon-sm"
-                title="Mettre en pause"
+                :title="tx('Mettre en pause')"
                 @click="downloadStore.pauseDownload(task.id)"
               >
                 ⏸
@@ -102,7 +98,7 @@
               <button
                 v-if="task.status === 'paused'"
                 class="btn-icon-sm"
-                title="Reprendre"
+                :title="tx('Reprendre')"
                 @click="downloadStore.resumeDownload(task.id)"
               >
                 ▶
@@ -110,14 +106,14 @@
               <button
                 v-if="task.status === 'error' || task.status === 'failed'"
                 class="btn-icon-sm"
-                title="Réessayer"
+                :title="tx('Réessayer')"
                 @click="downloadStore.retryDownload(task.id)"
               >
                 🔄
               </button>
               <button
                 class="btn-icon-sm btn-icon-danger"
-                title="Supprimer / Annuler"
+                :title="tx('Supprimer / Annuler')"
                 @click="downloadStore.cancelDownload(task.id)"
               >
                 ✕
@@ -126,7 +122,7 @@
           </div>
 
           <div v-if="task.error" class="task-error-msg">
-            {{ task.error }}
+            {{ tx(task.error) }}
           </div>
         </div>
       </div>
@@ -135,6 +131,7 @@
 </template>
 
 <script setup lang="ts">
+import { tx } from '@/utils/locale';
 import { useDownloadStore } from '@/stores/downloads';
 
 const downloadStore = useDownloadStore();

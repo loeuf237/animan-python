@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api, ApiError } from '@/api/client';
 import type { SourceChallenge } from '@/types';
+import { detectBrowser } from '@/utils/browser';
 
 export function challengeFromError(error: unknown): SourceChallenge | null {
   if (error instanceof ApiError && error.data?.code === 'verification_required') return error.data;
@@ -34,7 +35,10 @@ export const useVerificationStore = defineStore('verification', () => {
         sessions.value = result.sessions;
         browsers.value = result.browsers;
         webviewAvailable.value = result.webviewAvailable;
-        if (!browsers.value.some(b => b.name === browser.value)) browser.value = browsers.value[0]?.name || '';
+        if (!browsers.value.some(b => b.name === browser.value)) {
+          const hint = detectBrowser(navigator.userAgent).installedHint;
+          browser.value = (hint ? browsers.value.find(b => b.name.toLowerCase().includes(hint)) : null)?.name || browsers.value[0]?.name || '';
+        }
       } catch { /* Retry on the next poll if the server is restarting. */ }
     })();
     try { await refreshing; } finally { refreshing = null; }
@@ -62,6 +66,18 @@ export const useVerificationStore = defineStore('verification', () => {
       if (exc instanceof ApiError && exc.status === 400 && /expir|introuvable|fermé/.test(exc.message)) job.value = null;
     } finally { busy.value = false; }
   }
+  async function retry(domain: string) {
+    if (busy.value) return;
+    busy.value = true; error.value = '';
+    try {
+      await api.recheckNetworkSource(domain);
+      const retries = [...pending.entries()].filter(([, request]) => request.domains.has(domain));
+      for (const [key] of retries) pending.delete(key);
+      await Promise.allSettled(retries.map(([, request]) => request.retry()));
+      await refresh();
+    } catch (exc) { error.value = exc instanceof Error ? exc.message : 'Le site demande encore une vérification.'; }
+    finally { busy.value = false; }
+  }
   async function cancel() {
     if (!job.value || busy.value) return;
     busy.value = true;
@@ -70,5 +86,5 @@ export const useVerificationStore = defineStore('verification', () => {
     finally { busy.value = false; }
   }
   return {sessions, browsers, browser, job, busy, error, notice, webviewAvailable,
-          waitForVerification, clearPending, refresh, start, complete, cancel};
+          waitForVerification, clearPending, refresh, start, complete, cancel, retry};
 });

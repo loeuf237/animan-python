@@ -10,6 +10,7 @@ import pytest
 
 from animan.models.download_task import DownloadTask, DownloadStatus
 from animan.services.download_manager import download_manager, DownloadManagerService
+from animan.services.download_resume import prepare_hls_cache
 
 
 @pytest.mark.asyncio
@@ -157,10 +158,6 @@ async def test_hls_segment_level_resumption():
         # Pré-créer deux segments complets
         seg0 = segments_dir / "seg_00000.ts"
         seg1 = segments_dir / "seg_00001.ts"
-        with open(seg0, "wb") as f:
-            f.write(b"MPEGTS_SEGMENT_0")
-        with open(seg1, "wb") as f:
-            f.write(b"MPEGTS_SEGMENT_1")
 
         task = DownloadTask(
             id="test-hls-resume-task",
@@ -184,6 +181,10 @@ async def test_hls_segment_level_resumption():
             "#EXT-X-ENDLIST\n"
         )
 
+        prepare_hls_cache(segments_dir, "http://example.com/hls/master.m3u8", m3u8_content)
+        seg0.write_bytes(b"MPEGTS_SEGMENT_0")
+        seg1.write_bytes(b"MPEGTS_SEGMENT_1")
+
         downloaded_urls = []
 
         class MockResponse:
@@ -205,7 +206,8 @@ async def test_hls_segment_level_resumption():
                 downloaded_urls.append(url)
                 return MockResponse(content=b"MPEGTS_SEGMENT_2")
 
-        with patch.object(download_manager, "_create_async_client", return_value=MockAsyncClient()):
+        with patch.object(download_manager, "_create_async_client", return_value=MockAsyncClient()), \
+             patch.object(download_manager, "_finalize_task", new_callable=AsyncMock):
             # Désactiver ffmpeg pour tester le fallback d'assemblage binaire déterministe
             with patch.object(download_manager, "is_ffmpeg_available", return_value=False):
                 await download_manager._download_hls_segments_native(task, "http://example.com/hls/master.m3u8")
@@ -257,6 +259,7 @@ async def test_hls_in_situ_micro_cut_retry(tmp_path):
         def __init__(self, url):
             self.url = url
             self.status_code = 200
+            self.headers = {}
 
         async def __aenter__(self):
             if "seg1.ts" in self.url:
@@ -284,7 +287,8 @@ async def test_hls_in_situ_micro_cut_retry(tmp_path):
         def stream(self, method, url):
             return MockStreamContext(url)
 
-    with patch.object(download_manager, "_create_async_client", return_value=MockAsyncClientWithStream()):
+    with patch.object(download_manager, "_create_async_client", return_value=MockAsyncClientWithStream()), \
+         patch.object(download_manager, "_finalize_task", new_callable=AsyncMock):
         with patch.object(download_manager, "is_ffmpeg_available", return_value=False):
             with patch("asyncio.sleep", return_value=None):
                 await download_manager._download_hls_segments_native(task, "http://example.com/hls/master.m3u8")
@@ -333,4 +337,3 @@ async def test_bytes_gained_prevents_server_fallback_and_decrements_retry(tmp_pa
 
     assert task.selectedServer == "myTV", "L'hébergeur myTV doit être conservé car la connexion a progressé"
     assert getattr(task, "consecutiveServerErrors", 0) == 0, "Les erreurs serveur doivent être réinitialisées"
-

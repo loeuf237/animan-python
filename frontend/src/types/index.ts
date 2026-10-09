@@ -1,5 +1,5 @@
-export interface SourceChallenge { domain: string; source?: string; code: string; error: string }
-export interface SearchResponse { results: AnimeResult[]; challenges: SourceChallenge[]; errors: {source: string; message: string; domain?: string}[] }
+export interface SourceChallenge { domain: string; url?: string; source?: string; code: string; error: string }
+export interface SearchResponse { results: AnimeResult[]; challenges: SourceChallenge[]; errors: {source: string; message: string; url?: string; domain?: string}[] }
 export interface CatalogueSource {
   id: string; name: string; type: string; lang: string; baseUrl: string; isEnabled: boolean;
   views: {id: string; label: string}[]; multiTags: boolean;
@@ -84,6 +84,9 @@ export interface DownloadTask {
   animeName: string;
   episodeNumber: number | string;
   fileName: string;
+  version?: string;
+  phase?: string | null;
+  rawStatus?: string;
   filePath?: string | null;
   savePath?: string | null;
   fileUrl?: string | null;
@@ -175,6 +178,8 @@ export interface ExtensionSource {
 }
 
 export interface HomeFeedResponse {
+  challenges?: SourceChallenge[];
+  errors?: {source: string; message: string; url?: string; domain?: string}[];
   success: boolean;
   latestReleases?: Record<string, AnimeResult[]>;
   latestFrenchManga?: AnimeResult[];

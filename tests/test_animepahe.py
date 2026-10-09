@@ -9,6 +9,15 @@ from animan.services.animepahe_service import animepahe_service
 from animan.models.anime import AnimeResult, AnimeDetail
 
 
+@pytest.fixture(autouse=True)
+def isolated_feed_cache(monkeypatch):
+    # Mocked API payloads must never overwrite the application's persistent feed.
+    original = animepahe_service.latest_cache, animepahe_service.last_cache_time
+    monkeypatch.setattr(animepahe_service, '_save_persistent_cache', lambda: None)
+    yield
+    animepahe_service.latest_cache, animepahe_service.last_cache_time = original
+
+
 @pytest.mark.asyncio
 async def test_animepahe_search_parsing():
     mock_payload = {
@@ -236,7 +245,11 @@ def test_animepahe_security_ssrf_whitelist():
     assert is_safe_url("file:///etc/passwd") is False
 
 
-def test_routes_animepahe_search_integration():
+def test_routes_animepahe_search_integration(monkeypatch):
+    from animan.routers import anime as anime_router
+    monkeypatch.setattr(anime_router.scraping_service, 'search_anime', AsyncMock(return_value=[]))
+    monkeypatch.setattr(anime_router.voiranime_service, 'search_anime', AsyncMock(return_value=[]))
+    monkeypatch.setattr(anime_router.extension_service, 'get_enabled_container_sources', lambda: [])
     client = TestClient(app)
 
     # 1. Search with source=animepahe

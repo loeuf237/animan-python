@@ -1,3 +1,11 @@
+import { language } from '@/utils/locale';
+
+export interface ProxyPoolSnapshot {
+  automatic: boolean; refreshing: boolean; checking: boolean;
+  lastRefresh: number | null; total: number; healthy: number; importedCount: number;
+  providers: {id: string; name: string; website: string; count?: number; status?: string; error?: string}[];
+  entries: {url: string; provider: string; country: string; status?: string; latencyMs?: number; usable: boolean}[];
+}
 import type {
   AnimeDetailResponse,
   AnimeResult,
@@ -28,6 +36,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Content-Type', 'application/json');
   }
   headers.set('Accept', 'application/json');
+  headers.set('Accept-Language', language.value);
 
   const config: RequestInit = {
     ...options,
@@ -56,8 +65,18 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  getProxyPool() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool'); },
+  refreshProxyPool() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/refresh', {method: 'POST'}); },
+  checkProxyPool() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/check', {method: 'POST'}); },
+  saveProxyPool(automatic: boolean) { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/settings', {method: 'POST', body: JSON.stringify({automatic})}); },
+  importProxyPool(data: unknown) { return request<{imported: number; pool: ProxyPoolSnapshot}>('/api/network/proxy-pool/import', {method: 'POST', body: JSON.stringify(data)}); },
+  clearImportedProxies() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/import', {method: 'DELETE'}); },
+  rotateSourceProxy(domain: string) { return request<{success: boolean; domain: string; resumed: number}>('/api/network/proxy-pool/rotate', {method: 'POST', body: JSON.stringify({domain})}); },
   getNetworkSessions() {
     return request<{browsers: {name: string}[]; webviewAvailable: boolean; sessions: {domain: string; verificationRequired: boolean; usesProxy: boolean}[]}>('/api/network/sessions');
+  },
+  recheckNetworkSource(domain: string) {
+    return request<{success: boolean; domain: string}>('/api/network/recheck', {method: 'POST', body: JSON.stringify({domain})});
   },
   startNetworkVerification(domain: string, browser: string, mode: string) {
     return request<{id: string; domain: string}>('/api/network/verification', {
@@ -354,10 +373,10 @@ export const api = {
     });
   },
 
-  async testProxy(proxyUrl?: string): Promise<{ success: boolean; latencyMs?: number; ip?: string; error?: string }> {
+  async testProxy(proxyUrl?: string, settings?: Record<string, unknown>): Promise<{ success: boolean; latencyMs?: number; ip?: string; error?: string }> {
     return request('/api/proxy/test', {
       method: 'POST',
-      body: JSON.stringify({ proxyUrl: proxyUrl || '' }),
+      body: JSON.stringify({ proxyUrl: proxyUrl || '', settings }),
     });
   },
 

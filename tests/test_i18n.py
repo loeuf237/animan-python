@@ -11,6 +11,15 @@ from animan.services.i18n_service import (
     SUPPORTED_LANGUAGES,
 )
 
+@pytest.fixture(autouse=True)
+def mock_source_feeds(monkeypatch):
+    from unittest.mock import AsyncMock
+    from animan.services.scraping_service import scraping_service
+    from animan.services.voiranime_service import voiranime_service
+    from animan.services.animepahe_service import animepahe_service
+    for service in (scraping_service, voiranime_service, animepahe_service):
+        monkeypatch.setattr(service, "get_latest_releases", AsyncMock(return_value=[]))
+
 @pytest.fixture(scope="module")
 def client():
     init_db()
@@ -188,3 +197,19 @@ class TestSSRTemplateTranslation:
             resp = fresh_c2.get("/downloads", headers={"accept-language": "en-US,en;q=0.9"})
             assert resp.status_code == 200
             assert resp.cookies.get("animan_lang") == "en"
+
+
+def test_catalog_uses_request_language_when_no_override(client):
+    client.cookies.clear()
+    response = client.get('/api/i18n', headers={'Accept-Language': 'en-GB,en;q=0.9'})
+    assert response.status_code == 200
+    assert response.json()['language'] == 'en'
+    assert response.json()['translations']['nav_home'] == 'Home'
+
+
+def test_legacy_home_defaults_to_animepahe_for_english(client):
+    import re
+    response = client.get('/?lang=en')
+    assert response.status_code == 200
+    assert re.search(r'value="animepahe"\s+checked', response.text)
+    assert not re.search(r'value="french-manga"\s+checked', response.text)

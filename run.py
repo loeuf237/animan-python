@@ -45,15 +45,21 @@ async def lifespan(app: FastAPI):
     init_db()
     # 2. Restore unfinished download tasks
     download_manager.init_from_db()
+    loop = asyncio.get_running_loop()
+    source_http.rotation_callback = lambda domain: loop.call_soon_threadsafe(download_manager.resume_verified_domain, domain)
     # 3. Start Watchdog service
     watchdog_service.start()
     # 4. Pre-load release feeds (background with concurrency lock)
     bg_tasks = [
         asyncio.create_task(browser_verification.watch()),
-        asyncio.create_task(scraping_service._safe_refresh_cache()),
-        asyncio.create_task(voiranime_service._safe_refresh_cache()),
-        asyncio.create_task(animepahe_service._safe_refresh_cache()),
     ]
+    from animan.services.proxy_pool import proxy_pool
+    bg_tasks.append(asyncio.create_task(proxy_pool.refresh()))
+    bg_tasks.append(asyncio.create_task(proxy_pool.watch()))
+    for service in (scraping_service, voiranime_service, animepahe_service):
+        # API callers share the preload instead of launching another refresh.
+        service._refresh_task = asyncio.create_task(service._safe_refresh_cache())
+        bg_tasks.append(service._refresh_task)
 
     import socket
     lan_ip = "127.0.0.1"
@@ -67,12 +73,14 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Stopping Animan...")
+    source_http.rotation_callback = None
     watchdog_service.stop()
     for t in bg_tasks:
         if not t.done():
             t.cancel()
     await asyncio.gather(*bg_tasks, return_exceptions=True)
     await browser_verification.close()
+    await proxy_pool.close()
     await asyncio.to_thread(source_http.close)
 
 app = FastAPI(
@@ -290,5 +298,3 @@ if __name__ == "__main__":
         reload_dirs=["animan", "."] if reload_enabled else None,
         timeout_keep_alive=30,
     )
-
-

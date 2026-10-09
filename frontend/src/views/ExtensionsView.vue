@@ -8,16 +8,13 @@
             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
             <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
             <line x1="12" y1="22.08" x2="12" y2="12"/>
-          </svg>
-          Gestionnaire d'Extensions Aniyomi
-        </h1>
-        <p class="page-sub">Installez et activez des extensions tierces pour étendre vos sources de streaming.</p>
+          </svg> {{ tx("Gestionnaire d'Extensions Aniyomi") }} </h1>
+        <p class="page-sub">{{ tx("Installez et activez des extensions tierces pour étendre vos sources de streaming.") }}</p>
       </div>
 
       <div style="display: flex; gap: 10px; align-items: center;">
         <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3); padding: 8px 14px; border-radius: 9999px; font-weight: 500;">
-          <strong>{{ enabledCount }}</strong> / {{ totalCount }} sources actives
-        </span>
+          <strong>{{ tx(enabledCount) }}</strong> / {{ tx(totalCount) }} {{ tx("sources actives") }} </span>
       </div>
     </header>
 
@@ -28,8 +25,8 @@
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
         </div>
         <div>
-          <h2 style="font-size: 1.15rem; font-weight: 600; color: var(--text); margin: 0;">Magasin d'extensions Aniyomi</h2>
-          <p style="font-size: 0.85rem; color: var(--muted); margin: 2px 0 0 0;">Ajoutez un dépôt pour synchroniser automatiquement les extensions de visionnage.</p>
+          <h2 style="font-size: 1.15rem; font-weight: 600; color: var(--text); margin: 0;">{{ tx("Magasin d'extensions Aniyomi") }}</h2>
+          <p style="font-size: 0.85rem; color: var(--muted); margin: 2px 0 0 0;">{{ tx("Ajoutez un dépôt pour synchroniser automatiquement les extensions de visionnage.") }}</p>
         </div>
       </div>
 
@@ -51,14 +48,14 @@
             style="padding: 12px 24px; font-weight: 600; display: flex; align-items: center; gap: 8px;"
           >
             <div v-if="isImporting" class="spinner-sm"></div>
-            <span>{{ isImporting ? 'Importation en cours...' : 'Importer le magasin' }}</span>
+            <span>{{ tx(isImporting ? 'Importation en cours...' : 'Importer le magasin') }}</span>
           </button>
         </div>
       </form>
 
       <!-- Raccourcis Dépôts Populaires -->
       <div style="margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.85rem; color: #9ca3af;">
-        <span>Dépôts recommandés :</span>
+        <span>{{ tx("Dépôts recommandés :") }}</span>
         <button
           type="button"
           class="speed-preset-chip"
@@ -77,8 +74,7 @@
 
       <!-- Message d'information de règles -->
       <div style="margin-top: 16px; padding: 10px 14px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid #60a5fa; border-radius: 4px; font-size: 0.82rem; color: #bfdbfe;">
-        ℹ️ <strong>Règle de visibilité :</strong> Seules les sources présentes dans le <strong>dernier magasin ajouté</strong> sont affichées ci-dessous. Par défaut, toutes les sources importées sont <strong>désactivées</strong> : activez manuellement uniquement celles que vous souhaitez utiliser dans la recherche et le streaming.
-      </div>
+        ℹ️ <strong>{{ tx("Règle de visibilité :") }}</strong> {{ tx("Seules les sources présentes dans le") }} <strong>{{ tx("dernier magasin ajouté") }}</strong> {{ tx("sont affichées ci-dessous. Par défaut, toutes les sources importées sont") }} <strong>{{ tx("désactivées") }}</strong> {{ tx(": activez manuellement uniquement celles que vous souhaitez utiliser dans la recherche et le streaming.") }} </div>
     </section>
 
     <!-- Informations sur le magasin actuellement actif -->
@@ -89,14 +85,14 @@
       <div style="display: flex; align-items: center; gap: 10px;">
         <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981;"></span>
         <div>
-          <span style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);">Dépôt actif :</span>
-          <strong style="color: var(--text); margin-left: 6px; font-size: 0.95rem;">{{ activeRepo.name }}</strong>
+          <span style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);">{{ tx("Dépôt actif :") }}</span>
+          <strong style="color: var(--text); margin-left: 6px; font-size: 0.95rem;">{{ tx(activeRepo.name) }}</strong>
         </div>
       </div>
       <div style="font-size: 0.85rem; color: #9ca3af; display: flex; align-items: center; gap: 16px;">
-<button class="btn btn-sm" :disabled="isImporting" @click="refreshRepo">Actualiser le dépôt</button>
-        <span>Catalogue : {{ totalCount }} sources</span>
-        <span>Actives : {{ enabledCount }}</span>
+<button class="btn btn-sm" :disabled="isImporting" @click="refreshRepo">{{ tx("Actualiser le dépôt") }}</button>
+        <span>{{ tx("Catalogue :") }} {{ tx(totalCount) }} sources</span>
+        <span>{{ tx("Actives :") }} {{ tx(enabledCount) }}</span>
       </div>
     </div>
 
@@ -108,24 +104,21 @@
           class="tab-btn"
           :class="{ active: filterLang === 'all' }"
           @click="filterLang = 'all'"
-        >
-          Toutes ({{ totalCount }})
+        > {{ tx("Toutes (") }}{{ tx(totalCount) }})
         </button>
         <button
           type="button"
           class="tab-btn"
           :class="{ active: filterLang === 'fr' }"
           @click="filterLang = 'fr'"
-        >
-          🇫🇷 Français ({{ frCount }})
+        > {{ tx("🇫🇷 Français (") }}{{ tx(frCount) }})
         </button>
         <button
           type="button"
           class="tab-btn"
           :class="{ active: filterLang === 'active' }"
           @click="filterLang = 'active'"
-        >
-          Sources actives uniquement ({{ enabledCount }})
+        > {{ tx("Sources actives uniquement (") }}{{ tx(enabledCount) }})
         </button>
       </div>
 
@@ -135,44 +128,45 @@
           type="text"
           class="input-premium"
           style="width: 100%; padding: 8px 12px 8px 36px; font-size: 0.9rem;"
-          placeholder="Filtrer une extension par nom ou package..."
+          :placeholder="tx('Filtrer une extension par nom ou package...')"
         />
         <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9ca3af;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
       </div>
     </div>
 
     <!-- Loading spinner -->
+    <VerificationPrompt :challenges="extensionChallenges" />
+    <p v-if="diagnoseFailure" role="alert">{{ tx(diagnoseFailure.message) }} <ProxyRotationButton :domain="diagnoseFailure.domain" :retry="() => diagnose(diagnoseFailure!.extension)" /></p>
     <div v-if="isLoading" class="loading-state" style="padding: 60px 20px; text-align: center;">
       <div class="spinner" style="margin: 0 auto 16px;"></div>
-      <p style="color: var(--muted);">Chargement du catalogue des extensions...</p>
+      <p style="color: var(--muted);">{{ tx("Chargement du catalogue des extensions...") }}</p>
     </div>
 
     <!-- Grille des extensions compacte et fluide -->
     <div
       v-else-if="filteredExtensions.length > 0"
-      class="results-grid"
-      style="grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px;"
+      class="results-grid extensions-grid"
     >
       <article
         v-for="ext in filteredExtensions"
         :key="ext.id"
         class="ext-card ext-card-compact"
       >
-        <div class="ext-compact-left">
+        <div class="ext-compact-left ext-main-info">
           <img
             v-if="ext.icon_url || ext.iconUrl"
             :src="ext.icon_url || ext.iconUrl!"
-            :alt="ext.name"
+            :alt="tx(ext.name)"
             class="ext-icon-sm"
             @error="(e) => (e.target as HTMLElement).style.display = 'none'"
           />
           <div v-else class="ext-avatar-sm">
-            {{ ext.name ? ext.name[0].toUpperCase() : 'E' }}
+            {{ tx(ext.name ? ext.name[0].toUpperCase() : 'E') }}
           </div>
 
           <div style="flex: 1; min-width: 0;">
             <div style="display:flex;align-items:center;gap:6px;">
-              <h3 class="ext-title-text" :title="ext.name">{{ ext.name }}</h3>
+              <h3 class="ext-title-text" :title="tx(ext.name)">{{ tx(ext.name) }}</h3>
               <span
                 class="version-badge"
                 :style="{
@@ -181,11 +175,11 @@
                   background: ext.lang === 'fr' ? '#2563eb' : (ext.lang === 'all' ? '#7c3aed' : '#4b5563')
                 }"
               >
-                {{ (ext.lang || 'ALL').toUpperCase() }}
+                {{ tx((ext.lang || 'ALL').toUpperCase()) }}
               </span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:#9ca3af;margin-top:2px;">
-              <span>v{{ ext.version || '1.0' }}</span>
+              <span>v{{ tx(ext.version || '1.0') }}</span>
               <template v-if="ext.base_url || ext.baseUrl">
                 <span>•</span>
                 <a
@@ -193,18 +187,18 @@
                   target="_blank"
                   rel="noopener noreferrer"
                   style="color: #818cf8; text-decoration: none; overflow:hidden; text-overflow:ellipsis; max-width:120px; white-space:nowrap;"
-                  :title="ext.base_url || ext.baseUrl!"
+                  :title="tx(ext.base_url || ext.baseUrl!)"
                 >
-                  {{ formatDomain(ext.base_url || ext.baseUrl!) }}
+                  {{ tx(formatDomain(ext.base_url || ext.baseUrl!)) }}
                 </a>
               </template>
             </div>
           </div>
         </div>
 
-        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-          <button class="btn btn-sm" :disabled="busyExtensions.has(ext.id)" @click="diagnose(ext)">Tester</button>
-          <button class="btn btn-sm" @click="editRecipe(ext)">Configurer</button>
+        <div class="extension-actions">
+          <button class="btn btn-sm" :disabled="busyExtensions.has(ext.id)" @click="diagnose(ext)">{{ tx("Tester") }}</button>
+          <button class="btn btn-sm" @click="editRecipe(ext)">{{ tx("Configurer") }}</button>
           <label class="toggle-switch">
             <input
               type="checkbox"
@@ -226,36 +220,38 @@
     >
       <div style="font-size: 2.5rem; margin-bottom: 12px;">📦</div>
       <h3 style="font-size: 1.25rem; font-weight: 600; color: #f3f4f6; margin-bottom: 6px;">
-        {{ extensions.length === 0 ? "Aucun magasin d'extensions actif" : "Aucune extension ne correspond aux filtres" }}
+        {{ tx(extensions.length === 0 ? "Aucun magasin d'extensions actif" : "Aucune extension ne correspond aux filtres") }}
       </h3>
       <p style="color: #9ca3af; max-width: 460px; margin: 0 auto 20px auto; font-size: 0.9rem;">
-        {{ extensions.length === 0 ? "Importez un catalogue d'extensions Aniyomi ci-dessus pour afficher et activer vos sources d'animation préférées." : "Modifiez votre recherche ou sélectionnez un autre filtre de langue." }}
+        {{ tx(extensions.length === 0 ? "Importez un catalogue d'extensions Aniyomi ci-dessus pour afficher et activer vos sources d'animation préférées." : "Modifiez votre recherche ou sélectionnez un autre filtre de langue.") }}
       </p>
       <button
         v-if="extensions.length === 0"
         type="button"
         class="btn btn-primary"
         @click="setRepoPreset('https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json'); handleImportRepo();"
-      >
-        ⚡ Importer Yuzono Anime Repo en 1 clic
-      </button>
+      > {{ tx("⚡ Importer Yuzono Anime Repo en 1 clic") }} </button>
     </div>
 
     <section v-if="editingExtension" class="settings-card-pro" style="padding:20px;margin-top:20px">
-      <h2>Recette de {{ editingExtension.name }}</h2>
-      <p>Modifiez l’adresse du site et ses sélecteurs si son fonctionnement a changé. Les extensions utilisant une API nécessitent un adaptateur compatible.</p>
-      <textarea v-model="recipeText" class="input-premium" style="width:100%;min-height:240px" aria-label="Recette JSON"></textarea>
-      <button class="btn btn-primary" :disabled="busyExtensions.has(editingExtension.id)" @click="saveRecipe">Enregistrer</button>
-      <button class="btn" @click="editingExtension = null">Fermer</button>
+      <h2>{{ tx("Recette de") }} {{ tx(editingExtension.name) }}</h2>
+      <p>{{ tx("Modifiez l’adresse du site et ses sélecteurs si son fonctionnement a changé. Les extensions utilisant une API nécessitent un adaptateur compatible.") }}</p>
+      <textarea v-model="recipeText" class="input-premium" style="width:100%;min-height:240px" :aria-label="tx('Recette JSON')"></textarea>
+      <button class="btn btn-primary" :disabled="busyExtensions.has(editingExtension.id)" @click="saveRecipe">{{ tx("Enregistrer") }}</button>
+      <button class="btn" @click="editingExtension = null">{{ tx("Fermer") }}</button>
     </section>
     <!-- Notification Toast -->
-    <div v-if="toastMessage" class="toast-notification" :class="`toast-${toastType}`">
-      <span>{{ toastMessage }}</span>
-    </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
+import VerificationPrompt from '@/components/VerificationPrompt.vue';
+import ProxyRotationButton from '@/components/ProxyRotationButton.vue';
+import { useVerificationStore, challengeFromError } from '@/stores/verification';
+import type { SourceChallenge } from '@/types';
+import { tx } from '@/utils/locale';
+import { useNotifications } from '@/stores/notifications';
 import { ref, computed, onMounted } from 'vue';
 import { api } from '@/api/client';
 import { useAnimeStore } from '@/stores/anime';
@@ -284,12 +280,29 @@ async function saveRecipe() {
   } catch (e: any) { showToast(e.message, 'error'); }
   finally { busyExtensions.value.delete(ext.id); }
 }
+const extensionChallenges = ref<SourceChallenge[]>([]);
+const diagnoseFailure = ref<{domain: string; message: string; extension: ExtensionSource} | null>(null);
+function showDiagnoseFailure(ext: ExtensionSource, message: string) {
+  try {
+    const url = new URL(ext.base_url || ext.baseUrl || '');
+    if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) diagnoseFailure.value = {domain: url.hostname, message, extension: ext};
+  } catch { /* An invalid recipe has no source session to rotate. */ }
+}
 async function diagnose(ext: ExtensionSource) {
   busyExtensions.value.add(ext.id);
+  extensionChallenges.value = [];
+  diagnoseFailure.value = null;
   try {
     const result = await api.diagnoseExtension(ext.id);
+    if (!result.success) showDiagnoseFailure(ext, result.message);
     showToast(`${ext.name} : ${result.message}`, result.success ? 'success' : 'error');
-  } catch (e: any) { showToast(e.message, 'error'); }
+  } catch (e: any) {
+    const challenge = challengeFromError(e);
+    if (challenge) {
+      extensionChallenges.value = [challenge];
+      useVerificationStore().waitForVerification('extension-diagnose', [challenge], async () => { await diagnose(ext); });
+    } else { showDiagnoseFailure(ext, e.message); showToast(e.message, 'error'); }
+  }
   finally { busyExtensions.value.delete(ext.id); }
 }
 async function refreshRepo() {
@@ -306,18 +319,8 @@ const repoUrl = ref('https://raw.githubusercontent.com/yuzono/anime-repo/repo/in
 const filterLang = ref<'all' | 'fr' | 'active'>('all');
 const searchQuery = ref('');
 
-const toastMessage = ref<string | null>(null);
-const toastType = ref<'success' | 'error' | 'info'>('info');
-let toastTimer: any = null;
-
-function showToast(msg: string, type: 'success' | 'error' | 'info' = 'info') {
-  toastMessage.value = msg;
-  toastType.value = type;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toastMessage.value = null;
-  }, 4000);
-}
+const notifications = useNotifications();
+function showToast(message: string, tone: 'success' | 'error' | 'info' = 'info') { notifications.notify(message, tone); }
 
 function formatDomain(url: string) {
   return url.replace('https://', '').replace('http://', '').replace(/\/$/, '');
@@ -456,4 +459,12 @@ onMounted(() => {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+.extensions-grid.results-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)) !important; gap: 12px !important; }
+.extensions-grid .ext-card-compact { min-width: 0; flex-direction: column !important; align-items: stretch !important; }
+.ext-main-info { width: 100%; min-width: 0; }
+.ext-title-text { white-space: normal !important; overflow-wrap: anywhere; }
+.extension-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.extension-actions .toggle-switch { margin-left: auto; flex-shrink: 0; }
+.ext-main-info .version-badge { flex-shrink: 0; }
 </style>

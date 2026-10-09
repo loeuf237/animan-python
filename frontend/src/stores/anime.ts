@@ -15,7 +15,7 @@ export const useAnimeStore = defineStore('anime', () => {
   const isDetailLoading = ref(false);
   const error = ref<string | null>(null);
   const searchChallenges = ref<SourceChallenge[]>([]);
-  const searchWarnings = ref<{source: string; message: string}[]>([]);
+  const searchWarnings = ref<{source: string; message: string; url?: string; domain?: string}[]>([]);
   let searchSequence = 0;
 
   async function fetchHomeFeed(force = false) {
@@ -24,6 +24,7 @@ export const useAnimeStore = defineStore('anime', () => {
     error.value = null;
     try {
       homeFeed.value = await api.getHomeFeed();
+      useVerificationStore().waitForVerification('home-feed', homeFeed.value.challenges || [], async () => { await fetchHomeFeed(true); });
     } catch (err: any) {
       error.value = err.message || 'Impossible de charger le flux';
       console.error('[useAnimeStore] fetchHomeFeed error:', err);

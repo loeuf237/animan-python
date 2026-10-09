@@ -79,17 +79,21 @@ class ScrapingService:
     # -------------------------------------------------------------------------
 
     async def get_latest_releases(self) -> List[AnimeResult]:
-        now = time.time()
-        # Stale-While-Revalidate 100% non-bloquant : renvoie immédiatement le cache en mémoire
-        if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
-            if not self.is_refreshing:
-                self.is_refreshing = True
-                spawn(self._safe_refresh_cache(), name="refresh-cache")
+        state = source_http.state(self.base_url)
+        if state.blocked_url:
+            blocked = state.blocked_url
+            if not source_http.rotate_proxy(urlparse(blocked).hostname or "", automatic=True):
+                raise VerificationRequired(blocked)
+            self.last_cache_time = 0
+        if not self.latest_cache or time.time() - self.last_cache_time > 15 * 60:
+            task = getattr(self, "_refresh_task", None)
+            if task is None or task.done():
+                self._refresh_task = task = spawn(self._safe_refresh_cache(), name="refresh-cache")
+            # Keep the refresh alive if a caller times out, and share it with other callers.
+            await asyncio.shield(task)
         return list(self.latest_cache)
 
     async def _safe_refresh_cache(self):
-        if self.is_refreshing:
-            return
         self.is_refreshing = True
         try:
             await self.refresh_cache()
@@ -101,6 +105,7 @@ class ScrapingService:
             logger.info("Loading latest releases from %s", self.base_url)
             async with self._get_async_client() as client:
                 resp = await client.get(self.base_url)
+                resp.raise_for_status()
                 if resp.status_code == 200:
                     results = self.parse_search_results(resp.text)
                     if results:
@@ -112,6 +117,7 @@ class ScrapingService:
             raise
         except Exception as e:
             logger.error("Error updating french-manga cache: %s", e)
+            raise
 
     # -------------------------------------------------------------------------
     # Recherche
@@ -128,6 +134,7 @@ class ScrapingService:
                     search_url,
                     data={"query": query, "page": "1"},
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    retry_safe=True,  # Read-only search; replaying it does not change website state.
                 )
                 if resp.status_code == 200:
                     results = self.parse_search_results(resp.text)

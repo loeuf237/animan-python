@@ -180,11 +180,13 @@ class AnimepaheService:
 
     async def _fetch_api(self, path: str, timeout: float = 8.0) -> Optional[Dict[str, Any]]:
         """Interroge l'API AnimePahe avec rotation automatique des miroirs en cas de 403 / panne."""
+        last_error = None
         for base in self._get_candidate_bases():
             url = f"{base}{path}"
             try:
                 async with self._get_async_client(base=base, timeout=timeout) as client:
                     resp = await client.get(url)
+                    resp.raise_for_status()
                     if resp.status_code == 200:
                         content_type = resp.headers.get("content-type", "")
                         if "application/json" in content_type or resp.text.strip().startswith(("{", "[")):
@@ -193,30 +195,34 @@ class AnimepaheService:
                                 logger.info("[animepahe] Active mirror switched to: %s", base)
                                 self.base_url = base
                             return data
-                    elif resp.status_code in (403, 502, 503):
-                        logger.debug("[animepahe] Mirror %s returned %d for %s", base, resp.status_code, path)
+                    raise ValueError(f"Réponse API invalide pour {urlparse(base).hostname}")
             except VerificationRequired:
                 raise
             except Exception as e:
+                last_error = e
                 logger.debug("[animepahe] Error on mirror %s for %s: %s", base, path, e)
-        return None
+        raise last_error or ValueError("Aucun miroir AnimePahe disponible")
 
     # -------------------------------------------------------------------------
     # Dernières sorties (Airing)
     # -------------------------------------------------------------------------
 
     async def get_latest_releases(self) -> List[AnimeResult]:
-        now = time.time()
-        # Stale-While-Revalidate 100% non-bloquant : renvoie immédiatement le cache mémoire
-        if not self.latest_cache or (now - self.last_cache_time > 15 * 60):
-            if not self.is_refreshing:
-                self.is_refreshing = True
-                spawn(self._safe_refresh_cache(), name="refresh-cache")
+        state = source_http.state(self.base_url)
+        if state.blocked_url:
+            blocked = state.blocked_url
+            if not source_http.rotate_proxy(urlparse(blocked).hostname or "", automatic=True):
+                raise VerificationRequired(blocked)
+            self.last_cache_time = 0
+        if not self.latest_cache or time.time() - self.last_cache_time > 15 * 60:
+            task = getattr(self, "_refresh_task", None)
+            if task is None or task.done():
+                self._refresh_task = task = spawn(self._safe_refresh_cache(), name="refresh-cache")
+            # Keep the refresh alive if a caller times out, and share it with other callers.
+            await asyncio.shield(task)
         return list(self.latest_cache)
 
     async def _safe_refresh_cache(self):
-        if self.is_refreshing:
-            return
         self.is_refreshing = True
         try:
             await self.refresh_cache()
@@ -261,6 +267,7 @@ class AnimepaheService:
             raise
         except Exception as e:
             logger.warning("[animepahe] Cache refresh error: %s", e)
+            raise
 
     # -------------------------------------------------------------------------
     # Recherche
@@ -313,6 +320,7 @@ class AnimepaheService:
             raise
         except Exception as e:
             logger.error("[animepahe] Error searching '%s': %s", clean_q, e)
+            raise
 
         logger.info("[animepahe] Found %d result(s) for '%s'", len(results), clean_q)
         return results

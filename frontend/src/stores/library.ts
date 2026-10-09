@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/api/client';
+import { useNotifications } from '@/stores/notifications';
 import type { FavoriteItem, HistoryItem } from '@/types';
 
 export const useLibraryStore = defineStore('library', () => {
@@ -9,15 +10,19 @@ export const useLibraryStore = defineStore('library', () => {
   const watchedMap = ref<Record<string, Record<string, boolean>>>({});
   const isLoading = ref(false);
   const isLoadingHistory = ref(false);
+  const favoritesError = ref('');
+  const notifications = useNotifications();
 
   async function fetchFavorites() {
     isLoading.value = true;
+    favoritesError.value = '';
     try {
       const res = await api.getFavorites();
       if (Array.isArray(res)) {
         favorites.value = res;
       }
     } catch (e) {
+      favoritesError.value = e instanceof Error ? e.message : 'Impossible de charger la bibliothèque.';
       console.error('[LibraryStore] fetchFavorites error:', e);
     } finally {
       isLoading.value = false;
@@ -70,6 +75,7 @@ export const useLibraryStore = defineStore('library', () => {
       await fetchFavorites();
     }
     const isFav = favorites.value.some((f) => f.url === payload.url);
+    const previous = favorites.value.find(f => f.url === payload.url);
     try {
       if (isFav) {
         await api.removeFavorite(payload.url);
@@ -77,6 +83,17 @@ export const useLibraryStore = defineStore('library', () => {
         await api.addFavorite(payload);
       }
       await fetchFavorites();
+      if (isFav) {
+        const saved = { ...payload, ...previous };
+        notifications.notify(`${payload.title} retiré de la bibliothèque.`, 'info', {
+          label: 'Annuler',
+          async run() {
+            // Restoring twice must never toggle the favorite off again.
+            if (!favorites.value.some(f => f.url === saved.url)) await api.addFavorite(saved);
+            await fetchFavorites();
+          },
+        });
+      } else notifications.notify(`${payload.title} ajouté à la bibliothèque.`);
       return { isFavorite: !isFav };
     } catch (e) {
       console.error('[LibraryStore] toggleFavorite error:', e);
@@ -90,17 +107,29 @@ export const useLibraryStore = defineStore('library', () => {
     if (item) item.autoDownload = targetState;
     try {
       const res = await api.toggleAutoDownload(url, targetState);
+      notifications.notify(`Téléchargement automatique ${targetState ? 'activé' : 'désactivé'}.`);
       return res;
     } catch (e) {
       if (item) item.autoDownload = current; // Rollback
+      notifications.notify(e instanceof Error ? e.message : 'Impossible de modifier le téléchargement automatique.', 'error');
       console.error('[LibraryStore] toggleAutoDownload error:', e);
       throw e;
     }
   }
 
   async function clearAllFavorites() {
+    const previous = favorites.value.map(item => ({...item}));
     const res = await api.clearAllFavorites();
     await fetchFavorites();
+    notifications.notify('Bibliothèque vidée.', 'info', {
+      label: 'Annuler',
+      async run() {
+        for (const item of previous) {
+          if (!favorites.value.some(favorite => favorite.url === item.url)) await api.addFavorite(item);
+        }
+        await fetchFavorites();
+      },
+    });
     return res;
   }
 
@@ -138,6 +167,7 @@ export const useLibraryStore = defineStore('library', () => {
     watchedMap,
     isLoading,
     isLoadingHistory,
+    favoritesError,
     fetchFavorites,
     fetchHistory,
     loadWatchedForAnime,

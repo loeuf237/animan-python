@@ -386,8 +386,8 @@ class ProxyService:
                             "ip": ip_found or "Inconnue",
                             "latencyMs": latency,
                             "latency_ms": latency,
-                            "proxyUrl": url_to_test,
-                            "proxy_url": url_to_test,
+                            "proxyUrl": self.mask_url(url_to_test),
+                            "proxy_url": self.mask_url(url_to_test),
                             "endpoint": endpoint,
                         }
             except Exception as e:
@@ -396,11 +396,11 @@ class ProxyService:
         latency = int((time.perf_counter() - start_time) * 1000)
         return {
             "success": False,
-            "error": f"{type(last_error).__name__}: {str(last_error)}",
+            "error": f"{type(last_error).__name__}: {str(last_error).replace(url_to_test, self.mask_url(url_to_test))}",
             "latencyMs": latency,
             "latency_ms": latency,
-            "proxyUrl": url_to_test,
-            "proxy_url": url_to_test,
+            "proxyUrl": self.mask_url(url_to_test),
+            "proxy_url": self.mask_url(url_to_test),
         }
 
 proxy_service = ProxyService()

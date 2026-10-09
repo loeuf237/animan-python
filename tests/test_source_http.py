@@ -318,3 +318,22 @@ async def test_real_curl_transport_decompresses_once_and_streams_without_bufferi
     finally:
         server.shutdown()
         server.server_close()
+
+@pytest.mark.parametrize('code,body', [
+    (403, '<title>DDoS-Guard</title><script src="/.well-known/ddos-guard/js-challenge/view.js"></script>'),
+    (403, '<div id="cf-error-details">Sorry, you have been blocked</div>'),
+    (200, '<title>Verify you are human</title><div class="h-captcha"></div>'),
+])
+def test_other_protections_and_cloudflare_blocks_include_manual_url(transport, code, body):
+    url = 'https://source.example/search?q=one+piece'
+    service = transport(lambda s,m,u,k: response(u, code, body, {'content-type': 'text/html'}))
+    with pytest.raises(VerificationRequired) as error:
+        service.client().get(url)
+    assert error.value.to_dict()['url'] == url
+    assert service.state(url).blocked_url == url
+
+
+def test_normal_page_with_captcha_widget_is_not_blocked(transport):
+    service = transport(lambda s,m,u,k: response(u,200,'<h1>Catalogue</h1><div class="g-recaptcha"></div>', {'content-type': 'text/html'}))
+    assert service.client().get('https://source.example/').status_code == 200
+    assert not service.diagnostics()[0]['verificationRequired']

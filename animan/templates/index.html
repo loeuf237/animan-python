@@ -1,4 +1,6 @@
 {% import 'fragments/navbar.html' as nav with context %}
+{% set default_source = 'animepahe' if current_lang() == 'en' else 'french-manga' %}
+{% set selected_source = source or default_source %}
 <!DOCTYPE html>
 <html lang="{{ current_lang() }}">
 {{ nav.head(t('nav_home')) }}
@@ -28,7 +30,7 @@
         <div class="source-tabs" role="radiogroup" aria-label="{{ t('home_source_label') }}">
           <label class="source-tab">
             <input type="radio" name="source" value="french-manga"
-                   {% if not source or source == 'french-manga' %}checked{% endif %}/>
+                   {% if selected_source == 'french-manga' %}checked{% endif %}/>
             <span>french-manga.net</span>
           </label>
           <label class="source-tab">
@@ -38,7 +40,7 @@
           </label>
           <label class="source-tab">
             <input type="radio" name="source" value="animepahe"
-                   {% if source == 'animepahe' %}checked{% endif %}/>
+                   {% if selected_source == 'animepahe' %}checked{% endif %}/>
             <span>animepahe.pw</span>
           </label>
           {% if enabledExtensions %}
@@ -128,13 +130,13 @@
         {{ t('home_latest_releases') }}
       </h2>
       <div class="release-tabs">
-        <button class="tab-btn active" type="button" onclick="switchReleaseTab('french-manga', this)">french-manga.net</button>
+        <button class="tab-btn{% if default_source == 'french-manga' %} active{% endif %}" type="button" onclick="switchReleaseTab('french-manga', this)">french-manga.net</button>
         <button class="tab-btn" type="button" onclick="switchReleaseTab('voir-anime', this)">voir-anime.to</button>
-        <button class="tab-btn" type="button" onclick="switchReleaseTab('animepahe', this)">animepahe.pw (VO/Sub)</button>
+        <button class="tab-btn{% if default_source == 'animepahe' %} active{% endif %}" type="button" onclick="switchReleaseTab('animepahe', this)">animepahe.pw (VO/Sub)</button>
       </div>
     </div>
 
-    <div id="latest-french-manga" class="releases-content active">
+    <div id="latest-french-manga" class="releases-content{% if default_source == 'french-manga' %} active{% endif %}">
       {% if latestFrenchManga and latestFrenchManga|length > 0 %}
       <div class="results-grid">
         {% for anime in latestFrenchManga %}
@@ -208,7 +210,7 @@
       {% endif %}
     </div>
 
-    <div id="latest-animepahe" class="releases-content">
+    <div id="latest-animepahe" class="releases-content{% if default_source == 'animepahe' %} active{% endif %}">
       {% if latestAnimePahe and latestAnimePahe|length > 0 %}
       <div class="results-grid">
         {% for anime in latestAnimePahe %}

@@ -5,13 +5,12 @@
       <div class="player-header">
         <div class="header-info">
           <div style="display:flex;align-items:center;gap:8px;">
-            <h2 class="anime-title">{{ playerStore.animeTitle }}</h2>
-            <span v-if="playerStore.isDownloaded" class="local-badge" title="Fichier disponible sur le disque dur">
+            <h2 class="anime-title">{{ tx(playerStore.animeTitle) }}</h2>
+            <span v-if="playerStore.isDownloaded" class="local-badge" :title="tx('Fichier disponible sur le disque dur')">
               💾 Local
             </span>
           </div>
-          <span class="episode-title">
-            Épisode {{ playerStore.currentEpisode?.number }} - {{ playerStore.currentEpisode?.title || 'Streaming' }}
+          <span class="episode-title"> {{ tx("Épisode") }} {{ tx(playerStore.currentEpisode?.number) }} - {{ tx(playerStore.currentEpisode?.title || 'Streaming') }}
           </span>
         </div>
 
@@ -19,52 +18,52 @@
         <div class="header-actions">
           <!-- Subtitle Selector -->
           <div v-if="playerStore.subtitles.length > 0" class="select-group">
-            <label>💬 Sous-titres :</label>
+            <label>{{ tx("💬 Sous-titres :") }}</label>
             <select
               :value="playerStore.selectedSubtitle || ''"
               class="header-select"
               @change="onSubtitleChange($event)"
             >
-              <option value="">Désactivés</option>
+              <option value="">{{ tx("Désactivés") }}</option>
               <option
                 v-for="sub in playerStore.subtitles"
                 :key="sub.src"
                 :value="sub.src"
               >
-                {{ sub.label || 'Français' }}
+                {{ tx(sub.label || 'Français') }}
               </option>
             </select>
           </div>
 
           <!-- Server Selector -->
           <div v-if="playerStore.availableServers.length > 1" class="select-group">
-            <label>Serveur :</label>
+            <label>{{ tx("Serveur :") }}</label>
             <select
               :value="playerStore.selectedServer"
               class="header-select"
               @change="onServerChange($event)"
             >
               <option v-for="srv in playerStore.availableServers" :key="srv" :value="srv">
-                {{ srv }}
+                {{ tx(srv) }}
               </option>
             </select>
           </div>
 
           <!-- Quality Selector -->
           <div v-if="hasQualities" class="select-group">
-            <label>Qualité :</label>
+            <label>{{ tx("Qualité :") }}</label>
             <select
               :value="playerStore.selectedQuality"
               class="header-select"
               @change="onQualityChange($event)"
             >
               <option v-for="q in Object.keys(playerStore.availableQualities)" :key="q" :value="q">
-                {{ q }}
+                {{ tx(q) }}
               </option>
             </select>
           </div>
 
-          <button class="btn-icon" title="Fermer (Échap)" @click="playerStore.closePlayer">✕</button>
+          <button class="btn-icon" :title="tx('Fermer (Échap)')" @click="playerStore.closePlayer">✕</button>
         </div>
       </div>
 
@@ -85,7 +84,7 @@
             v-for="(sub, i) in playerStore.subtitles"
             :key="sub.src || i"
             :kind="sub.kind || 'captions'"
-            :label="sub.label || 'Français'"
+            :label="tx(sub.label || 'Français')"
             :srclang="sub.srclang || 'fr'"
             :src="sub.src"
             :default="playerStore.selectedSubtitle === sub.src || (i === 0 && playerStore.selectedSubtitle !== '')"
@@ -95,7 +94,7 @@
         <!-- Loading overlay -->
         <div v-if="playerStore.isLoading" class="player-state-overlay">
           <div class="spinner"></div>
-          <p>Résolution du flux vidéo...</p>
+          <p>{{ tx("Résolution du flux vidéo...") }}</p>
         </div>
 
         <!-- Error overlay -->
@@ -105,10 +104,8 @@
             <line x1="12" y1="8" x2="12" y2="12"></line>
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
-          <p>{{ playerStore.error }}</p>
-          <button class="btn-primary" @click="playerStore.resolveStream">
-            Réessayer
-          </button>
+          <p>{{ tx(playerStore.error) }}</p>
+          <button class="btn-primary" @click="playerStore.resolveStream"> {{ tx("Réessayer") }} </button>
         </div>
       </div>
 
@@ -118,27 +115,23 @@
           class="btn-secondary"
           :disabled="!playerStore.hasPrev"
           @click="playerStore.playPrev"
-        >
-          ⏮ Épisode précédent
-        </button>
+        > {{ tx("⏮ Épisode précédent") }} </button>
 
-        <span class="source-tag">
-          Source : {{ playerStore.source }} • {{ playerStore.serverType || 'Direct' }}
+        <span class="source-tag"> {{ tx("Source :") }} {{ tx(playerStore.source) }} • {{ tx(playerStore.serverType || 'Direct') }}
         </span>
 
         <button
           class="btn-primary"
           :disabled="!playerStore.hasNext"
           @click="playerStore.playNext"
-        >
-          Épisode suivant ⏭
-        </button>
+        > {{ tx("Épisode suivant ⏭") }} </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { tx } from '@/utils/locale';
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import Hls from 'hls.js';
 import { usePlayerStore } from '@/stores/player';

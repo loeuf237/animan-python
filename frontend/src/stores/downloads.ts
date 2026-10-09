@@ -23,6 +23,8 @@ function normalizeTask(raw: any): DownloadTask {
     ...raw,
     id: raw.id ?? raw.taskId,
     status: normStatus,
+    rawStatus: String(raw.status || '').toUpperCase(),
+    phase: raw.phase || (String(raw.status).toUpperCase() === 'MUXING' ? 'muxing' : null),
     downloadSpeed: typeof speed === 'number' ? speed : 0,
     bytesDownloaded: raw.downloadedBytes ?? raw.bytesDownloaded ?? 0,
     totalBytes: raw.totalBytes ?? 0,

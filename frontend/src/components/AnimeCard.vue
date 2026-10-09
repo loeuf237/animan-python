@@ -1,9 +1,9 @@
 <template>
-  <div class="anime-card" @click="goToDetail">
+  <router-link class="anime-card" :to="{path: '/anime', query: {url: anime.url, source: anime.source || 'french-manga'}}">
     <div class="anime-card-poster">
       <img
         :src="anime.imageUrl || '/static/placeholder.jpg'"
-        :alt="anime.title"
+        :alt="tx(anime.title)"
         loading="lazy"
         @error="onImageError"
       />
@@ -14,42 +14,30 @@
           </svg>
         </div>
         <div class="top-badges">
-          <span class="badge badge-source">{{ anime.source }}</span>
+          <span class="badge badge-source">{{ tx(anime.source) }}</span>
           <span v-if="anime.rating" class="badge badge-rating">
-            ★ {{ Number(anime.rating).toFixed(1) }}
+            ★ {{ tx(Number(anime.rating).toFixed(1)) }}
           </span>
         </div>
       </div>
     </div>
     <div class="anime-card-info">
-      <h3 class="anime-card-title" :title="anime.title">{{ anime.title }}</h3>
+      <h3 class="anime-card-title" :title="tx(anime.title)">{{ tx(anime.title) }}</h3>
       <div class="anime-card-meta">
-        <span class="meta-tag">{{ anime.latestEpisode || anime.type || 'Animé' }}</span>
-        <span v-if="anime.status" class="meta-status">{{ anime.status }}</span>
+        <span class="meta-tag">{{ tx(anime.latestEpisode || anime.type || 'Animé') }}</span>
+        <span v-if="anime.status" class="meta-status">{{ tx(anime.status) }}</span>
       </div>
     </div>
-  </div>
+  </router-link>
 </template>
 
 <script setup lang="ts">
-import { useRouter } from 'vue-router';
+import { tx } from '@/utils/locale';
 import type { AnimeResult } from '@/types';
 
 const props = defineProps<{
   anime: AnimeResult;
 }>();
-
-const router = useRouter();
-
-function goToDetail() {
-  router.push({
-    path: '/anime',
-    query: {
-      url: props.anime.url,
-      source: props.anime.source || 'french-manga',
-    },
-  });
-}
 
 function onImageError(event: Event) {
   const target = event.target as HTMLImageElement;

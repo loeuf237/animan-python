@@ -274,9 +274,15 @@ class AniyomiDexParser:
             recipe.search_request_path = "/?s={query}"
             recipe.episode_list_selector = "#seasons .episodiotitle a, .episodiotitle a, a[href*='/episodes/']"
         elif "voiranime" in pkg_lower or "voir-anime" in base_lower:
-            recipe.search_selector = "div.c-tabs-item__content, article"
+            recipe.search_selector = ".page-item-detail.video, .page-item-detail, .c-tabs-item__content"
+            recipe.latest_selector = recipe.search_selector
             recipe.popular_selector = recipe.search_selector
             recipe.search_request_path = "/?s={query}&post_type=wp-manga"
+            recipe.latest_request_path = "/"
+            recipe.item_link_selector = ".post-title a[href], .item-thumb a[href], .tab-thumb a[href]"
+            recipe.item_title_selector = ".post-title a, h3.h5 a, h3 a"
+            recipe.item_thumb_selector = ".item-thumb img, .tab-thumb img"
+            recipe.episode_list_selector = "li.wp-manga-chapter, .listing-chapters .chapter-item"
 
         # Détection générique depuis raw_strings si encore incomplet
         if not recipe.search_selector or not recipe.popular_selector:

@@ -3,33 +3,33 @@
     <!-- Header avec Statistiques -->
     <section class="dashboard-header">
       <div>
-        <h1 class="page-title">Gestionnaire des Téléchargements</h1>
-        <p class="page-sub">Suivez et pilotez vos flux d'épisodes en tâche de fond avec contrôle d'intégrité.</p>
+        <h1 class="page-title">{{ tx("Gestionnaire des Téléchargements") }}</h1>
+        <p class="page-sub">{{ tx("Suivez vos épisodes et reprenez les téléchargements interrompus.") }}</p>
       </div>
 
-      <div class="stats-grid">
+      <div class="stats-grid compact-stats">
         <div class="stat-card">
-          <strong>{{ downloadStore.stats.activeCount }}</strong>
-          <span>Actifs</span>
+          <strong>{{ tx(downloadStore.stats.activeCount) }}</strong>
+          <span>{{ tx("Actifs") }}</span>
         </div>
         <div class="stat-card stat-blue">
-          <strong>{{ downloadStore.stats.queuedCount }}</strong>
-          <span>En attente</span>
+          <strong>{{ tx(downloadStore.stats.queuedCount) }}</strong>
+          <span>{{ tx("En attente") }}</span>
         </div>
         <div class="stat-card stat-green">
-          <strong>{{ formatSpeed(downloadStore.stats.totalSpeed) }}</strong>
-          <span>Vitesse globale</span>
-          <i class="mini-spark"></i>
+          <strong>{{ tx(formatSpeed(downloadStore.stats.totalSpeed)) }}</strong>
+          <span>{{ tx("Vitesse globale") }}</span>
+
         </div>
-        <div
+        <button type="button"
           v-if="errorTasksCount > 0"
           class="stat-card stat-red clickable"
-          title="Afficher les téléchargements en échec"
+          :title="tx('Afficher les téléchargements en échec')"
           @click="tab = 'errors'"
         >
-          <strong>{{ errorTasksCount }}</strong>
-          <span>En échec</span>
-        </div>
+          <strong>{{ tx(errorTasksCount) }}</strong>
+          <span>{{ tx("En échec") }}</span>
+        </button>
       </div>
     </section>
 
@@ -39,116 +39,103 @@
         <button
           class="tab-btn"
           :class="{ active: tab === 'queue' }"
+          :aria-pressed="tab === 'queue'"
           type="button"
           @click="tab = 'queue'"
-        >
-          En cours & Attente
-          <span class="tab-badge badge-queue">{{ activeAndQueuedCount }}</span>
+        > {{ tx("En cours & Attente") }} <span class="tab-badge badge-queue">{{ tx(activeAndQueuedCount) }}</span>
         </button>
         <button
           class="tab-btn"
           :class="{ active: tab === 'done' }"
+          :aria-pressed="tab === 'done'"
           type="button"
           @click="tab = 'done'"
-        >
-          Terminés
-          <span class="tab-badge badge-done">{{ completedCount }}</span>
+        > {{ tx("Terminés") }} <span class="tab-badge badge-done">{{ tx(completedCount) }}</span>
         </button>
         <button
           class="tab-btn"
           :class="{ active: tab === 'errors' }"
+          :aria-pressed="tab === 'errors'"
           type="button"
           @click="tab = 'errors'"
-        >
-          Erreurs
-          <span class="tab-badge badge-error">{{ errorTasksCount }}</span>
+        > {{ tx("Erreurs") }} <span class="tab-badge badge-error">{{ tx(errorTasksCount) }}</span>
         </button>
         <button
           class="tab-btn"
           :class="{ active: tab === 'all' }"
+          :aria-pressed="tab === 'all'"
           type="button"
           @click="tab = 'all'"
-        >
-          Tous
-          <span class="tab-badge">{{ downloadStore.tasks.length }}</span>
+        > {{ tx("Tous") }} <span class="tab-badge">{{ tx(downloadStore.tasks.length) }}</span>
         </button>
       </div>
 
       <div class="download-actions">
+        <span class="connection-status" role="status">{{ tx(downloadStore.isConnected ? 'Suivi en direct' : 'Actualisation périodique') }}</span>
         <!-- Actions globales selon l'onglet -->
         <button
-          v-if="tab === 'queue' || tab === 'all'"
+          v-if="(tab === 'queue' || tab === 'all') && downloadStore.stats.activeCount > 0"
           class="btn btn-sm"
           type="button"
-          title="Mettre en pause tous les téléchargements en cours"
-          @click="downloadStore.pauseAll"
+          :title="tx('Mettre en pause tous les téléchargements en cours')"
+          @click="performAction(() => downloadStore.pauseAll())"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14M16 5v14"/></svg>
-          Tout suspendre
-        </button>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14M16 5v14"/></svg> {{ tx("Tout suspendre") }} </button>
 
         <button
-          v-if="tab === 'queue' || tab === 'all'"
+          v-if="(tab === 'queue' || tab === 'all') && downloadStore.tasks.some(task => task.status === 'paused')"
           class="btn btn-success btn-sm"
           type="button"
-          title="Reprendre tous les téléchargements en pause"
-          @click="downloadStore.resumeAll"
+          :title="tx('Reprendre tous les téléchargements en pause')"
+          @click="performAction(() => downloadStore.resumeAll())"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16l13-8Z"/></svg>
-          Tout reprendre
-        </button>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16l13-8Z"/></svg> {{ tx("Tout reprendre") }} </button>
 
         <button
           v-if="tab === 'done'"
           class="btn btn-sm"
           type="button"
           :disabled="isVerifyingAll"
-          title="Vérifier la validité de tous les fichiers vidéo téléchargés"
+          :title="tx('Vérifier la validité de tous les fichiers vidéo téléchargés')"
           @click="verifyAll"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
-          {{ isVerifyingAll ? 'Vérification...' : 'Vérifier l\'intégrité' }}
+          {{ tx(isVerifyingAll ? 'Vérification...' : 'Vérifier l\'intégrité') }}
         </button>
 
         <button
           v-if="tab === 'errors'"
           class="btn btn-warning btn-sm"
           type="button"
-          title="Relancer tous les téléchargements en échec"
+          :title="tx('Relancer tous les téléchargements en échec')"
           @click="retryAllErrors"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
-          Tout relancer
-        </button>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg> {{ tx("Tout relancer") }} </button>
 
         <button
-          v-if="tab === 'queue' || tab === 'all'"
+          v-if="(tab === 'queue' || tab === 'all') && activeAndQueuedCount > 0"
           class="btn btn-danger-outline btn-sm"
           type="button"
-          title="Annuler tous les téléchargements"
+          :title="tx('Annuler tous les téléchargements')"
           @click="confirmCancelAll"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
-          Tout annuler
-        </button>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg> {{ tx("Tout annuler") }} </button>
 
         <button
           v-if="tab === 'done' || tab === 'errors'"
           class="btn btn-danger-outline btn-sm"
           type="button"
-          title="Nettoyer les tâches de cette vue"
-          @click="downloadStore.cleanCompleted"
+          :title="tx('Nettoyer les tâches de cette vue')"
+          @click="performAction(() => downloadStore.cleanCompleted())"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>
-          Nettoyer
-        </button>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg> {{ tx("Nettoyer") }} </button>
 
         <!-- Bouton Accordéon Réglages Rapides -->
         <button
           class="btn btn-icon-round"
           :class="{ active: isSettingsOpen }"
           type="button"
-          title="Paramètres rapides de débit et téléchargement"
+          :title="tx('Paramètres rapides de débit et téléchargement')"
           @click="isSettingsOpen = !isSettingsOpen"
         >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -165,17 +152,17 @@
         <div class="quick-settings-header">
           <div class="quick-settings-title">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 0 0-1.8-1L14.4 3H9.6L9.2 6.1a7 7 0 0 0-1.8 1L5 6.1l-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.8 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></svg>
-            <span>Réglages Rapides des Téléchargements</span>
+            <span>{{ tx("Réglages Rapides des Téléchargements") }}</span>
           </div>
           <button class="btn btn-sm btn-primary" :disabled="isSavingSettings" @click="saveSettings">
-            {{ isSavingSettings ? 'Enregistrement...' : 'Appliquer' }}
+            {{ tx(isSavingSettings ? 'Enregistrement...' : 'Appliquer') }}
           </button>
         </div>
 
         <div class="quick-settings-grid">
           <!-- Téléchargements simultanés -->
           <div class="qs-item">
-            <label class="qs-label">Téléchargements simultanés</label>
+            <label class="qs-label">{{ tx("Téléchargements simultanés") }}</label>
             <div class="qs-control">
               <input
                 v-model.number="quickSettings.maxConcurrentDownloads"
@@ -184,23 +171,23 @@
                 min="1"
                 max="10"
               />
-              <span class="qs-hint">Flux max en parallèle (1-10)</span>
+              <span class="qs-hint">{{ tx("Flux max en parallèle (1-10)") }}</span>
             </div>
           </div>
 
           <!-- Limite de débit globale -->
           <div class="qs-item qs-item-wide">
-            <label class="qs-label">Plafond de vitesse globale (Ko/s)</label>
+            <label class="qs-label">{{ tx("Plafond de vitesse globale (Ko/s)") }}</label>
             <div class="qs-control-col">
               <div class="qs-input-row">
                 <input
                   v-model.number="quickSettings.globalSpeedLimitKb"
                   type="number"
                   class="input-premium qs-number-input"
-                  placeholder="Illimité"
+                  :placeholder="tx('Illimité')"
                   min="0"
                 />
-                <span class="qs-unit">Ko/s {{ quickSettings.globalSpeedLimitKb ? `(~${(quickSettings.globalSpeedLimitKb / 1024).toFixed(1)} Mo/s)` : '(Illimité)' }}</span>
+                <span class="qs-unit">{{ tx("Ko/s") }} {{ tx(quickSettings.globalSpeedLimitKb ? `(~${(quickSettings.globalSpeedLimitKb / 1024).toFixed(1)} Mo/s)` : '(Illimité)') }}</span>
               </div>
               <!-- Presets rapides en 1 clic -->
               <div class="speed-presets">
@@ -209,41 +196,31 @@
                   class="preset-chip"
                   :class="{ active: !quickSettings.globalSpeedLimitKb || quickSettings.globalSpeedLimitKb === 0 }"
                   @click="quickSettings.globalSpeedLimitKb = 0"
-                >
-                  Illimité
-                </button>
+                > {{ tx("Illimité") }} </button>
                 <button
                   type="button"
                   class="preset-chip"
                   :class="{ active: quickSettings.globalSpeedLimitKb === 1024 }"
                   @click="quickSettings.globalSpeedLimitKb = 1024"
-                >
-                  1 Mo/s
-                </button>
+                > {{ tx("1 Mo/s") }} </button>
                 <button
                   type="button"
                   class="preset-chip"
                   :class="{ active: quickSettings.globalSpeedLimitKb === 3072 }"
                   @click="quickSettings.globalSpeedLimitKb = 3072"
-                >
-                  3 Mo/s
-                </button>
+                > {{ tx("3 Mo/s") }} </button>
                 <button
                   type="button"
                   class="preset-chip"
                   :class="{ active: quickSettings.globalSpeedLimitKb === 5120 }"
                   @click="quickSettings.globalSpeedLimitKb = 5120"
-                >
-                  5 Mo/s
-                </button>
+                > {{ tx("5 Mo/s") }} </button>
                 <button
                   type="button"
                   class="preset-chip"
                   :class="{ active: quickSettings.globalSpeedLimitKb === 10240 }"
                   @click="quickSettings.globalSpeedLimitKb = 10240"
-                >
-                  10 Mo/s
-                </button>
+                > {{ tx("10 Mo/s") }} </button>
               </div>
             </div>
           </div>
@@ -254,7 +231,7 @@
     <!-- Indication de réorganisation si file d'attente active -->
     <div v-if="tab === 'queue' && queuedTasks.length > 1" class="queue-reorder-hint">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      <span>Glissez-déposez les tâches en attente avec la poignée <strong>::</strong> ou utilisez les boutons pour réorganiser l'ordre de priorité.</span>
+      <span>{{ tx("Glissez-déposez les tâches en attente avec la poignée") }} <strong>::</strong> {{ tx("ou utilisez les boutons pour réorganiser l'ordre de priorité.") }}</span>
     </div>
 
     <!-- Empty State -->
@@ -262,15 +239,14 @@
       <div class="empty-icon-circle">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
       </div>
-      <h3>{{ emptyStateTitle }}</h3>
-      <p>{{ emptyStateDescription }}</p>
-      <router-link to="/" class="btn btn-primary" style="margin-top: 14px;">
-        Rechercher des animés
-      </router-link>
+      <h3>{{ tx(emptyStateTitle) }}</h3>
+      <p>{{ tx(emptyStateDescription) }}</p>
+      <router-link to="/" class="btn btn-primary" style="margin-top: 14px;"> {{ tx("Rechercher des animés") }} </router-link>
     </div>
 
+    <VerificationPrompt :challenges="downloadChallenges" />
     <!-- Liste des Tâches -->
-    <div v-else class="tasks-table">
+    <div v-if="filteredTasks.length" class="tasks-table">
       <div
         v-for="task in filteredTasks"
         :key="task.id"
@@ -283,8 +259,8 @@
         @dragend="onDragEnd"
       >
         <!-- Poignée Drag & Drop + Index de priorité pour la file d'attente -->
-        <div v-if="tab === 'queue' && task.status === 'queued'" class="task-drag-handle" title="Glisser pour réorganiser la priorité">
-          <span class="queue-order-badge">{{ getQueueIndex(task.id) }}</span>
+        <div v-if="tab === 'queue' && task.status === 'queued'" class="task-drag-handle" :title="tx('Glisser pour réorganiser la priorité')">
+          <span class="queue-order-badge">{{ tx(getQueueIndex(task.id)) }}</span>
           <span class="drag-dots">⋮⋮</span>
         </div>
 
@@ -293,34 +269,35 @@
           <img
             v-if="getAnimePoster(task.animeName)"
             :src="getAnimePoster(task.animeName)!"
-            :alt="task.animeName"
+            :alt="tx(task.animeName)"
             class="task-cover-img"
             loading="lazy"
           />
           <div v-else class="task-cover-fallback">
-            {{ getInitials(task.animeName) }}
+            {{ tx(getInitials(task.animeName)) }}
           </div>
         </div>
 
         <!-- Informations Principales & Progression -->
         <div class="task-col-main">
           <div class="task-title-line">
-            <strong class="task-anime-title" :title="task.animeName">{{ task.animeName }}</strong>
-            <span class="badge" :class="getStatusBadgeClass(task)">{{ getStatusLabel(task) }}</span>
-            <span v-if="task.selectedQuality" class="quality-tag">{{ task.selectedQuality }}</span>
-            <span v-if="task.source" class="source-tag">{{ task.source }}</span>
+            <strong class="task-anime-title" :title="tx(task.animeName)">{{ tx(task.animeName) }}</strong>
+            <span class="badge" :class="getStatusBadgeClass(task)">{{ tx(getStatusLabel(task)) }}</span>
+            <span v-if="task.version" class="quality-tag">{{ tx(task.version) }}</span>
+            <span v-if="task.selectedQuality" class="quality-tag">{{ tx(task.selectedQuality) }}</span>
+            <span v-if="task.source" class="source-tag">{{ tx(task.source) }}</span>
           </div>
 
           <div class="task-meta-line">
-            <span class="task-ep-number">Épisode {{ task.episodeNumber }}</span>
-            <span v-if="task.fileName" class="task-filename" :title="task.fileName">• {{ task.fileName }}</span>
-            <span v-if="task.scheduledStartTime" class="task-scheduled-time">
-              • ⏱ Planifié : {{ formatDateTime(task.scheduledStartTime) }}
+            <span class="task-ep-number">{{ tx("Épisode") }} {{ tx(task.episodeNumber) }}</span>
+            <span v-if="task.fileName" class="task-filename" :title="tx(task.fileName)">• {{ tx(task.fileName) }}</span>
+            <span v-if="task.scheduledStartTime" class="task-scheduled-time"> {{ tx("• ⏱ Planifié :") }} {{ tx(formatDateTime(task.scheduledStartTime)) }}
             </span>
           </div>
 
           <!-- Barre de progression intelligente -->
-          <div class="progress-bar-container">
+          <p v-if="phaseDescription(task)" class="task-phase-description">{{ tx(phaseDescription(task)) }}</p>
+          <div class="progress-bar-container" :class="{indeterminate: !task.totalBytes && task.status === 'downloading'}" role="progressbar" :aria-label="tx(`Progression de l’épisode ${task.episodeNumber}`)" :aria-valuenow="task.totalBytes || task.status === 'completed' ? getVisualProgress(task) : undefined" :aria-valuetext="progressText(task)" aria-valuemin="0" aria-valuemax="100">
             <div
               class="progress-bar-fill"
               :class="{
@@ -336,25 +313,25 @@
           <!-- Métriques de téléchargement & Vérification -->
           <div class="task-stats-line">
             <div class="task-stats-left">
-              <span>{{ (task.progress || 0).toFixed(1) }}% ({{ formatBytes(task.bytesDownloaded) }} / {{ formatBytes(task.totalBytes) }})</span>
+              <span>{{ tx(progressText(task)) }}</span>
               
               <!-- Badge de vérification d'intégrité -->
               <span
                 v-if="task.verificationStatus && task.verificationStatus !== 'UNVERIFIED'"
                 class="verif-badge"
                 :class="getVerifBadgeClass(task.verificationStatus)"
-                :title="task.verificationError || 'Vérification d\'intégrité des flux vidéo et audio'"
+                :title="tx(task.verificationError || 'Vérification d\'intégrité des flux vidéo et audio')"
               >
                 <svg v-if="task.verificationStatus === 'VALID'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
                 <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                {{ formatVerifLabel(task) }}
+                {{ tx(formatVerifLabel(task)) }}
               </span>
             </div>
 
             <div class="task-stats-right">
               <span v-if="task.status === 'downloading'" class="live-speed">
-                {{ formatSpeed(task.downloadSpeed) }}
-                <span v-if="task.eta && task.eta > 0" class="live-eta">• ETA {{ formatEta(task.eta) }}</span>
+                {{ tx(formatSpeed(task.downloadSpeed)) }}
+                <span v-if="task.eta && task.eta > 0" class="live-eta">• ETA {{ tx(formatEta(task.eta)) }}</span>
               </span>
 
               <!-- Badge / Bouton Limite de débit par tâche -->
@@ -362,10 +339,10 @@
                 v-if="task.status === 'downloading' || task.status === 'queued' || task.status === 'paused'"
                 type="button"
                 class="speed-limit-chip"
-                :title="task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `Plafond actuel : ${Math.round(task.maxSpeedLimit / 1024)} Ko/s (Cliquer pour modifier)` : 'Définir un plafond de vitesse pour ce téléchargement'"
+                :title="tx(task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `Plafond actuel : ${Math.round(task.maxSpeedLimit / 1024)} Ko/s (Cliquer pour modifier)` : 'Définir un plafond de vitesse pour ce téléchargement')"
                 @click="openSpeedLimitModal(task)"
               >
-                <span>⚡ {{ task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `${Math.round(task.maxSpeedLimit / 1024)} Ko/s` : 'Limiter' }}</span>
+                <span>⚡ {{ tx(task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `${Math.round(task.maxSpeedLimit / 1024)} Ko/s` : 'Limiter') }}</span>
               </button>
             </div>
           </div>
@@ -373,77 +350,80 @@
           <!-- Alerte explicite si erreur / flux endommagé -->
           <div v-if="task.error || (task.verificationStatus && task.verificationStatus !== 'VALID' && task.verificationStatus !== 'UNVERIFIED')" class="task-error-box">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            <span>{{ task.error || task.verificationError || 'Anomalie détectée lors de l\'analyse du conteneur vidéo' }}</span>
+            <span>{{ tx(task.error || task.verificationError || 'Anomalie détectée lors de l\'analyse du conteneur vidéo') }}</span>
           </div>
         </div>
 
         <!-- Boutons d'Action Contextuels -->
         <div class="task-col-actions">
           <!-- Actif : Pause & Annuler -->
-          <template v-if="task.status === 'downloading'">
-            <button class="btn btn-sm btn-icon" title="Mettre en pause" @click="downloadStore.pauseDownload(task.id)">
+          <template v-if="task.status === 'downloading' && !['assembling', 'muxing', 'verifying'].includes(task.phase || '')">
+            <button class="btn btn-sm btn-icon" :title="tx('Mettre en pause')" @click="performAction(() => downloadStore.pauseDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14M16 5v14"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" title="Annuler le téléchargement" @click="downloadStore.cancelDownload(task.id)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Annuler le téléchargement')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </template>
 
           <!-- En pause : Reprendre & Annuler -->
           <template v-else-if="task.status === 'paused'">
-            <button class="btn btn-success btn-sm btn-icon" title="Reprendre" @click="downloadStore.resumeDownload(task.id)">
+            <button class="btn btn-success btn-sm btn-icon" :title="tx('Reprendre')" @click="performAction(() => downloadStore.resumeDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16l13-8Z"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" title="Annuler" @click="downloadStore.cancelDownload(task.id)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Annuler')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </template>
 
           <!-- En file d'attente : Monter en tête, Prioriser la série, Annuler -->
           <template v-else-if="task.status === 'queued'">
-            <button class="btn btn-sm btn-icon" title="Monter en tête de file d'attente" @click="moveTaskToTop(task)">
+            <button class="btn btn-sm btn-icon" :title="tx('Monter en tête de file d\'attente')" @click="moveTaskToTop(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
             </button>
-            <button class="btn btn-sm btn-icon" title="Prioriser tous les épisodes de cette série" @click="moveSeriesToTop(task)">
+            <button class="btn btn-sm btn-icon" :title="tx('Prioriser tous les épisodes de cette série')" @click="moveSeriesToTop(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" title="Annuler" @click="downloadStore.cancelDownload(task.id)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Annuler')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </template>
 
           <template v-else-if="task.status === 'verification_required'">
-            <button class="btn btn-danger-outline btn-sm" @click="downloadStore.cancelDownload(task.id)">Annuler</button>
+            <a v-if="task.verificationUrl" class="btn btn-secondary btn-sm" :href="task.verificationUrl" target="_blank" rel="noopener noreferrer">{{ tx('Ouvrir dans un nouvel onglet') }}</a>
+            <ProxyRotationButton v-if="task.verificationDomain" :domain="task.verificationDomain" />
+            <button class="btn btn-danger-outline btn-sm" @click="performAction(() => downloadStore.cancelDownload(task.id))">{{ tx("Annuler") }}</button>
           </template>
 
           <!-- Terminé : Lire (Mode Cinéma local), Vérifier l'intégrité, Supprimer -->
           <template v-else-if="task.status === 'completed'">
-            <button class="btn btn-primary btn-sm btn-icon" title="Lire la vidéo locale (Mode Cinéma)" @click="playTask(task)">
+            <button class="btn btn-primary btn-sm btn-icon" :title="tx('Lire la vidéo locale (Mode Cinéma)')" @click="playTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8Z"/></svg>
             </button>
-            <button class="btn btn-sm btn-icon" title="Vérifier l'intégrité du fichier MP4" @click="verifySingleTask(task)">
+            <button class="btn btn-sm btn-icon" :title="tx('Vérifier l\'intégrité du fichier MP4')" @click="verifySingleTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
             </button>
             <button
               v-if="task.verificationStatus && task.verificationStatus !== 'VALID' && task.verificationStatus !== 'UNVERIFIED'"
               class="btn btn-warning btn-sm btn-icon"
-              title="Fichier corrompu : Re-télécharger proprement"
+              :title="tx('Fichier corrompu : Re-télécharger proprement')"
               @click="redownloadTask(task)"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" title="Supprimer de la liste" @click="removeTask(task)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Supprimer de la liste')" @click="removeTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </template>
 
           <!-- Erreur / Annulé : Re-télécharger proprement (Smart Redownload) & Supprimer -->
           <template v-else-if="task.status === 'error' || task.status === 'failed' || task.status === 'cancelled'">
-            <button class="btn btn-warning btn-sm" title="Nettoyer le fichier corrompu et relancer un lien direct propre" @click="redownloadTask(task)">
+            <ProxyRotationButton v-if="task.status !== 'cancelled' && task.verificationDomain" :domain="task.verificationDomain" :retry="async () => { await redownloadTask(task); }" />
+            <button class="btn btn-warning btn-sm" :title="tx('Nettoyer le fichier corrompu et relancer un lien direct propre')" @click="redownloadTask(task)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
-              <span>Réessayer</span>
+              <span>{{ tx("Réessayer") }}</span>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" title="Supprimer de la liste" @click="removeTask(task)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Supprimer de la liste')" @click="removeTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </template>
@@ -456,53 +436,56 @@
       <div v-if="speedModalTask" class="modal-overlay" @click.self="speedModalTask = null">
         <div class="modal-card">
           <div class="modal-header">
-            <h3>Plafond de vitesse : {{ speedModalTask.animeName }} (Ep. {{ speedModalTask.episodeNumber }})</h3>
+            <h3>{{ tx("Plafond de vitesse :") }} {{ tx(speedModalTask.animeName) }} (Ep. {{ tx(speedModalTask.episodeNumber) }})</h3>
             <button class="btn-icon" @click="speedModalTask = null">✕</button>
           </div>
           <div class="modal-body">
-            <p class="modal-sub">Définissez une vitesse maximale spécifique pour ce flux sans brider les autres téléchargements.</p>
+            <p class="modal-sub">{{ tx("Définissez une vitesse maximale spécifique pour ce flux sans brider les autres téléchargements.") }}</p>
             <div class="modal-input-group">
               <input
                 v-model.number="taskSpeedLimitInput"
                 type="number"
                 class="input-premium"
-                placeholder="Ex: 500 pour 500 Ko/s (0 = Illimité)"
+                :placeholder="tx('Ex: 500 pour 500 Ko/s (0 = Illimité)')"
                 min="0"
               />
-              <span class="modal-unit">Ko/s</span>
+              <span class="modal-unit">{{ tx("Ko/s") }}</span>
             </div>
             <div class="speed-presets" style="margin-top: 12px;">
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 0">Illimité</button>
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 500">500 Ko/s</button>
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 1024">1 Mo/s</button>
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 2048">2 Mo/s</button>
+              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 0">{{ tx("Illimité") }}</button>
+              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 500">{{ tx("500 Ko/s") }}</button>
+              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 1024">{{ tx("1 Mo/s") }}</button>
+              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 2048">{{ tx("2 Mo/s") }}</button>
             </div>
           </div>
           <div class="modal-footer">
-            <button class="btn" @click="speedModalTask = null">Annuler</button>
-            <button class="btn btn-primary" @click="applyTaskSpeedLimit">Appliquer</button>
+            <button class="btn" @click="speedModalTask = null">{{ tx("Annuler") }}</button>
+            <button class="btn btn-primary" @click="applyTaskSpeedLimit">{{ tx("Appliquer") }}</button>
           </div>
         </div>
       </div>
     </Transition>
 
-    <!-- Toast Notification -->
-    <Transition name="fade">
-      <div v-if="toastMessage" class="toast" :class="`toast-${toastType}`">
-        {{ toastMessage }}
-      </div>
-    </Transition>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { language, tx } from '@/utils/locale';
+import ProxyRotationButton from '@/components/ProxyRotationButton.vue';
+import VerificationPrompt from '@/components/VerificationPrompt.vue';
+import { ref, computed, onMounted, onActivated } from 'vue';
 import { useDownloadStore } from '@/stores/downloads';
 import { useLibraryStore } from '@/stores/library';
 import { usePlayerStore } from '@/stores/player';
+import { useNotifications } from '@/stores/notifications';
 import type { DownloadTask } from '@/types';
 
+defineOptions({name: 'DownloadsView'});
+const notifications = useNotifications();
 const downloadStore = useDownloadStore();
+const downloadChallenges = computed(() => downloadStore.tasks.filter(t => t.status === 'verification_required' && t.verificationDomain).map(t => ({domain: t.verificationDomain!, url: t.verificationUrl || undefined, code: 'verification_required', error: t.error || ''})));
+let firstActivation = true;
+onActivated(() => { if (firstActivation) firstActivation = false; else void downloadStore.fetchTasks(); });
 const libraryStore = useLibraryStore();
 const playerStore = usePlayerStore();
 
@@ -523,18 +506,10 @@ const draggedTaskId = ref<string | number | null>(null);
 const speedModalTask = ref<DownloadTask | null>(null);
 const taskSpeedLimitInput = ref<number>(0);
 
-// Toast state
-const toastMessage = ref<string | null>(null);
-const toastType = ref<'success' | 'error' | 'info'>('info');
-let toastTimer: any = null;
-
-function showToast(msg: string, type: 'success' | 'error' | 'info' = 'info') {
-  toastMessage.value = msg;
-  toastType.value = type;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toastMessage.value = null;
-  }, 4000);
+function showToast(message: string, tone: 'success' | 'error' | 'info' = 'info') { notifications.notify(message, tone); }
+async function performAction(action: () => Promise<unknown>) {
+  try { await action(); }
+  catch (error) { showToast(error instanceof Error ? error.message : 'Impossible de terminer cette action.', 'error'); }
 }
 
 onMounted(async () => {
@@ -589,7 +564,7 @@ const completedCount = computed(() => {
 const errorTasksCount = computed(() => {
   return downloadStore.tasks.filter((t) => {
     const s = (t.status || '').toLowerCase();
-    return ['error', 'failed', 'cancelled'].includes(s);
+    return ['error', 'failed'].includes(s);
   }).length;
 });
 
@@ -611,7 +586,7 @@ const filteredTasks = computed<DownloadTask[]>(() => {
   if (tab.value === 'errors') {
     return list.filter((t) => {
       const s = (t.status || '').toLowerCase();
-      return ['error', 'failed', 'cancelled'].includes(s);
+      return ['error', 'failed'].includes(s);
     });
   }
   return list;
@@ -656,8 +631,7 @@ function getQueueIndex(taskId: string | number): number {
 function getVisualProgress(task: DownloadTask): number {
   const s = (task.status || '').toLowerCase();
   if (s === 'completed') return 100;
-  if (s === 'error' || s === 'failed') return Math.min(100, Math.max(10, task.progress || 0));
-  return task.progress || 0;
+  return Math.min(99, Math.max(0, task.progress || 0));
 }
 
 function getStatusBadgeClass(task: DownloadTask): string {
@@ -673,7 +647,7 @@ function getStatusBadgeClass(task: DownloadTask): string {
 function getStatusLabel(task: DownloadTask): string {
   const s = (task.status || '').toLowerCase();
   switch (s) {
-    case 'downloading': return 'En cours';
+    case 'downloading': return ({resolving: 'Préparation', video: 'Téléchargement vidéo', subtitles: 'Sous-titres', assembling: 'Assemblage', muxing: 'Fusion des sous-titres', verifying: 'Vérification du fichier'} as Record<string, string>)[task.phase || 'video'] || 'En cours';
     case 'queued':
     case 'pending': return 'En attente';
     case 'scheduled': return 'Planifié';
@@ -683,9 +657,19 @@ function getStatusLabel(task: DownloadTask): string {
     case 'error':
     case 'failed': return 'Échec';
     case 'cancelled': return 'Annulé';
-    case 'muxing': return 'Muxing';
+    case 'muxing': return 'Fusion des sous-titres';
     default: return task.status;
   }
+}
+
+function progressText(task: DownloadTask): string {
+  const downloaded = formatBytes(task.bytesDownloaded);
+  if (!task.totalBytes || task.totalBytes <= 0) return `${downloaded} téléchargés — taille totale inconnue`;
+  return `${getVisualProgress(task).toFixed(1)} % · ${downloaded} / ${formatBytes(task.totalBytes)}`;
+}
+function phaseDescription(task: DownloadTask): string {
+  if (task.status !== 'downloading') return '';
+  return ({resolving: 'Recherche d’un flux disponible…', subtitles: 'La vidéo est récupérée. Téléchargement des pistes de sous-titres…', assembling: 'Assemblage des segments vidéo…', muxing: 'Intégration des sous-titres dans la vidéo…', verifying: 'Contrôle du fichier vidéo et de ses pistes audio…'} as Record<string, string>)[task.phase || ''] || '';
 }
 
 function getVerifBadgeClass(status?: string): string {
@@ -734,7 +718,7 @@ function formatDateTime(isoStr?: string | null): string {
   if (!isoStr) return '';
   try {
     const d = new Date(isoStr);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    return d.toLocaleTimeString(language.value, { hour: '2-digit', minute: '2-digit' }) + ' ' + d.toLocaleDateString(language.value, { month: 'short', day: 'numeric' });
   } catch {
     return isoStr;
   }
@@ -828,20 +812,18 @@ async function retryAllErrors() {
   });
   if (errTasks.length === 0) return;
 
-  for (const t of errTasks) {
-    try {
-      await downloadStore.redownloadTask(t.id);
-    } catch {}
+  let restarted = 0;
+  for (const task of errTasks) {
+    try { await downloadStore.redownloadTask(task.id); restarted++; }
+    catch (error) { showToast(error instanceof Error ? error.message : `Impossible de relancer l’épisode ${task.episodeNumber}.`, 'error'); }
   }
-  showToast(`${errTasks.length} téléchargement(s) relancé(s) !`, 'success');
-  tab.value = 'queue';
+  if (restarted) { showToast(`${restarted} téléchargement(s) relancé(s).`, 'success'); tab.value = 'queue'; }
 }
 
-function confirmCancelAll() {
-  if (window.confirm('Êtes-vous sûr de vouloir annuler tous les téléchargements actifs et en attente ?')) {
-    downloadStore.cancelAll();
-    showToast('Tous les téléchargements ont été annulés.', 'info');
-  }
+async function confirmCancelAll() {
+  if (!window.confirm(tx('Annuler tous les téléchargements actifs et en attente ?'))) return;
+  try { await downloadStore.cancelAll(); showToast('Téléchargements annulés.', 'info'); }
+  catch (error) { showToast(error instanceof Error ? error.message : 'Impossible d’annuler les téléchargements.', 'error'); }
 }
 
 // Media Playback (Mode Cinéma local)
@@ -1488,5 +1470,15 @@ async function applyTaskSpeedLimit() {
 .expand-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+</style>
+
+<style scoped>
+@media (max-width: 768px) {
+  .download-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .connection-status { grid-column: 1 / -1; }
+  .download-actions .btn { min-height: 44px; }
+  .download-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .download-tabs .tab-btn { padding: 8px 4px; min-height: 44px; font-size: 12px; justify-content: center; }
 }
 </style>

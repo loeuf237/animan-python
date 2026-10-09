@@ -1,5 +1,6 @@
 from animan.services.source_http import VerificationRequired
 import asyncio
+from animan.services.i18n_service import current_lang
 import logging
 from typing import List, Optional, Dict, Any
 from urllib.parse import urlparse
@@ -62,7 +63,7 @@ async def home(request: Request):
             "enabledExtensions": enabled_extensions,
             "results": None,
             "query": "",
-            "source": "french-manga",
+            "source": "animepahe" if current_lang() == "en" else "french-manga",
         }
     )
 
@@ -212,7 +213,7 @@ async def search_api(
             challenges.append({**response.to_dict(), "source": sid})
         elif isinstance(response, BaseException):
             logger.debug("Search source %s failed: %s", sid, response)
-            errors.append({"source": sid, "domain": urlparse(service.base_url).hostname or '',
+            errors.append({"source": sid, "url": service.base_url, "domain": urlparse(service.base_url).hostname or '',
                            "message": "La source est momentanément inaccessible"})
         else:
             for item in response or []:
@@ -392,39 +393,33 @@ async def api_home_feed():
     """
     enabled_extensions = extension_service.get_enabled_container_sources()
 
-    async def _safe_fetch(coro, default=None, timeout: float = 6.0):
-        try:
-            return await asyncio.wait_for(coro, timeout=timeout)
-        except VerificationRequired:
-            raise
-        except Exception as e:
-            logger.debug("[home_feed] Source fetch error: %s", e)
-            return default if default is not None else []
+    async def fetch(service):
+        return await asyncio.wait_for(service.get_latest_releases(), timeout=12)
 
-    fm_task = _safe_fetch(scraping_service.get_latest_releases())
-    va_task = _safe_fetch(voiranime_service.get_latest_releases())
-    ap_task = _safe_fetch(animepahe_service.get_latest_releases())
-
-    ext_tasks = []
-    for ext in enabled_extensions[:4]:
-        if hasattr(ext, "get_latest_releases"):
-            ext_tasks.append(_safe_fetch(ext.get_latest_releases(), default=[]))
-        else:
-            ext_tasks.append(asyncio.sleep(0, result=[]))
-
-    all_res = await asyncio.gather(fm_task, va_task, ap_task, *ext_tasks, return_exceptions=True)
+    # Every enabled source receives a result or a visible error; no first-four cutoff.
+    providers = [("french-manga", scraping_service), ("voir-anime", voiranime_service),
+                 ("animepahe", animepahe_service)] + [(ext.pkg, ext) for ext in enabled_extensions]
+    all_res = await asyncio.gather(*(fetch(service) for _, service in providers), return_exceptions=True)
     latest_fm = all_res[0] if not isinstance(all_res[0], Exception) else []
     latest_va = all_res[1] if not isinstance(all_res[1], Exception) else []
     latest_ap = all_res[2] if not isinstance(all_res[2], Exception) else []
 
     ext_releases = {}
-    for idx, ext in enumerate(enabled_extensions[:4]):
+    for idx, ext in enumerate(enabled_extensions):
         res = all_res[3 + idx]
         if not isinstance(res, Exception) and res:
             ext_releases[ext.pkg] = {
                 "name": ext.name,
                 "releases": [r.model_dump() for r in res[:24]],
             }
+
+    challenges, errors = [], []
+    for (sid, service), response in zip(providers, all_res):
+        if isinstance(response, VerificationRequired):
+            challenges.append({**response.to_dict(), "source": sid})
+        elif isinstance(response, BaseException):
+            errors.append({"source": sid, "message": "La source est momentanément inaccessible",
+                           "url": service.base_url, "domain": urlparse(service.base_url).hostname or ""})
 
     favorites = [f.to_dict() for f in library_service.get_all_favorites()]
     history_items = [t.to_task().to_dict() for t in library_service.get_history()[:15]]
@@ -439,6 +434,7 @@ async def api_home_feed():
 
     return {
         "success": True,
+        "challenges": challenges, "errors": errors,
         "latestReleases": releases_map,
         "latestFrenchManga": [r.model_dump() for r in latest_fm],
         "latestVoirAnime": [r.model_dump() for r in latest_va],

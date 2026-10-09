@@ -1,4 +1,5 @@
 import json
+import asyncio
 import shutil
 import socket
 import struct
@@ -139,8 +140,13 @@ async def test_mux_validates_output_and_updates_size(video, monkeypatch, contain
     episode = task(video, [{"url": "https://cdn.example/fr.srt", "lang": "fr"}])
     episode.totalBytes = video.stat().st_size
     mock_http(monkeypatch, lambda request: httpx.Response(200, content=SRT))
+    events = []
+    monkeypatch.setattr(manager, "broadcast_update", lambda item: events.append(item.to_dict()))
     await manager._download_subtitles(episode)
     await manager._finalize_task(episode)
+    assert [event["phase"] for event in events[:3]] == ["subtitles", "muxing", "verifying"]
+    assert events[1]["status"] == "MUXING"
+    assert events[-1]["status"] == "COMPLETED"
     assert episode.status == DownloadStatus.COMPLETED
     assert episode.totalBytes == episode.downloadedBytes == Path(episode.savePath).stat().st_size
     assert verification_service.verify_file(episode.savePath, expected_size=episode.totalBytes).valid
@@ -161,17 +167,25 @@ async def test_mux_failure_preserves_files_and_reports_failure(video):
     assert not list(video.parent.glob(".animan-mux-*"))
 
 
-def test_existing_mkv_not_overwritten(video):
+@pytest.mark.parametrize("hardlinks", [True, False])
+def test_existing_mkv_is_preserved_and_new_export_gets_unique_name(video, monkeypatch, hardlinks):
+    if not hardlinks:
+        import errno
+        import os
+        def unsupported(*args):
+            raise OSError(errno.EOPNOTSUPP, "Hard links unsupported")
+        monkeypatch.setattr(os, "link", unsupported)
     target = video.with_suffix(".mkv")
     target.write_bytes(b"existing video")
     sidecar = video.with_suffix(".srt")
     sidecar.write_bytes(SRT)
     episode = task(video, [])
     episode.savePathSubtitle = json.dumps([str(sidecar)])
-    with pytest.raises(FileExistsError):
-        manager._mux_subtitles_with_ffmpeg(episode)
+    manager._mux_subtitles_with_ffmpeg(episode)
     assert target.read_bytes() == b"existing video"
-    assert video.exists() and sidecar.exists()
+    assert Path(episode.savePath) != target
+    assert any(stream["codec_type"] == "subtitle" for stream in streams(episode.savePath))
+    assert not video.exists() and not sidecar.exists()
 
 
 def test_normalize_rejects_invalid_structure():
@@ -230,3 +244,98 @@ async def test_successful_mux_is_not_repeated_on_resume(video, monkeypatch):
     monkeypatch.setattr(manager, "_create_async_client", unexpected_request)
     await manager._download_subtitles(episode)
     assert len([s for s in streams(episode.savePath) if s["codec_type"] == "subtitle"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_subtitle_timeout_retries_with_nonempty_error(tmp_path, isolated, monkeypatch):
+    episode = task(tmp_path / "episode.mp4", [{"url": "https://cdn.example/fr.srt"}])
+    requests = []
+    def handler(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("", request=request)
+    mock_http(monkeypatch, handler)
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    with pytest.raises(SubtitleError, match="Délai réseau dépassé après 3 tentatives"):
+        await manager._download_subtitles(episode)
+    assert len(requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_partial_subtitles_are_cached_across_retries(tmp_path, isolated, monkeypatch):
+    episode = task(tmp_path / "episode.mp4", [
+        {"url": "https://cdn.example/fr.srt", "lang": "fr"},
+        {"url": "https://cdn.example/en.srt", "lang": "en"}])
+    first = True
+    seen = []
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(503 if first and request.url.path == "/en.srt" else 200, content=SRT)
+    mock_http(monkeypatch, handler)
+    monkeypatch.setattr(asyncio, "sleep", AsyncMock())
+    with pytest.raises(SubtitleError, match="HTTP 503"):
+        await manager._download_subtitles(episode)
+    assert len(json.loads(episode.savePathSubtitle)) == 1
+    first = False
+    seen.clear()
+    await manager._download_subtitles(episode)
+    assert seen == ["/en.srt"]
+    assert len(json.loads(episode.savePathSubtitle)) == 2
+    assert not list(tmp_path.glob(".animan-sub-*"))
+
+
+@pytest.mark.asyncio
+async def test_retry_finalizes_local_video_without_resolving_player(video, monkeypatch):
+    episode = task(video, [{"url": "https://cdn.example/fr.srt", "lang": "fr"}])
+    mock_http(monkeypatch, lambda request: httpx.Response(200, content=SRT))
+    await manager._download_subtitles(episode)
+    monkeypatch.setattr(manager, "process_queue", AsyncMock())
+    # The local fast path must work even with no remote video URL.
+    await manager._execute_download(episode)
+    assert episode.status == DownloadStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_legacy_missing_mp4_recovers_verified_mkv(video, monkeypatch):
+    episode = task(video, [{"url": "https://cdn.example/fr.srt", "lang": "fr"}])
+    mock_http(monkeypatch, lambda request: httpx.Response(200, content=SRT))
+    await manager._download_subtitles(episode)
+    stale = task(video, json.loads(episode.subtitlesJson))
+    manager._mux_subtitles_with_ffmpeg(episode)
+    assert not video.exists()
+    assert manager._recover_muxed_file(stale)
+    assert stale.savePath == episode.savePath
+    assert not manager._has_pending_subtitles(stale)
+    incompatible = task(video, [{"url": "https://cdn.example/de.srt", "lang": "de", "label": "Allemand"}])
+    assert not manager._recover_muxed_file(incompatible)
+
+
+@pytest.mark.asyncio
+async def test_expired_subtitle_url_is_refreshed_once_without_losing_metadata(video, monkeypatch):
+    episode = task(video, [{"url": "https://cdn.example/expired.srt", "lang": "fr"}])
+    episode.source = "custom"
+    episode.fileUrl = "https://player.example/embed/123"
+    seen = []
+    def handler(request):
+        seen.append(request.url.path)
+        return httpx.Response(403 if request.url.path == "/expired.srt" else 200, content=SRT)
+    mock_http(monkeypatch, handler)
+    from animan.services.extension_service import extension_service
+    from animan.services.extractors import extractor_registry
+    monkeypatch.setattr(extension_service, "get_container_source_by_id", lambda source: None)
+    monkeypatch.setattr(extension_service, "get_enabled_container_sources", lambda: [])
+    monkeypatch.setattr(extractor_registry, "is_known_embed", lambda url: True)
+    resolver = AsyncMock(return_value={"videoUrl": "https://cdn.example/episode.mp4", "serverType": "custom",
+        "subtitles": [{"url": "https://cdn.example/fresh.srt", "lang": "fr"}]})
+    monkeypatch.setattr(manager, "resolve_imported_video_stream", resolver)
+    monkeypatch.setattr(manager, "process_queue", AsyncMock())
+    await manager._execute_download(episode)
+    assert episode.status == DownloadStatus.COMPLETED
+    assert resolver.await_count == 1
+    assert seen == ["/expired.srt", "/fresh.srt"]
+
+
+def test_empty_reextraction_keeps_pending_subtitles(tmp_path):
+    episode = task(tmp_path / "episode.mp4", [{"url": "https://cdn.example/fr.srt"}])
+    manager._update_resolved_subtitles(episode, [], "https://cdn.example")
+    assert len(json.loads(episode.subtitlesJson)) == 1
+    assert manager._has_pending_subtitles(episode)
