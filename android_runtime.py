@@ -110,7 +110,11 @@ def native_probe():
     response = curl_cffi.requests.get("https://example.com", impersonate="chrome", timeout=20)
     assert response.status_code == 200
     assert lxml.etree.fromstring(b"<probe/>").tag == "probe"
-    media = media_pipeline_probe()
+    import subprocess
+    try:
+        media = media_pipeline_probe()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError(f"Native media validation failed: {exc}; diagnostics: {str(exc.stderr)[-2048:]}") from exc
     return json.dumps({"python_engine": True, "curl_cffi": curl_cffi.__version__,
                        "pydantic": pydantic.__version__, "ffmpeg_jni": True, "tls": True, **media})
 
@@ -174,6 +178,7 @@ def media_pipeline_probe():
             write_metadata(Path(direct.savePath + ".part.resume.json"), {"validator": '"native-fixture-v1"', "total": len(payload)})
             await manager._download_single_file(direct, url)
             assert direct.status == DownloadStatus.COMPLETED, direct.error
+            assert not direct.error, direct.error
             assert requested_ranges and direct.savePath.endswith(".mkv")
             streams = json.loads(media_tools.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", direct.savePath], check=True).stdout)["streams"]
             assert any(s["codec_type"] == "subtitle" and s["tags"].get("language") == "eng" for s in streams)
@@ -182,9 +187,12 @@ def media_pipeline_probe():
             tasks.append(hls); manager.tasks[hls.id] = hls; manager.task_order.append(hls.id)
             await manager._download_hls_segments_native(hls, "https://fixtures.animan.invalid/playlist.m3u8")
             assert hls.status == DownloadStatus.COMPLETED, hls.error
+            assert not hls.error, hls.error
             verification = verification_service.verify_file(hls.savePath)
             assert verification.valid and "mp4" in verification.formatName, verification.error
-            return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True, "storage_export": True, "decode_verification": True}
+            # Instrumentation also opens the shared copies and compares hashes.
+            return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True,
+                    "media_paths": [direct.savePath, hls.savePath], "decode_verification": True}
         finally:
             manager._create_async_client, manager_module.is_safe_url = original_client, original_safe
             for task in tasks:

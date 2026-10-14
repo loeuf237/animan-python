@@ -18,6 +18,9 @@ import android.graphics.Bitmap
 import android.webkit.WebView
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import android.net.Uri
+import android.provider.MediaStore
+import java.security.MessageDigest
 
 @RunWith(AndroidJUnit4::class)
 class EmbeddedEngineTest {
@@ -67,6 +70,27 @@ class EmbeddedEngineTest {
             val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe").toString())
             report.put("vue_rendered", true)
             report.put("webview_version", WebView.getCurrentWebViewPackage()?.versionName)
+            val mediaPaths = report.getJSONArray("media_paths")
+            for (index in 0 until mediaPaths.length()) {
+                val source = File(mediaPaths.getString(index))
+                val uri = Uri.parse(NativeHooks.exportFile(source.path, "validation"))
+                fun hash(input: java.io.InputStream): ByteArray = input.use {
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    val buffer = ByteArray(65536)
+                    while (true) {
+                        val count = it.read(buffer)
+                        if (count < 0) break
+                        digest.update(buffer, 0, count)
+                    }
+                    digest.digest()
+                }
+                val shared = requireNotNull(context.contentResolver.openInputStream(uri))
+                assertArrayEquals("Shared download differs from verified private media", hash(source.inputStream()), hash(shared))
+                context.contentResolver.query(uri, arrayOf(MediaStore.Downloads.IS_PENDING), null, null, null)?.use {
+                    assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+                } ?: fail("Shared download was not published")
+            }
+            report.put("storage_export", true)
             for (key in listOf("python_engine", "ffmpeg_jni", "tls", "direct_resume", "aes128_hls", "subtitle_mux", "storage_export", "decode_verification")) assertTrue(key, report.getBoolean(key))
             assertEquals(200, request("/api/download/status").first)
             println("ANIMAN_ANDROID_PROBE=" + report.toString())

@@ -45,7 +45,7 @@ the separate `android-v0.1.0-beta.1` tag and never modifies desktop `v0.1.0`.
 
 Release gates cover native imports, Chrome/TLS requests, SQLite, packaged Vue,
 loopback authentication, Activity recreation, resumed direct media, AES-128 HLS,
-subtitle mux and MediaStore export. Logs and a screenshot are saved as Actions
+subtitle mux and MediaStore export with matching content hashes. Logs and a screenshot are saved as Actions
 artifacts. A beta may state `physical_device_tested: false`; it must not claim
 that real-device power management or all playback codecs were tested.
 
@@ -60,3 +60,7 @@ FFmpeg/FFprobe are native JNI libraries, with the LGPL package and corresponding
 source link recorded in [the release notes](releases/android-v0.1.0-beta.1.md).
 APK checks inspect Python extension libraries inside Chaquopy's nested archives
 as well as normal `lib/arm64-v8a` libraries.
+Native media commands are serialized; diagnostic collection is bounded before
+storage rather than by truncating an already unbounded FFmpegKit session log.
+A native worker which fails to stop after cancellation prevents subsequent
+commands until the application restarts.
