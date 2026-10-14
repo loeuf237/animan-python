@@ -11,7 +11,7 @@ import subprocess
 import time
 
 
-def validate(api, app, tests, output):
+def validate(api, app, tests, output, boot_only=False):
     sdk = Path(os.environ['ANDROID_HOME'])
     output.mkdir(parents=True, exist_ok=True)
     backend = sdk / 'emulator/qemu/linux-x86_64/qemu-system-aarch64-headless'
@@ -42,6 +42,9 @@ def validate(api, app, tests, output):
             print('Native guest ABI:', abi, flush=True)
             if not abi.startswith('arm64-v8a') or 'x86' in abi:
                 raise RuntimeError('Test must run on an ARM64 guest without native translation')
+            if boot_only:
+                print('ARM64 emulator boot probe passed', flush=True)
+                return
             for namespace, key in [('global', 'window_animation_scale'), ('global', 'transition_animation_scale'), ('global', 'animator_duration_scale')]:
                 subprocess.run(['adb', 'shell', 'settings', 'put', namespace, key, '0'], check=True, timeout=20)
             subprocess.run(['adb', 'shell', 'input', 'keyevent', '82'], check=True, timeout=20)
@@ -60,5 +63,6 @@ if __name__ == '__main__':
     parser.add_argument('app', type=Path)
     parser.add_argument('tests', type=Path)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--boot-only', action='store_true')
     args = parser.parse_args()
-    validate(args.api, args.app, args.tests, args.output)
+    validate(args.api, args.app, args.tests, args.output, args.boot_only)
