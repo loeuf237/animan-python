@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.view.View
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowCompat
 import android.webkit.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -34,6 +35,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
@@ -71,7 +73,7 @@ class MainActivity : AppCompatActivity() {
                     val cookies = CookieManager.getInstance()
                     cookies.setAcceptCookie(true)
                     cookies.setCookie(EngineHost.baseUrl, "animan_android_session=${EngineHost.token}; Path=/; HttpOnly; SameSite=Strict") {
-                        binding.webView.loadUrl(EngineHost.baseUrl + "/spa/")
+                        if (!isDestroyed && !isFinishing) binding.webView.loadUrl(EngineHost.baseUrl + "/spa/")
                     }
                     return@launch
                 }

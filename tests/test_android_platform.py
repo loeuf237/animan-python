@@ -83,3 +83,41 @@ async def test_android_rejects_unauthenticated_websocket():
     async def send(message): output.append(message)
     await AndroidSessionMiddleware(endpoint, "a" * 64)({"type": "websocket", "headers": []}, None, send)
     assert output == [{"type": "websocket.close", "code": 1008}]
+
+
+@pytest.mark.asyncio
+async def test_native_export_does_not_complete_a_paused_transfer(monkeypatch, tmp_path):
+    from animan import platform_events
+    from animan.models.download_task import DownloadTask, DownloadStatus
+    from animan.services.download_manager import DownloadManagerService
+    from animan.services.library_service import library_service
+    from animan.services.verification_service import verification_service, VerificationResult
+    manager = DownloadManagerService()
+    task = DownloadTask(status=DownloadStatus.DOWNLOADING, savePath=str(tmp_path / "episode.mp4"))
+    monkeypatch.setattr(verification_service, "verify_file", lambda **kwargs: VerificationResult(valid=True, status="VALID"))
+    monkeypatch.setattr(library_service, "save_task", lambda task: None)
+    def export(task):
+        assert task.status == DownloadStatus.DOWNLOADING
+        task.paused = True
+    monkeypatch.setattr(platform_events, "completed_handler", export)
+    await manager._finalize_task(task)
+    assert task.status == DownloadStatus.PAUSED
+    assert task.completedAt is None
+
+
+def test_interrupted_mux_is_restored_as_paused(monkeypatch, tmp_path):
+    from animan.models.download_task import DownloadTask, DownloadStatus
+    from animan.services.download_manager import DownloadManagerService
+    from animan.services.library_service import library_service
+    manager = DownloadManagerService()
+    task = DownloadTask(status=DownloadStatus.MUXING, savePath=str(tmp_path / "missing.mp4"))
+    class Entity:
+        def to_task(self): return task
+    monkeypatch.setattr(library_service, "get_unfinished_tasks", lambda: [Entity()])
+    monkeypatch.setattr(library_service, "save_task", lambda task: None)
+    manager.init_from_db()
+    assert task.status == DownloadStatus.PAUSED
+    task.status = DownloadStatus.MUXING
+    monkeypatch.setattr(manager, "_trigger_process_queue", lambda: None)
+    manager.pause_all_downloads()
+    assert task.paused and task.status == DownloadStatus.PAUSED

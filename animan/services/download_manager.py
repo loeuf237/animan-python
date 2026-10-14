@@ -168,7 +168,7 @@ class DownloadManagerService:
                         if task.totalBytes > 0:
                             task.progress = min(99.9, (task.downloadedBytes / task.totalBytes) * 100.0)
 
-                if task.status in [DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING]:
+                if task.status in [DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING, DownloadStatus.MUXING]:
                     task.status = DownloadStatus.PAUSED
                     task.speed = 0
                     library_service.save_task(task)
@@ -1149,7 +1149,7 @@ class DownloadManagerService:
 
     def pause_all_downloads(self):
         for t in self.tasks.values():
-            if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED]:
+            if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED, DownloadStatus.MUXING]:
                 t.paused = True
                 t.status = DownloadStatus.PAUSED
                 t.speed = 0
@@ -2587,7 +2587,7 @@ class DownloadManagerService:
         merged = False
         if self.is_ffmpeg_available() and task.fileName.endswith(".mp4"):
             remux_cmd = [
-                "ffmpeg", "-y",
+                "ffmpeg", "-v", "error", "-y",
                 "-f", "concat",
                 "-safe", "0",
                 "-i", str(concat_file),

@@ -15,6 +15,9 @@ import java.net.Proxy
 import java.net.URL
 import java.io.File
 import android.graphics.Bitmap
+import android.webkit.WebView
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class EmbeddedEngineTest {
@@ -45,11 +48,24 @@ class EmbeddedEngineTest {
             assertTrue(page!!.second.contains("id=\"app\""))
             assertEquals(401, request("/api/download/status", false).first)
             assertEquals(200, request("/api/download/status").first)
+            var hydrated = false
+            val uiDeadline = System.currentTimeMillis() + 60000
+            while (!hydrated && System.currentTimeMillis() < uiDeadline) {
+                val checked = CountDownLatch(1)
+                scenario.onActivity { activity ->
+                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#app .app-shell'))") {
+                        hydrated = it == "true"; checked.countDown()
+                    }
+                }
+                assertTrue(checked.await(5, TimeUnit.SECONDS))
+                if (!hydrated) Thread.sleep(500)
+            }
+            assertTrue("Vue did not render in the installed System WebView", hydrated)
             val port = EngineHost.port
             scenario.recreate()
             assertEquals("Activity recreation started another server", port, EngineHost.port)
             val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe").toString())
-            for (key in listOf("python_engine", "ffmpeg_jni", "tls", "direct_resume", "aes128_hls", "subtitle_mux", "storage_export")) assertTrue(key, report.getBoolean(key))
+            for (key in listOf("python_engine", "ffmpeg_jni", "tls", "direct_resume", "aes128_hls", "subtitle_mux", "storage_export", "decode_verification")) assertTrue(key, report.getBoolean(key))
             assertEquals(200, request("/api/download/status").first)
             println("ANIMAN_ANDROID_PROBE=" + report.toString())
             val instrumentation = InstrumentationRegistry.getInstrumentation()

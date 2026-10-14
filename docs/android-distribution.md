@@ -2,7 +2,8 @@
 
 The current target is Android 10+ / ARM64, Python 3.13 and Chaquopy 17.1.0.
 `android/requirements.txt` pins the runtime. `scripts/android_native_wheels.py`
-builds cffi 2.0.0 and pydantic-core 2.41.5 against a pinned Chaquopy toolchain;
+builds cffi 2.0.0, pydantic-core 2.41.5 and lxml 6.1.3 with recent libxml2/libxslt
+against a pinned Chaquopy toolchain;
 curl_cffi 0.16.3 uses its unchanged official ARM64 wheel. Desktop wheels are never
 renamed into Android artifacts. AES uses javax.crypto rather than an outdated
 Android cryptography/OpenSSL wheel.
@@ -49,7 +50,9 @@ artifacts. A beta may state `physical_device_tested: false`; it must not claim
 that real-device power management or all playback codecs were tested.
 
 Media copies in the private library and shared Downloads occupy space twice.
-Private partials/cookies/database are excluded from Android backup. No broad
+Private partials/cookies/database are excluded from Android backup. Engine state
+(including installed extensions and imported proxy lists) uses persistent private
+storage rather than the evictable Android cache. No broad
 storage permission is requested. Android 15's dataSync time budget and background
 start restrictions are handled by pausing the queue, not by bypassing OS policy.
 

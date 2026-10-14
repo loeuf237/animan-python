@@ -79,6 +79,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7")
+    // The maintained AAR still references these original exception helpers but
+    // does not declare them in its published dependency metadata.
+    implementation("com.arthenica:smart-exception-java:0.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:rules:1.6.1")

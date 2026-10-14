@@ -37,13 +37,17 @@ class VerificationWindow:
 def start(data_dir, cache_dir, port, token, test_mode=False):
     global _loop
     os.environ.update({
-        "ANIMAN_DATA_DIR": data_dir, "ANIMAN_CACHE_DIR": cache_dir,
+        # Shared engine cache also contains installed extensions and user proxy
+        # lists. Android may evict cacheDir, so preserve this state in filesDir.
+        "ANIMAN_DATA_DIR": data_dir, "ANIMAN_CACHE_DIR": str(Path(data_dir) / "engine-state"),
         "ANIMAN_DB_PATH": str(Path(data_dir) / "db/animan.sqlite3"),
         "ANIMAN_DOWNLOAD_DIR": str(Path(data_dir) / "downloads"),
         "ANIMAN_HOST": "127.0.0.1", "ANIMAN_PORT": str(port),
     })
     if test_mode:
         os.environ["ANIMAN_STARTUP_REFRESH"] = "false"
+    import tempfile
+    tempfile.tempdir = cache_dir
     from java import jclass
     from animan import media_tools, platform_events
     media_tools.configure_android(jclass("com.animan.app.MediaBridge"), jclass("com.animan.app.CryptoBridge"))
@@ -127,16 +131,16 @@ def media_pipeline_probe():
     root.mkdir(parents=True, exist_ok=True)
     source = root / "fixture.mp4"
     media_tools.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=160x90:r=10",
-                     "-f", "lavfi", "-i", "sine=frequency=440", "-t", "2", "-c:v", "mpeg4", "-c:a", "aac",
+                     "-f", "lavfi", "-i", "sine=frequency=440", "-t", "40", "-c:v", "mpeg4", "-c:a", "aac",
                      str(source)], check=True)
     payload = source.read_bytes()
     segment = root / "fixture.ts"
-    media_tools.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-c:v", "mpeg2video",
+    media_tools.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-t", "2", "-c:v", "mpeg2video",
                      "-c:a", "aac", "-f", "mpegts", str(segment)], check=True)
     key, iv = b"0123456789abcdef", bytes(16)
     cipher = jclass("javax.crypto.Cipher").getInstance("AES/CBC/PKCS5Padding")
     cipher.init(1, jclass("javax.crypto.spec.SecretKeySpec")(key, "AES"), jclass("javax.crypto.spec.IvParameterSpec")(iv))
-    encrypted = bytes(cipher.doFinal(segment.read_bytes()))
+    encrypted = bytes(value & 255 for value in cipher.doFinal(segment.read_bytes()))
     requested_ranges = []
 
     def handler(request):
@@ -180,7 +184,7 @@ def media_pipeline_probe():
             assert hls.status == DownloadStatus.COMPLETED, hls.error
             verification = verification_service.verify_file(hls.savePath)
             assert verification.valid and "mp4" in verification.formatName, verification.error
-            return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True, "storage_export": True}
+            return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True, "storage_export": True, "decode_verification": True}
         finally:
             manager._create_async_client, manager_module.is_safe_url = original_client, original_safe
             for task in tasks:
