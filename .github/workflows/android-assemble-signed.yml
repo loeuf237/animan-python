@@ -30,3 +30,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
         run: python scripts/android_assemble_signed.py "$DRAFT_RELEASE_ID" assembled-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-signed-under-test
+          path: assembled-release/*
+          if-no-files-found: error

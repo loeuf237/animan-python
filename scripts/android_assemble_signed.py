@@ -34,7 +34,14 @@ def assemble(release_id, output):
     info=json.loads(get('/releases/assets/'+str(assets['Android-build-info.json']['id']),'application/octet-stream'))
     assert info['signing_certificate_sha256'] in cert and not info['validation_key_only']
     subprocess.run([str(tools/'zipalign'),'-c','-P','16','4',str(target)],check=True)
-    subprocess.run(['gh','release','upload','android-v0.1.0-beta.1',str(target),'--clobber','--repo',REPOSITORY],check=True)
+    asset=assets.get(manifest['filename'])
+    if asset is None or asset.get('state')!='uploaded' or asset.get('digest')!='sha256:'+manifest['sha256']:
+        subprocess.run(['gh','release','upload','android-v0.1.0-beta.1',str(target),'--clobber','--repo',REPOSITORY],check=True)
+    # Publish only verified signing outputs as a test artifact. The tester can
+    # read this with actions:read; unpublished release assets require writers.
+    for name in ('Animan-instrumentation.apk','Android-build-info.json','SHA256SUMS.txt'):
+        (output/name).write_bytes(get('/releases/assets/'+str(assets[name]['id']),'application/octet-stream'))
+    target.rename(output/'Animan-Android-under-test.apk')
     print('Checksummed APK assembled and verified; release remains a draft')
 
 if __name__=='__main__':

@@ -5,8 +5,8 @@ on:
       candidate_run_id:
         description: Build run containing the unchanged native media test APKs
         required: true
-      draft_release_id:
-        description: Draft Android release containing locally signed app and instrumentation
+      signed_run_id:
+        description: Assembly run containing the verified locally signed APKs
         required: true
 permissions:
   contents: read
@@ -34,11 +34,12 @@ jobs:
           path: android-validation
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
-      - name: Download locally signed outputs without private key
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
-        run: python scripts/android_fetch_signed.py "$DRAFT_RELEASE_ID" android-validation
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-signed-under-test
+          path: android-validation
+          run-id: ${{ inputs.signed_run_id }}
+          github-token: ${{ github.token }}
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
