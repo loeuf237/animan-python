@@ -1,0 +1,32 @@
+name: Assemble signed Android draft from verified chunks
+on:
+  workflow_dispatch:
+    inputs:
+      draft_release_id:
+        required: true
+        description: Android draft release containing signed APK chunks
+permissions:
+  contents: read
+jobs:
+  assemble:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools build-tools;35.0.0
+      - name: Assemble and verify already signed APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
+        run: python scripts/android_assemble_signed.py "$DRAFT_RELEASE_ID" assembled-release
