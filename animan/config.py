@@ -19,7 +19,9 @@ if IS_ANDROID:
     if not _data_dir:
         _data_dir = "/data/data/com.animan.app/files"
     APP_STORAGE_DIR = Path(_data_dir)
-    DEFAULT_DOWNLOAD_DIR = "/storage/emulated/0/Download/Animan"
+    # Partial media and the library remain private. Kotlin exports completed
+    # files through MediaStore on modern Android, without broad storage access.
+    DEFAULT_DOWNLOAD_DIR = str(APP_STORAGE_DIR / "downloads")
     DEFAULT_DB_DIR = APP_STORAGE_DIR / "db"
     DEFAULT_DB_PATH = str(DEFAULT_DB_DIR / "animan.sqlite3")
     DEFAULT_CACHE_DIR = APP_STORAGE_DIR / "cache"
@@ -98,4 +100,3 @@ for _dir_path in [settings.DOWNLOAD_DIR, str(DEFAULT_DB_DIR), str(settings.CACHE
         Path(_dir_path).mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
-

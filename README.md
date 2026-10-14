@@ -25,7 +25,12 @@ Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/a
 
 Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
 
-Android is the next milestone: embed the complete Python engine and compiled Vue interface with Kotlin/Chaquopy and Android WebView. The legacy APK is not published with desktop tags. See the [Android technical roadmap](docs/android-embedded-roadmap.md).
+The **Android beta pipeline** embeds the shared Python engine, compiled Vue interface,
+curl_cffi and native FFmpeg for **Android 10+ / ARM64**. It validates the installed
+app on emulators before publication; production signing and real-phone testing
+are tracked separately. Validation APKs use a temporary identity and are not
+distributed as production releases. See [Android distribution](docs/android-distribution.md)
+and the [technical roadmap](docs/android-embedded-roadmap.md).
 
 ## Language and default source
 

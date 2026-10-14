@@ -1,0 +1,190 @@
+"""Android bootstrap. Configure storage and JNI before importing the engine."""
+import asyncio
+from contextlib import asynccontextmanager
+from email.utils import formatdate
+from http.cookies import SimpleCookie
+import json
+import os
+from pathlib import Path
+import time
+from urllib.parse import urlparse
+
+_loop = None
+
+
+class VerificationWindow:
+    def __init__(self, url, bridge):
+        self.url, self.bridge = url, bridge
+        from animan.services.source_http import USER_AGENT
+        self.bridge.open(url, USER_AGENT)
+
+    def get_cookies(self):
+        jar = SimpleCookie()
+        jar.load(str(self.bridge.cookies(self.url)))
+        for cookie in jar.values():
+            cookie["domain"] = urlparse(self.url).hostname
+            cookie["path"] = "/"
+            cookie["secure"] = urlparse(self.url).scheme == "https"
+            # CookieManager does not expose expiry. Revalidate within an hour
+            # instead of turning a browser session cookie into permanent access.
+            cookie["expires"] = formatdate(time.time() + 3600, usegmt=True)
+        return [jar]
+
+    def destroy(self):
+        self.bridge.close(self.url)
+
+
+def start(data_dir, cache_dir, port, token, test_mode=False):
+    global _loop
+    os.environ.update({
+        "ANIMAN_DATA_DIR": data_dir, "ANIMAN_CACHE_DIR": cache_dir,
+        "ANIMAN_DB_PATH": str(Path(data_dir) / "db/animan.sqlite3"),
+        "ANIMAN_DOWNLOAD_DIR": str(Path(data_dir) / "downloads"),
+        "ANIMAN_HOST": "127.0.0.1", "ANIMAN_PORT": str(port),
+    })
+    if test_mode:
+        os.environ["ANIMAN_STARTUP_REFRESH"] = "false"
+    from java import jclass
+    from animan import media_tools, platform_events
+    media_tools.configure_android(jclass("com.animan.app.MediaBridge"), jclass("com.animan.app.CryptoBridge"))
+    hooks = jclass("com.animan.app.NativeHooks")
+    verification = jclass("com.animan.app.VerificationBridge")
+    import run
+    from animan.android_security import AndroidSessionMiddleware
+    from animan.models.download_task import DownloadStatus
+    from animan.services.download_manager import download_manager
+    run.app.add_middleware(AndroidSessionMiddleware, token=token)
+    run.browser_verification.webview_opener = lambda url: VerificationWindow(url, verification)
+
+    def notify(task):
+        active = [t for t in download_manager.get_all_tasks() if t.status in (
+            DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING, DownloadStatus.MUXING)]
+        if not hooks.progress(len(active), int(task.progress), task.fileName) and active and _loop:
+            _loop.call_soon_threadsafe(download_manager.pause_all_downloads)
+
+    platform_events.progress_handler = notify
+    platform_events.completed_handler = lambda task: hooks.exportFile(task.savePath)
+    original_lifespan = run.app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(app):
+        global _loop
+        _loop = asyncio.get_running_loop()
+        async with original_lifespan(app):
+            hooks.ready()
+            yield
+        _loop = None
+
+    run.app.router.lifespan_context = lifespan
+    run.start_embedded_server("127.0.0.1", port, data_dir)
+
+
+def command(action):
+    if _loop is None:
+        return False
+    from animan.services.download_manager import download_manager
+    actions = {"pause": download_manager.pause_all_downloads, "resume": download_manager.resume_all_downloads}
+    if action not in actions:
+        raise ValueError("Unknown Android download action")
+    _loop.call_soon_threadsafe(actions[action])
+    return True
+
+
+def native_probe():
+    """Called by instrumentation, not by a public API or untrusted WebView."""
+    import cffi, curl_cffi, pydantic, sqlalchemy, lxml.etree, websockets, yt_dlp
+    from animan import media_tools
+    from animan.database import engine
+    from animan.services.source_http import source_http
+    from animan.models.anime import AnimeResult
+    assert AnimeResult(id="probe", title="Offline", url="https://example.com").model_dump()["id"] == "probe"
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("SELECT 1").scalar() == 1
+    assert media_tools.which("ffmpeg") and media_tools.which("ffprobe")
+    assert media_tools.run(["ffmpeg", "-version"], check=True).stdout
+    # TLS + Chrome impersonation, outside source security/cache policy.
+    response = curl_cffi.requests.get("https://example.com", impersonate="chrome", timeout=20)
+    assert response.status_code == 200
+    assert lxml.etree.fromstring(b"<probe/>").tag == "probe"
+    media = media_pipeline_probe()
+    return json.dumps({"python_engine": True, "curl_cffi": curl_cffi.__version__,
+                       "pydantic": pydantic.__version__, "ffmpeg_jni": True, "tls": True, **media})
+
+
+def media_pipeline_probe():
+    """Real JNI media operations and the shared direct/HLS/subtitle pipeline."""
+    import httpx
+    from java import jclass
+    from animan import media_tools
+    from animan.config import settings
+    from animan.models.download_task import DownloadTask, DownloadStatus
+    import importlib
+    manager_module = importlib.import_module("animan.services.download_manager")
+    from animan.services.download_manager import download_manager as manager
+    from animan.services.download_resume import write_metadata
+    from animan.services.verification_service import verification_service
+    root = Path(settings.DOWNLOAD_DIR) / "native-probe"
+    root.mkdir(parents=True, exist_ok=True)
+    source = root / "fixture.mp4"
+    media_tools.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=160x90:r=10",
+                     "-f", "lavfi", "-i", "sine=frequency=440", "-t", "2", "-c:v", "mpeg4", "-c:a", "aac",
+                     str(source)], check=True)
+    payload = source.read_bytes()
+    segment = root / "fixture.ts"
+    media_tools.run(["ffmpeg", "-v", "error", "-y", "-i", str(source), "-c:v", "mpeg2video",
+                     "-c:a", "aac", "-f", "mpegts", str(segment)], check=True)
+    key, iv = b"0123456789abcdef", bytes(16)
+    cipher = jclass("javax.crypto.Cipher").getInstance("AES/CBC/PKCS5Padding")
+    cipher.init(1, jclass("javax.crypto.spec.SecretKeySpec")(key, "AES"), jclass("javax.crypto.spec.IvParameterSpec")(iv))
+    encrypted = bytes(cipher.doFinal(segment.read_bytes()))
+    requested_ranges = []
+
+    def handler(request):
+        if request.url.path.endswith(".m3u8"):
+            return httpx.Response(200, text='#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXT-X-KEY:METHOD=AES-128,URI="key",IV=0x00000000000000000000000000000000\n#EXTINF:2,\nsegment.ts\n#EXT-X-ENDLIST\n')
+        if request.url.path.endswith("/key"): return httpx.Response(200, content=key)
+        if request.url.path.endswith(".ts"): return httpx.Response(200, content=encrypted)
+        if request.url.path.endswith(".srt"):
+            return httpx.Response(200, text="1\n00:00:00,000 --> 00:00:01,000\nNative subtitle probe\n")
+        start = 0
+        headers = {"content-type": "video/mp4", "etag": '"native-fixture-v1"', "accept-ranges": "bytes"}
+        if "range" in request.headers:
+            requested_ranges.append(request.headers["range"])
+            start = int(request.headers["range"].split("=")[1].split("-")[0])
+            headers["content-range"] = f"bytes {start}-{len(payload)-1}/{len(payload)}"
+        headers["content-length"] = str(len(payload) - start)
+        return httpx.Response(206 if "range" in request.headers else 200, headers=headers, content=payload[start:])
+
+    async def transfer():
+        original_client, original_safe = manager._create_async_client, manager_module.is_safe_url
+        manager._create_async_client = lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False)
+        manager_module.is_safe_url = lambda url, *a, **kw: urlparse(str(url)).hostname == "fixtures.animan.invalid"
+        tasks = []
+        try:
+            url = "https://fixtures.animan.invalid/video.mp4"
+            direct = DownloadTask(animeName="Native probe", episodeNumber=1, version="VO", fileName="direct.mp4",
+                savePath=str(root / "direct.mp4"), fileUrl=url, status=DownloadStatus.DOWNLOADING,
+                downloadSubtitles=True, subtitlesJson=json.dumps([{"url": "https://fixtures.animan.invalid/sub.srt", "lang": "en", "label": "English"}]))
+            tasks.append(direct); manager.tasks[direct.id] = direct; manager.task_order.append(direct.id)
+            Path(direct.savePath + ".part").write_bytes(payload[:len(payload)//2])
+            write_metadata(Path(direct.savePath + ".part.resume.json"), {"validator": '"native-fixture-v1"', "total": len(payload)})
+            await manager._download_single_file(direct, url)
+            assert direct.status == DownloadStatus.COMPLETED, direct.error
+            assert requested_ranges and direct.savePath.endswith(".mkv")
+            streams = json.loads(media_tools.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", direct.savePath], check=True).stdout)["streams"]
+            assert any(s["codec_type"] == "subtitle" and s["tags"].get("language") == "eng" for s in streams)
+            hls = DownloadTask(animeName="Native probe", episodeNumber=2, version="VO", fileName="hls.mp4",
+                              savePath=str(root / "hls.mp4"), status=DownloadStatus.DOWNLOADING)
+            tasks.append(hls); manager.tasks[hls.id] = hls; manager.task_order.append(hls.id)
+            await manager._download_hls_segments_native(hls, "https://fixtures.animan.invalid/playlist.m3u8")
+            assert hls.status == DownloadStatus.COMPLETED, hls.error
+            assert verification_service.verify_file(hls.savePath).valid
+            return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True, "storage_export": True}
+        finally:
+            manager._create_async_client, manager_module.is_safe_url = original_client, original_safe
+            for task in tasks:
+                manager.tasks.pop(task.id, None)
+                if task.id in manager.task_order: manager.task_order.remove(task.id)
+
+    assert _loop is not None
+    return asyncio.run_coroutine_threadsafe(transfer(), _loop).result(timeout=180)

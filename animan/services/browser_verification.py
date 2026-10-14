@@ -73,7 +73,7 @@ class BrowserVerificationService:
             # Verification must use the same network route as the HTTP session.
             if mode == "webview":
                 if self.webview_opener is None:
-                    raise ValueError("WebView disponible uniquement dans Animan Desktop")
+                    raise ValueError("WebView disponible uniquement dans les applications natives Animan")
                 if state.proxy:
                     raise ValueError("Utilisez le navigateur installé pour vérifier avec ce proxy")
                 job["window"] = await asyncio.to_thread(self.webview_opener, url)

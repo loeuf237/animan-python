@@ -1,42 +1,209 @@
-name: Android legacy build (manual, no release publication)
+name: Release Android Python + Vue
 
 on:
+  push:
+    tags: ['android-v0.*']
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the signed Android beta after validation
+        type: boolean
+        default: false
+      tag_name:
+        description: Android release tag
+        default: android-v0.1.0-beta.1
+        required: true
 
 permissions:
   contents: read
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag_name }}
+
 jobs:
-  build-android:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-
+  native-wheels:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
         with:
-          python-version: '3.11'
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x android/gradlew
-
-      - name: Build Android Release APK
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: actions/cache@v4
+        id: wheels
+        with:
+          path: android/wheels
+          key: android-native-arm64-${{ hashFiles('scripts/android_native_wheels.py') }}
+      - name: Build missing Android wheels
+        if: steps.wheels.outputs.cache-hit != 'true'
         run: |
-          cd android
-          ./gradlew assembleRelease --stacktrace
-
-      - name: Keep legacy APK as a diagnostic artifact only
-        uses: actions/upload-artifact@v4
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+          python scripts/android_native_wheels.py
+      - uses: actions/upload-artifact@v4
         with:
-          name: Android-legacy-INCOMPLETE-not-for-release
-          path: android/app/build/outputs/apk/release/*.apk
+          name: Android-native-wheels
+          path: android/wheels/*.whl
+          if-no-files-found: error
+
+  build:
+    needs: native-wheels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      ANIMAN_ANDROID_KEYSTORE: ${{ secrets.ANIMAN_ANDROID_KEYSTORE_BASE64 != '' && '/tmp/animan-release.p12' || '' }}
+      ANIMAN_ANDROID_STORE_PASSWORD: ${{ secrets.ANIMAN_ANDROID_STORE_PASSWORD }}
+      ANIMAN_ANDROID_KEY_PASSWORD: ${{ secrets.ANIMAN_ANDROID_KEY_PASSWORD }}
+      ANIMAN_ANDROID_KEY_ALIAS: ${{ secrets.ANIMAN_ANDROID_KEY_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build and test Vue
+        working-directory: frontend
+        run: npm ci && npm test && npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-native-wheels
+          path: android/wheels
+      - name: Restore signing identity when configured
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANIMAN_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          if os.environ.get('KEYSTORE_BASE64'):
+              target = Path(os.environ['ANIMAN_ANDROID_KEYSTORE'])
+              target.write_bytes(base64.b64decode(os.environ['KEYSTORE_BASE64'], validate=True))
+              target.chmod(0o600)
+          PY
+      - name: Build installed test target and APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          if [ -n "$ANIMAN_ANDROID_KEYSTORE" ]; then
+            ./gradlew assembleRelease assembleReleaseAndroidTest --stacktrace
+          else
+            ./gradlew assembleValidation assembleValidationAndroidTest --stacktrace
+          fi
+      - name: Inspect packaged engine and 16 KB native alignment
+        run: |
+          mkdir -p android-validation
+          if [ -n "$ANIMAN_ANDROID_KEYSTORE" ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk android-validation/Animan-Android-under-test.apk
+            cp android/app/build/outputs/apk/androidTest/release/app-release-androidTest.apk android-validation/Animan-instrumentation.apk
+            python scripts/android_release.py android-validation/Animan-Android-under-test.apk android-validation
+          else
+            cp android/app/build/outputs/apk/validation/app-validation.apk android-validation/Animan-Android-under-test.apk
+            cp android/app/build/outputs/apk/androidTest/validation/app-validation-androidTest.apk android-validation/Animan-instrumentation.apk
+            python scripts/android_release.py android-validation/Animan-Android-under-test.apk android-validation --validation
+          fi
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs android-validation/Animan-Android-under-test.apk
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 android-validation/Animan-Android-under-test.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-under-test
+          path: android-validation/*
+          if-no-files-found: error
+      - name: Remove temporary signing file
+        if: always()
+        run: rm -f /tmp/animan-release.p12
+
+  device-tests:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [30, 35]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-under-test
+          path: android-validation
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: |
+            adb shell getprop ro.product.cpu.abilist
+            python scripts/android_instrumentation.py android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk android-test-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Android-API-${{ matrix.api }}-test-results
+          path: android-test-results/*
+
+  publish:
+    if: github.event_name == 'push' || inputs.publish
+    needs: [build, device-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-under-test
+          path: android-validation
+      - name: Require a production-signed, validated package
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, shutil
+          from pathlib import Path
+          root = Path('android-validation')
+          info = json.loads((root / 'Android-build-info.json').read_text())
+          assert info['version'] == '0.1.0' and not info['validation_key_only']
+          assert os.environ['RELEASE_TAG'] == 'android-v0.1.0-beta.1'
+          target = Path('release-assets'); target.mkdir()
+          apk = target / 'Animan-v0.1.0-Android-arm64.apk'
+          shutil.copyfile(root / 'Animan-Android-under-test.apk', apk)
+          info['emulator_api_levels_tested'] = [30, 35]
+          (target / 'Android-build-info.json').write_text(json.dumps(info, indent=2))
+          (target / 'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n' for p in sorted(target.iterdir()) if p.name != 'SHA256SUMS.txt'))
+          PY
+      - name: Publish Android beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/* --target "$GITHUB_SHA" \
+            --title "Animan 0.1.0 Android beta" --prerelease --notes-file docs/releases/android-v0.1.0-beta.1.md

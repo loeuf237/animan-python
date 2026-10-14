@@ -43,7 +43,14 @@ android {
         debug {
             isMinifyEnabled = false
         }
+        create("validation") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
+    // The temporary validation key is never used by the publication job.
+    testBuildType = if (System.getenv("ANIMAN_ANDROID_KEYSTORE").isNullOrBlank()) "validation" else "release"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -55,6 +62,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 
     lint {

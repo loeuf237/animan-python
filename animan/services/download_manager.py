@@ -10,6 +10,7 @@ import re
 import shutil
 import socket
 import subprocess
+from animan import media_tools, platform_events
 import tempfile
 import time
 import xml.sax.saxutils as saxutils
@@ -2517,8 +2518,6 @@ class DownloadManagerService:
 
                         if seg_tmp.exists() and seg_tmp.stat().st_size > 0:
                             if encryption[idx]:
-                                from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-                                from cryptography.hazmat.primitives.padding import PKCS7
                                 key_url, iv = encryption[idx]
                                 if key_url not in keys:
                                     key_response = await client.get(key_url)
@@ -2526,10 +2525,8 @@ class DownloadManagerService:
                                     if len(key_response.content) != 16:
                                         raise ValueError("Clé AES-128 HLS invalide")
                                     keys[key_url] = key_response.content
-                                decryptor = Cipher(algorithms.AES(keys[key_url]), modes.CBC(iv)).decryptor()
-                                plaintext = decryptor.update(seg_tmp.read_bytes()) + decryptor.finalize()
-                                unpadder = PKCS7(128).unpadder()
-                                plaintext = unpadder.update(plaintext) + unpadder.finalize()
+                                plaintext = media_tools.decrypt_aes_cbc(
+                                    seg_tmp.read_bytes(), keys[key_url], iv, unpad=True)
                                 seg_tmp.write_bytes(plaintext)
                             seg_tmp.replace(seg_file)
                             completed_indices.add(idx)
@@ -2593,18 +2590,19 @@ class DownloadManagerService:
                 "ffmpeg", "-y",
                 "-f", "concat",
                 "-safe", "0",
-                "-i", "concat_list.txt",
+                "-i", str(concat_file),
                 "-c", "copy",
                 "-bsf:a", "aac_adtstoasc",
                 str(temp_output)
             ]
-            r_proc = await asyncio.create_subprocess_exec(
-                *remux_cmd,
-                cwd=str(segments_dir),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-            r_rc = await r_proc.wait()
+            if media_tools.is_native():
+                result = await asyncio.to_thread(media_tools.run, remux_cmd, timeout=300)
+                r_rc = result.returncode
+            else:
+                r_proc = await asyncio.create_subprocess_exec(
+                    *remux_cmd, cwd=str(segments_dir),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                r_rc = await r_proc.wait()
             if r_rc == 0 and temp_output.exists() and temp_output.stat().st_size > 0:
                 shutil.move(str(temp_output), str(output_path))
                 merged = True
@@ -2706,6 +2704,14 @@ class DownloadManagerService:
         task.verificationError = verif.error
 
         if verif.valid:
+            # Keep the foreground transfer alive until its shared-storage copy
+            # has been published. Android may kill an idle background process.
+            if platform_events.completed_handler is not None:
+                try:
+                    await asyncio.to_thread(platform_events.completed, task)
+                except Exception as exc:
+                    logger.exception("Completed media could not be exported by the native platform")
+                    task.error = f"Android export failed; media is available in the library: {exc}"
             task.status = DownloadStatus.COMPLETED
             task.completedAt = datetime.now(timezone.utc)
             part_path = Path(task.savePath + ".part")
@@ -2758,7 +2764,7 @@ class DownloadManagerService:
         if not task.savePath or Path(task.savePath).exists():
             return False
         candidate = Path(task.savePath).with_suffix(".mkv")
-        if not candidate.is_file() or not shutil.which("ffprobe"):
+        if not candidate.is_file() or not media_tools.which("ffprobe"):
             return False
         try:
             tracks = normalize_subtitles(task.subtitlesJson)
@@ -2767,7 +2773,7 @@ class DownloadManagerService:
             result = verification_service.verify_file(str(candidate), expected_size=task.totalBytes or None)
             if not result.valid:
                 return False
-            probe = subprocess.run([shutil.which("ffprobe"), "-v", "error", "-show_streams",
+            probe = media_tools.run([media_tools.which("ffprobe"), "-v", "error", "-show_streams",
                                     "-of", "json", str(candidate)], capture_output=True,
                                    text=True, check=True, timeout=30)
             present = Counter((stream.get("tags", {}).get("title", ""),
@@ -2909,7 +2915,7 @@ class DownloadManagerService:
             raise SubtitleError("Échec du téléchargement des sous-titres : " + "; ".join(errors), refresh_required)
 
     def is_ffmpeg_available(self) -> bool:
-        return shutil.which("ffmpeg") is not None
+        return media_tools.which("ffmpeg") is not None
 
     def _mux_subtitles_with_ffmpeg(self, task: DownloadTask):
         if not self.is_ffmpeg_available():
@@ -2933,12 +2939,12 @@ class DownloadManagerService:
         original = verification_service.verify_file(str(video_path), expected_size=task.totalBytes)
         if not original.valid:
             raise ValueError(f"Vidéo source invalide : {original.error}")
-        probe_path = shutil.which("ffprobe")
+        probe_path = media_tools.which("ffprobe")
         if not probe_path:
             raise RuntimeError("FFprobe requis pour valider les pistes fusionnées")
 
         def probe(path):
-            result = subprocess.run([probe_path, "-v", "error", "-show_streams", "-of", "json", str(path)],
+            result = media_tools.run([probe_path, "-v", "error", "-show_streams", "-of", "json", str(path)],
                                     capture_output=True, text=True, check=True, timeout=30)
             return json.loads(result.stdout).get("streams", [])
 
@@ -2966,7 +2972,7 @@ class DownloadManagerService:
                 cmd.extend([f"-metadata:s:s:{stream_index}", f"language={lang}",
                             f"-metadata:s:s:{stream_index}", f"title={title}"])
             cmd.append(str(staging))
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = media_tools.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode:
                 raise RuntimeError(result.stderr.strip()[-1000:] or "FFmpeg a échoué")
             verification = verification_service.verify_file(str(staging))
@@ -3092,6 +3098,10 @@ class DownloadManagerService:
             self.sse_subscribers.remove(q)
 
     def broadcast_update(self, task: DownloadTask):
+        try:
+            platform_events.progress(task)
+        except Exception:
+            logger.exception("Native download notification update failed")
         data = task.to_dict()
         for q in list(self.sse_subscribers):
             try:

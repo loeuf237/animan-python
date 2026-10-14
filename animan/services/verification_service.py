@@ -8,6 +8,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from animan.config import settings
+from animan import media_tools
 from animan.models.download_task import format_bytes
 
 logger = logging.getLogger("animan.verification")
@@ -45,7 +46,7 @@ class VerificationResult(BaseModel):
 
 class DownloadVerificationService:
     def __init__(self):
-        self._ffprobe_path = shutil.which("ffprobe")
+        self._ffprobe_path = media_tools.which("ffprobe")
         if self._ffprobe_path:
             logger.info("Verification service initialized with ffprobe (%s)", self._ffprobe_path)
         else:
@@ -175,7 +176,7 @@ class DownloadVerificationService:
                     "-of", "json",
                     str(path)
                 ]
-                proc = subprocess.run(
+                proc = media_tools.run(
                     cmd,
                     capture_output=True,
                     text=True,
@@ -222,7 +223,7 @@ class DownloadVerificationService:
                 format_name = format_info.get("format_name", "")
 
                 # 3b. Contrôle rapide de décodage effectif avec ffmpeg pour détecter les paquets corrompus
-                ffmpeg_path = shutil.which("ffmpeg")
+                ffmpeg_path = media_tools.which("ffmpeg")
                 if ffmpeg_path and duration and duration > 30:
                     check_points = [min(60.0, duration * 0.1), duration * 0.5, duration * 0.85]
                     for check_pos in check_points:
@@ -236,7 +237,7 @@ class DownloadVerificationService:
                             "-f", "null", "-"
                         ]
                         try:
-                            test_proc = subprocess.run(test_cmd, capture_output=True, text=True, timeout=10)
+                            test_proc = media_tools.run(test_cmd, capture_output=True, text=True, timeout=10)
                             # The null output may round Matroska timestamps and report DTS
                             # collisions. These output diagnostics are not decoder errors.
                             err_lines = [line.strip() for line in test_proc.stderr.splitlines()

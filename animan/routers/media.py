@@ -805,11 +805,9 @@ async def hls_proxy_segment(
                         HLS_KEY_CACHE[key] = key_bytes
 
                 if key_bytes and len(key_bytes) == 16:
-                    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+                    from animan.media_tools import decrypt_aes_cbc
                     iv = seq.to_bytes(16, "big")
-                    cipher = Cipher(algorithms.AES(key_bytes), modes.CBC(iv))
-                    decryptor = cipher.decryptor()
-                    seg_bytes = decryptor.update(seg_bytes) + decryptor.finalize()
+                    seg_bytes = decrypt_aes_cbc(seg_bytes, key_bytes, iv)
 
             return Response(
                 content=seg_bytes,
