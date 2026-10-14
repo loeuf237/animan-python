@@ -44,7 +44,15 @@ def build(root: Path):
     old = '"PYO3_NO_PYTHON": "1",'
     if old not in contents:
         raise RuntimeError("Chaquopy Rust configuration changed; review the native build")
-    contents = contents.replace(old, '"PYO3_CROSS_LIB_DIR": f"{self.host_env}/chaquopy/lib",')
+    contents = contents.replace(old, '"PYO3_CONFIG_FILE": f"{self.build_dir}/pyo3-config.txt",')
+    anchor = '    def get_rust_env_vars(self, env):\n'
+    if contents.count(anchor) != 1:
+        raise RuntimeError("Chaquopy Rust helper changed")
+    contents = contents.replace(anchor, anchor + '''        Path(f"{self.build_dir}/pyo3-config.txt").write_text(
+            f"implementation=CPython\\nversion={self.python}\\nshared=true\\nabi3=false\\n"
+            f"lib_name=python{self.python}\\nlib_dir={self.host_env}/chaquopy/lib\\n"
+            "pointer_width=64\\nbuild_flags=\\nsuppress_build_script_link_lines=false\\n")
+''')
     # New target packages provide both libpython3 and libpython3.13. The legacy
     # helper attempts to create the same convenience symlink for both libraries.
     contents = contents.replace('if link_filename != filename:',
