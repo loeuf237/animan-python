@@ -56,7 +56,7 @@ class EmbeddedEngineTest {
             while (!hydrated && System.currentTimeMillis() < uiDeadline) {
                 val checked = CountDownLatch(1)
                 scenario.onActivity { activity ->
-                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#app .app-shell'))") {
+                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#main-content .home-container .hero-panel'))") {
                         hydrated = it == "true"; checked.countDown()
                     }
                 }
@@ -74,7 +74,7 @@ class EmbeddedEngineTest {
             while (!recreated && System.currentTimeMillis() < recreatedDeadline) {
                 val checked = CountDownLatch(1)
                 scenario.onActivity { activity ->
-                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#app .app-shell'))") {
+                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#main-content .home-container .hero-panel'))") {
                         recreated = it == "true" && activity.findViewById<android.view.View>(R.id.loadingLayout).visibility == android.view.View.GONE
                         checked.countDown()
                     }
