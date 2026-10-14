@@ -5,6 +5,11 @@ import { fileURLToPath, URL } from 'node:url';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  // Android 10/11 devices can retain older System WebView builds. Lower modern
+  // syntax (including logical assignments) instead of shipping a blank screen.
+  build: {
+    target: 'chrome80',
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

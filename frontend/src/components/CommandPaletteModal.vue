@@ -212,7 +212,7 @@ function onEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') close();
   if (event.key === 'Tab') {
     const elements = [...document.querySelectorAll<HTMLElement>('.palette-card input, .palette-card button:not(:disabled), .palette-card select')].filter(el => el.getClientRects().length);
-    const first = elements[0], last = elements.at(-1);
+    const first = elements[0], last = elements[elements.length - 1];
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }

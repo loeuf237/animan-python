@@ -46,7 +46,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); cancel(); }
   if (event.key !== 'Tab') return;
   const targets = [...dialog.value!.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled)')];
-  const first = targets[0], last = targets.at(-1);
+  const first = targets[0], last = targets[targets.length - 1];
   if (!first) { event.preventDefault(); dialog.value?.focus(); }
   else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.value)) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }

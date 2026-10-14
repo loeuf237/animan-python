@@ -65,6 +65,8 @@ class EmbeddedEngineTest {
             scenario.recreate()
             assertEquals("Activity recreation started another server", port, EngineHost.port)
             val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe").toString())
+            report.put("vue_rendered", true)
+            report.put("webview_version", WebView.getCurrentWebViewPackage()?.versionName)
             for (key in listOf("python_engine", "ffmpeg_jni", "tls", "direct_resume", "aes128_hls", "subtitle_mux", "storage_export", "decode_verification")) assertTrue(key, report.getBoolean(key))
             assertEquals(200, request("/api/download/status").first)
             println("ANIMAN_ANDROID_PROBE=" + report.toString())
