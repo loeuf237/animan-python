@@ -21,8 +21,8 @@ def validate(api, app, tests, output, boot_only=False):
     avd = f'animan_arm_api_{api}'
     avdmanager = sdk / 'cmdline-tools/latest/bin/avdmanager'
     env = os.environ.copy()
-    avd_home = output.resolve() / 'avd'
-    avd_home.mkdir(exist_ok=True)
+    avd_home = (Path('build/android-ci-avd') / str(api)).resolve()
+    avd_home.mkdir(parents=True, exist_ok=True)
     env['ANDROID_AVD_HOME'] = str(avd_home)
     env['ANDROID_EMULATOR_LAUNCHER_DIR'] = str(sdk / 'emulator')
     subprocess.run([str(avdmanager), 'create', 'avd', '--force', '-n', avd, '-k', package], input='no\n', text=True, check=True, timeout=120, env=env)
