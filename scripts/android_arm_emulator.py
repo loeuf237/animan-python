@@ -26,9 +26,8 @@ def validate(api, app, tests, output, boot_only=False):
     env['ANDROID_AVD_HOME'] = str(avd_home)
     env['ANDROID_EMULATOR_LAUNCHER_DIR'] = str(sdk / 'emulator')
     subprocess.run([str(avdmanager), 'create', 'avd', '--force', '-n', avd, '-k', package], input='no\n', text=True, check=True, timeout=120, env=env)
-    # The Linux backend otherwise adds an x86 PCI HDA sound card to the
-    # ARM virt machine, which has no PCI bus. Disable guest audio devices too;
-    # -noaudio only disables host audio and leaves that incompatible device.
+    # Mute this headless test environment. The SDK still creates a sound card;
+    # the virt machine selected below supplies the required PCI bus.
     config = avd_home / (avd + '.avd') / 'config.ini'
     with config.open('a') as settings:
         settings.write('\nhw.audioInput=no\nhw.audioOutput=no\n')
@@ -37,7 +36,8 @@ def validate(api, app, tests, output, boot_only=False):
     env['LD_LIBRARY_PATH'] = ':'.join(libraries)
     with (output / 'emulator.log').open('w') as log:
         process = subprocess.Popen([str(backend), '-avd', avd, '-accel', 'off', '-memory', '3072', '-cores', '2',
-                                    '-no-window', '-gpu', 'swiftshader', '-noaudio', '-no-boot-anim', '-no-snapshot'],
+                                    '-no-window', '-gpu', 'swiftshader', '-noaudio', '-no-boot-anim', '-no-snapshot',
+                                    '-verbose', '-show-kernel', '-qemu', '-machine', 'type=virt'],
                                    env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 900
