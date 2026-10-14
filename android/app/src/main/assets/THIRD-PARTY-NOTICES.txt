@@ -3,6 +3,7 @@ Package: dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.3 (LGPL-3.0).
 Corresponding source and build instructions:
 https://github.com/ffmpegkit-maintained/ffmpeg
 License: https://www.gnu.org/licenses/lgpl-3.0.txt
+Copies of LGPL-3.0 and its referenced GPL-3.0 are bundled in assets/licenses.
 
 Python SDK: Chaquopy 17.1.0, https://github.com/chaquo/chaquopy (MIT).
 Python: https://www.python.org (PSF license).
