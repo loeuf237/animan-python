@@ -86,3 +86,7 @@ frontend/dist/
 # Private source sessions and browser verification profiles
 http_sessions/
 verification_profiles/
+
+# Android release signing identity and generated dependencies
+android/keystore/
+android/wheels/

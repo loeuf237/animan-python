@@ -12,22 +12,33 @@ android {
 
     defaultConfig {
         applicationId = "com.animan.app"
-        minSdk = 24
+        minSdk = 29
         targetSdk = 35
-        versionCode = 210
-        versionName = "2.1.0"
+        versionCode = 211
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val keyPath = System.getenv("ANIMAN_ANDROID_KEYSTORE")
+            if (!keyPath.isNullOrBlank()) {
+                storeFile = file(keyPath)
+                storePassword = System.getenv("ANIMAN_ANDROID_STORE_PASSWORD")
+                keyAlias = System.getenv("ANIMAN_ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANIMAN_ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isMinifyEnabled = false
@@ -59,24 +70,19 @@ dependencies {
     implementation("androidx.webkit:webkit:1.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:rules:1.6.1")
 }
 
 chaquopy {
     defaultConfig {
-        version = "3.11"
+        version = "3.13"
         extractPackages("animan")
         pip {
-            options("--timeout", "120")
-            install("pydantic<2.0.0")
-            install("fastapi<0.100.0")
-            install("uvicorn>=0.30.0")
-            install("sqlalchemy>=2.0.0")
-            install("jinja2>=3.1.4")
-            install("aiofiles>=24.1.0")
-            install("httpx[socks]>=0.27.0")
-            install("socksio>=1.0.0")
-            install("beautifulsoup4>=4.12.0")
-            install("lxml>=5.2.0")
+            options("--timeout", "120", "--find-links", "${rootProject.projectDir}/wheels")
+            install("-r", "${rootProject.projectDir}/requirements.txt")
         }
     }
 }
@@ -85,6 +91,8 @@ val syncPythonSource by tasks.registering(Sync::class) {
     from("${rootProject.projectDir}/..") {
         include("animan/**")
         include("run.py")
+        include("android_runtime.py")
+        include("frontend/dist/**")
         exclude("**/__pycache__/**")
         exclude("**/.pytest_cache/**")
         exclude("**/*.pyc")
