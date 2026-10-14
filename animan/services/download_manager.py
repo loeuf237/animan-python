@@ -2598,6 +2598,8 @@ class DownloadManagerService:
             if media_tools.is_native():
                 result = await asyncio.to_thread(media_tools.run, remux_cmd, timeout=300)
                 r_rc = result.returncode
+                if r_rc:
+                    raise RuntimeError("Android HLS remux failed: " + result.stderr[-1000:])
             else:
                 r_proc = await asyncio.create_subprocess_exec(
                     *remux_cmd, cwd=str(segments_dir),
@@ -2712,6 +2714,11 @@ class DownloadManagerService:
                 except Exception as exc:
                     logger.exception("Completed media could not be exported by the native platform")
                     task.error = f"Android export failed; media is available in the library: {exc}"
+            if task.paused or task.cancelled:
+                task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
+                library_service.save_task(task)
+                self.broadcast_update(task)
+                return
             task.status = DownloadStatus.COMPLETED
             task.completedAt = datetime.now(timezone.utc)
             part_path = Path(task.savePath + ".part")

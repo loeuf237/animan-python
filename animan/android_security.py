@@ -22,7 +22,7 @@ class AndroidSessionMiddleware:
                 supplied = morsel.value if morsel else ""
             except Exception:
                 supplied = ""
-        if not hmac.compare_digest(supplied, self.token):
+        if not hmac.compare_digest(supplied.encode("utf-8"), self.token.encode("utf-8")):
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 1008})
             else:

@@ -5,16 +5,19 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 object NativeHooks {
     private var lastNotification = 0L
     private val exportLock = Any()
+    private val taskStates = ConcurrentHashMap<String, String>()
     @JvmStatic fun ready() {
         EngineHost.ready = true
         EngineHost.main.post { DownloadService.finishIdle(EngineHost.context) }
     }
 
-    @JvmStatic @Synchronized fun progress(count: Int, percent: Int, label: String): Boolean {
+    @JvmStatic @Synchronized fun progress(count: Int, percent: Int, label: String, taskId: String, status: String): Boolean {
+        taskStates[taskId] = status
         val changed = count != EngineHost.activeCount
         EngineHost.activeCount = count
         EngineHost.progress = percent.coerceIn(0, 100)
@@ -25,9 +28,9 @@ object NativeHooks {
         return DownloadService.update(EngineHost.context)
     }
 
-    @JvmStatic fun exportFile(path: String): String = synchronized(exportLock) { exportCompletedFile(path) }
+    @JvmStatic fun exportFile(path: String, taskId: String): String = synchronized(exportLock) { exportCompletedFile(path, taskId) }
 
-    private fun exportCompletedFile(path: String): String {
+    private fun exportCompletedFile(path: String, taskId: String): String {
         val context = EngineHost.context
         val root = File(context.filesDir, "downloads").canonicalFile
         val source = File(path).canonicalFile
@@ -65,7 +68,15 @@ object NativeHooks {
         val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
         preferences.edit().putString(pendingKey, uri.toString()).commit()
         try {
-            requireNotNull(resolver.openOutputStream(uri)).use { output -> source.inputStream().use { it.copyTo(output) } }
+            requireNotNull(resolver.openOutputStream(uri)).use { output -> source.inputStream().use { input ->
+                val buffer = ByteArray(256 * 1024)
+                while (true) {
+                    check(taskStates[taskId] !in listOf("paused", "cancelled")) { "Export was paused or cancelled" }
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                }
+            } }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
             preferences.edit().putString(key, uri.toString()).remove(pendingKey).commit()
             return uri.toString()

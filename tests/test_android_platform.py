@@ -69,6 +69,7 @@ async def test_android_loopback_authentication_includes_assets():
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://127.0.0.1") as client:
         assert (await client.get("/spa/")).status_code == 401
         assert (await client.get("/assets/app.js", headers={"X-Animan-Session": "wrong"})).status_code == 401
+        assert (await client.get("/spa/", headers={"Cookie": b'animan_android_session="\xff"'})).status_code == 401
         assert (await client.get("/spa/", headers={"X-Animan-Session": token})).status_code == 200
         client.cookies.set("animan_android_session", token)
         assert (await client.get("/api/download/status")).status_code == 200

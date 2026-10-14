@@ -1,0 +1,14 @@
+Animan Android includes dynamically loaded FFmpeg/FFprobe libraries.
+Package: dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7 (LGPL-3.0).
+Corresponding source and build instructions:
+https://github.com/ffmpegkit-maintained/ffmpeg
+License: https://www.gnu.org/licenses/lgpl-3.0.txt
+
+Python SDK: Chaquopy 17.1.0, https://github.com/chaquo/chaquopy (MIT).
+Python: https://www.python.org (PSF license).
+curl_cffi: https://github.com/lexiforest/curl_cffi (MIT).
+curl-impersonate: https://github.com/lexiforest/curl-impersonate.
+lxml: https://lxml.de (BSD).
+libxml2 / libxslt sources: https://download.gnome.org/sources/ (MIT).
+Package license files remain inside the embedded Python wheel data.
+Build configuration and pinned versions are included in the repository.

@@ -59,11 +59,11 @@ def start(data_dir, cache_dir, port, token, test_mode=False):
     def notify(task):
         active = [t for t in download_manager.get_all_tasks() if t.status in (
             DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING, DownloadStatus.MUXING)]
-        if not hooks.progress(len(active), int(task.progress), task.fileName) and active and _loop:
+        if not hooks.progress(len(active), int(task.progress), task.fileName, task.id, task.status.value) and active and _loop:
             _loop.call_soon_threadsafe(download_manager.pause_all_downloads)
 
     platform_events.progress_handler = notify
-    platform_events.completed_handler = lambda task: hooks.exportFile(task.savePath)
+    platform_events.completed_handler = lambda task: hooks.exportFile(task.savePath, task.id)
     original_lifespan = run.app.router.lifespan_context
 
     @asynccontextmanager
@@ -178,7 +178,8 @@ def media_pipeline_probe():
             tasks.append(hls); manager.tasks[hls.id] = hls; manager.task_order.append(hls.id)
             await manager._download_hls_segments_native(hls, "https://fixtures.animan.invalid/playlist.m3u8")
             assert hls.status == DownloadStatus.COMPLETED, hls.error
-            assert verification_service.verify_file(hls.savePath).valid
+            verification = verification_service.verify_file(hls.savePath)
+            assert verification.valid and "mp4" in verification.formatName, verification.error
             return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True, "storage_export": True}
         finally:
             manager._create_async_client, manager_module.is_safe_url = original_client, original_safe

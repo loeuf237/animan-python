@@ -1,7 +1,9 @@
 # Android: complete embedded Python engine and Vue interface
 
-Status: next milestone after desktop 0.1.0; this document is a technical plan,
-not a claim that a complete APK has already been built or validated.
+Status: the Android implementation and native dependency wheels are now in the
+repository. APK/emulator validation and production signing are tracked by
+`release-android.yml`; physical-device validation remains pending. See
+[Android distribution](android-distribution.md) for the build and publication gates.
 
 ## Architecture to retain
 
@@ -21,15 +23,15 @@ flowchart TD
     DATA --> EXPORT[MediaStore or user-selected folder]
 ```
 
-## What is incomplete today
+## Initial gaps addressed by the implementation
 
-The existing Gradle project copies `animan/` and `run.py`, but not `frontend/dist`.
-It pins older FastAPI/Pydantic versions and omits curl_cffi, websockets,
-cryptography and yt-dlp although the current engine imports them. Its startup is
-owned by an Activity thread rather than a foreground service. It targets public
-download paths directly, uses broad cleartext/file-access settings, and signs its
-release with the debug key. A successful Gradle build does not establish a
-complete or resilient embedded engine.
+The original Gradle project omitted Vue and required dependencies, started Python
+from an Activity, targeted public file paths and signed releases with a debug key.
+The implementation synchronizes Vue/backend resources, builds the missing native
+wheels, uses JNI media/JCA AES adapters, authenticates a per-process loopback
+server, adds foreground download notifications and MediaStore export, and gates
+production publication on a dedicated signing identity and installed-app tests.
+A successful Gradle build alone still does not establish real-phone reliability.
 
 ## Ordered route
 

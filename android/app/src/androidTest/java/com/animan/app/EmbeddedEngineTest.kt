@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import com.chaquo.python.Python
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -12,6 +13,8 @@ import org.junit.runner.RunWith
 import java.net.HttpURLConnection
 import java.net.Proxy
 import java.net.URL
+import java.io.File
+import android.graphics.Bitmap
 
 @RunWith(AndroidJUnit4::class)
 class EmbeddedEngineTest {
@@ -27,6 +30,7 @@ class EmbeddedEngineTest {
     }
     @Test fun embeddedEngineAndNativeMedia() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        EngineHost.start(context, true)
         val intent = Intent(context, MainActivity::class.java).putExtra("test_mode", true)
         ActivityScenario.launch<MainActivity>(intent).use { scenario ->
             val deadline = System.currentTimeMillis() + 120000
@@ -48,6 +52,12 @@ class EmbeddedEngineTest {
             for (key in listOf("python_engine", "ffmpeg_jni", "tls", "direct_resume", "aes128_hls", "subtitle_mux", "storage_export")) assertTrue(key, report.getBoolean(key))
             assertEquals(200, request("/api/download/status").first)
             println("ANIMAN_ANDROID_PROBE=" + report.toString())
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val image = instrumentation.uiAutomation.takeScreenshot()
+            assertNotNull("Screenshot could not be captured", image)
+            File(instrumentation.context.getExternalFilesDir(null), "screen.png").outputStream().use {
+                image.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
         }
     }
 }
