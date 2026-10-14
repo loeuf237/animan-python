@@ -23,7 +23,7 @@ def validate(app, tests, output, skip_native_media=False, package="com.animan.ap
     logs = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, timeout=30)
     (output / "logcat.txt").write_text(logs.stdout)
     if package == "com.animan.app":
-        subprocess.run(["adb", "pull", "/sdcard/Android/data/com.animan.app.test/files/screen.png", str(output / "screen.png")], timeout=15)
+        subprocess.run(["adb", "pull", "/sdcard/Android/data/com.animan.app/files/screen.png", str(output / "screen.png")], timeout=15)
     print(report)
     if result.returncode or not re.search(r"OK \(1 test\)", report) or "FAILURES" in report or "INSTRUMENTATION_FAILED" in report:
         raise RuntimeError("The installed Android engine did not pass instrumentation")

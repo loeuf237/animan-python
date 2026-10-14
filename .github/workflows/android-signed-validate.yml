@@ -54,8 +54,10 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: |
-            python scripts/android_instrumentation.py android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk signed-test-results/runtime --skip-native-media
-            python scripts/android_instrumentation.py android-validation/Animan-native-media-probe.apk android-validation/Animan-native-media-tests.apk signed-test-results/media --package com.animan.nativeprobe
+            status=0
+            python scripts/android_instrumentation.py android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk signed-test-results/runtime --skip-native-media || status=1
+            python scripts/android_instrumentation.py android-validation/Animan-native-media-probe.apk android-validation/Animan-native-media-tests.apk signed-test-results/media --package com.animan.nativeprobe || status=1
+            exit "$status"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

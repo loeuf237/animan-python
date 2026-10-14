@@ -117,7 +117,8 @@ class EmbeddedEngineTest {
             val instrumentation = InstrumentationRegistry.getInstrumentation()
             val image = instrumentation.uiAutomation.takeScreenshot()
             assertNotNull("Screenshot could not be captured", image)
-            File(instrumentation.context.getExternalFilesDir(null), "screen.png").outputStream().use {
+            val pictures = requireNotNull(context.getExternalFilesDir(null))
+            File(pictures, "screen.png").outputStream().use {
                 image.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
         }
