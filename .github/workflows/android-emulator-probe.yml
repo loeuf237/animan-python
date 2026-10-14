@@ -8,6 +8,7 @@ on:
         required: false
 permissions:
   contents: read
+  actions: read
 jobs:
   boot:
     runs-on: ubuntu-24.04
