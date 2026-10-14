@@ -20,8 +20,12 @@ def validate(api, app, tests, output, boot_only=False):
     package = f'system-images;android-{api};google_apis;arm64-v8a'
     avd = f'animan_arm_api_{api}'
     avdmanager = sdk / 'cmdline-tools/latest/bin/avdmanager'
-    subprocess.run([str(avdmanager), 'create', 'avd', '--force', '-n', avd, '-k', package], input='no\n', text=True, check=True, timeout=120)
     env = os.environ.copy()
+    avd_home = output.resolve() / 'avd'
+    avd_home.mkdir(exist_ok=True)
+    env['ANDROID_AVD_HOME'] = str(avd_home)
+    env['ANDROID_EMULATOR_LAUNCHER_DIR'] = str(sdk / 'emulator')
+    subprocess.run([str(avdmanager), 'create', 'avd', '--force', '-n', avd, '-k', package], input='no\n', text=True, check=True, timeout=120, env=env)
     libraries = [str(sdk / 'emulator/lib64'), str(sdk / 'emulator/lib64/qt/lib')]
     if env.get('LD_LIBRARY_PATH'): libraries.append(env['LD_LIBRARY_PATH'])
     env['LD_LIBRARY_PATH'] = ':'.join(libraries)
@@ -51,10 +55,15 @@ def validate(api, app, tests, output, boot_only=False):
             from android_instrumentation import validate as instrument
             instrument(app, tests, output)
         finally:
-            subprocess.run(['adb', 'logcat', '-d'], stdout=(output / 'logcat.txt').open('w'), stderr=subprocess.DEVNULL, timeout=30)
-            subprocess.run(['adb', 'emu', 'kill'], capture_output=True, timeout=20)
-            try: process.wait(timeout=15)
-            except subprocess.TimeoutExpired: process.kill(); process.wait()
+            if process.poll() is None:
+                try:
+                    with (output / 'logcat.txt').open('w') as logs:
+                        subprocess.run(['adb', 'logcat', '-d'], stdout=logs, stderr=subprocess.DEVNULL, timeout=5)
+                    subprocess.run(['adb', 'emu', 'kill'], capture_output=True, timeout=5)
+                except subprocess.TimeoutExpired: pass
+                process.terminate()
+                try: process.wait(timeout=5)
+                except subprocess.TimeoutExpired: process.kill(); process.wait()
 
 
 if __name__ == '__main__':
