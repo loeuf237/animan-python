@@ -67,6 +67,22 @@ class EmbeddedEngineTest {
             val port = EngineHost.port
             scenario.recreate()
             assertEquals("Activity recreation started another server", port, EngineHost.port)
+            // Recreating the Activity creates a new WebView. Its server stays
+            // alive, but its page must render again before capturing the UI.
+            var recreated = false
+            val recreatedDeadline = System.currentTimeMillis() + 60000
+            while (!recreated && System.currentTimeMillis() < recreatedDeadline) {
+                val checked = CountDownLatch(1)
+                scenario.onActivity { activity ->
+                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#app .app-shell'))") {
+                        recreated = it == "true" && activity.findViewById<android.view.View>(R.id.loadingLayout).visibility == android.view.View.GONE
+                        checked.countDown()
+                    }
+                }
+                assertTrue(checked.await(5, TimeUnit.SECONDS))
+                if (!recreated) Thread.sleep(500)
+            }
+            assertTrue("Recreated WebView did not become visible", recreated)
             val includeMedia = InstrumentationRegistry.getArguments().getString("skip_native_media") != "true"
             val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe", includeMedia).toString())
             report.put("vue_rendered", true)
