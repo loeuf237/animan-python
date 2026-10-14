@@ -1,7 +1,7 @@
 """Animan - Anime Downloader in Python (FastAPI)."""
 import os
 
-__version__ = "2.0.0"
+__version__ = "0.1.0"
 
 def _sanitize_proxy_env():
     """Normalise automatiquement les URLs de proxy SOCKS de socks:// vers socks5://
@@ -13,4 +13,3 @@ def _sanitize_proxy_env():
             os.environ[var] = "socks5://" + val[len("socks://"):]
 
 _sanitize_proxy_env()
-

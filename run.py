@@ -14,6 +14,7 @@ from animan.services.source_http import source_http, VerificationRequired
 from animan.services.browser_verification import browser_verification
 from animan.routers.network import router as network_router
 from animan.config import settings
+from animan import __version__
 from animan.database import init_db
 from animan.services.download_manager import download_manager
 from animan.services.scraping_service import scraping_service
@@ -39,7 +40,7 @@ logger = logging.getLogger("animan")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Animan Python v2.0...")
+    logger.info("Starting Animan Python v%s...", __version__)
     source_http.start()
     # 1. Initialize SQLite database
     init_db()
@@ -54,12 +55,12 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(browser_verification.watch()),
     ]
     from animan.services.proxy_pool import proxy_pool
-    bg_tasks.append(asyncio.create_task(proxy_pool.refresh()))
     bg_tasks.append(asyncio.create_task(proxy_pool.watch()))
-    for service in (scraping_service, voiranime_service, animepahe_service):
-        # API callers share the preload instead of launching another refresh.
-        service._refresh_task = asyncio.create_task(service._safe_refresh_cache())
-        bg_tasks.append(service._refresh_task)
+    if os.getenv("ANIMAN_STARTUP_REFRESH", "true").lower() not in ("false", "0", "no"):
+        bg_tasks.append(asyncio.create_task(proxy_pool.refresh()))
+        for service in (scraping_service, voiranime_service, animepahe_service):
+            service._refresh_task = asyncio.create_task(service._safe_refresh_cache())
+            bg_tasks.append(service._refresh_task)
 
     import socket
     lan_ip = "127.0.0.1"
@@ -86,7 +87,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Animan",
     description="Anime Downloader - High performance anime streaming & downloads",
-    version="2.0.0",
+    version=__version__,
     lifespan=lifespan
 )
 

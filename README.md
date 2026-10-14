@@ -9,7 +9,7 @@
 
 **Animan** is an anime streaming and download application built with **FastAPI**, **Python 3**, and a **Vue 3 / TypeScript** interface. It supports dubbed and subtitled episodes, a personal library, imported sources, and local video playback.
 
-Use the standalone **Windows executable**, a native desktop window on **Linux or macOS**, or the cross-platform **Progressive Web App (PWA)**.
+Use the packaged **Python + Vue desktop application** on Windows, Linux or macOS, or the cross-platform **Progressive Web App (PWA)**. The desktop release series starts at **0.1.0**; macOS builds are explicitly **UNTESTED on real Mac hardware**.
 
 ## Downloads and applications
 
@@ -17,12 +17,15 @@ Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/a
 
 | Platform | Format | Access | Description |
 | :--- | :---: | :--- | :--- |
-| Windows | `.exe` | [Animan-Windows-x64.zip](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-Windows-x64.zip) | Standalone executable with an Edge WebView2 interface; no Python installation required. |
-| Linux | Desktop / Web | [Desktop launcher](#linux-and-macos) | Native WebKitGTK window or local Python server. |
-| macOS | Desktop / Web | [Desktop launcher](#linux-and-macos) | Native Cocoa / WebKit window or local Python server. |
+| Windows x64 | `.zip` / `.exe` | [Download](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip) | Python engine, Vue interface and media tools included; WebView2 or installed-browser fallback. |
+| Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
+| macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
+| macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
 | Web / Mobile | PWA | [Browser installation](#pwa-installation) | Standalone browser installation on Chrome, Edge, Safari iOS and Android. |
 
-The experimental Android APK is currently suspended while the Android application is being rewritten with Flutter.
+Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
+
+Android is the next milestone: embed the complete Python engine and compiled Vue interface with Kotlin/Chaquopy and Android WebView. The legacy APK is not published with desktop tags. See the [Android technical roadmap](docs/android-embedded-roadmap.md).
 
 ## Language and default source
 
@@ -138,14 +141,19 @@ Enable subtitles for the episode or batch. Tracks must be available from the sou
 
 ## Windows
 
-1. Download [Animan-Windows-x64.zip](https://github.com/loeuf237/animan-python/releases/download/v2.1.0/Animan-Windows-x64.zip).
+1. Download [Animan-v0.1.0-Windows-x64.zip](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip).
 2. Extract the archive into a directory such as `C:\Animan`.
 3. Run `Animan.exe`.
 4. Animan starts the local server and opens a native Microsoft Edge WebView2 window.
 
 ## Linux and macOS
 
-For a native desktop window:
+For packaged builds, extract the whole archive and run `./Animan` on Linux or open
+`Animan.app` on macOS. Choose the correct Mac architecture. **macOS is UNTESTED on
+real hardware**, unsigned by Developer ID and not notarized. Linux archives need
+a compatible system (glibc 2.35+); they are not universal AppImages.
+
+For a native window from a source checkout:
 
 ```bash
 python3 desktop.py

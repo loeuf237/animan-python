@@ -1,18 +1,10 @@
-name: Build and Release Android (.apk)
+name: Android legacy build (manual, no release publication)
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Tag de la release (ex: v2.1.0)'
-        required: true
-        default: 'v2.1.0'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-android:
@@ -43,24 +35,8 @@ jobs:
           cd android
           ./gradlew assembleRelease --stacktrace
 
-      - name: Determine Tag Name
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Prepare APK Asset
-        run: |
-          mkdir -p dist
-          cp android/app/build/outputs/apk/release/app-release.apk dist/Animan-${{ steps.vars.outputs.tag }}.apk
-
-      - name: Upload APK to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Keep legacy APK as a diagnostic artifact only
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          files: dist/Animan-${{ steps.vars.outputs.tag }}.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: Android-legacy-INCOMPLETE-not-for-release
+          path: android/app/build/outputs/apk/release/*.apk
