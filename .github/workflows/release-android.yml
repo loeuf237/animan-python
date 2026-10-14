@@ -171,11 +171,7 @@ jobs:
           heap-size: 512M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
-            status=0
-            python scripts/android_instrumentation.py android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk android-test-results/runtime --skip-native-media || status=1
-            python scripts/android_instrumentation.py android-validation/Animan-native-media-probe.apk android-validation/Animan-native-media-tests.apk android-test-results/media --package com.animan.nativeprobe || status=1
-            exit "$status"
+          script: python scripts/android_run_probes.py android-validation android-test-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
