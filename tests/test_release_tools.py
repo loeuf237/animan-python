@@ -1,5 +1,8 @@
 import hashlib
 import sys
+import json
+import subprocess
+from pathlib import Path
 import pytest
 from scripts import desktop_release
 
@@ -24,3 +27,19 @@ def test_preparation_rejects_mismatched_release_version(monkeypatch):
     monkeypatch.setenv('RELEASE_TAG','v2.1.0')
     with pytest.raises(ValueError, match='Tag'):
         desktop_release.prepare()
+
+
+def test_windowed_entry_point_can_configure_server_without_console(tmp_path):
+    result = tmp_path / 'streams.json'
+    code = '''
+import sys, json
+sys.stdin = sys.stdout = sys.stderr = None
+import desktop, uvicorn
+async def app(scope, receive, send): pass
+uvicorn.Config(app, log_config=None, access_log=False)
+with open(sys.argv[1], 'w') as handle:
+    json.dump({name:getattr(sys,name) is not None for name in ('stdin','stdout','stderr')}, handle)
+'''
+    subprocess.run([sys.executable, '-c', code, str(result)],
+                   cwd=Path(__file__).resolve().parents[1], check=True, timeout=20)
+    assert json.loads(result.read_text()) == {'stdin':True,'stdout':True,'stderr':True}

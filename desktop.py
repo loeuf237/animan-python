@@ -15,6 +15,11 @@ from urllib.request import ProxyHandler, build_opener
 import webbrowser
 from animan import __version__
 
+# Windowed PyInstaller executables have no console streams on Windows.
+for _stream in ("stdin", "stdout", "stderr"):
+    if getattr(sys, _stream) is None:
+        setattr(sys, _stream, open(os.devnull, "r" if _stream == "stdin" else "w", encoding="utf-8"))
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("animan.desktop")
 if os.getenv("ANIMAN_LOG_FILE"):
@@ -56,7 +61,7 @@ def start_server(port):
     from run import app
     import uvicorn
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
-        log_level="warning", access_log=False, timeout_graceful_shutdown=10))
+        log_level="warning", log_config=None, access_log=False, timeout_graceful_shutdown=10))
     worker = threading.Thread(target=server.run, daemon=True, name="AnimanServer")
     worker.start()
     if not wait_for_server(port):
@@ -99,10 +104,14 @@ def self_test():
             for tool in ("ffmpeg", "ffprobe"):
                 if not shutil.which(tool): raise RuntimeError(f"Missing bundled media tool: {tool}")
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
-                "color=c=black:s=32x32:d=0.3", "-c:v", "mpeg4", str(target)], check=True, timeout=30)
+                "color=c=black:s=32x32:d=1", "-c:v", "mpeg4", str(target)],
+                stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=30)
             probe = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(target)],
-                                   check=True, capture_output=True, text=True, timeout=30)
+                                   stdin=subprocess.DEVNULL, check=True, capture_output=True, text=True, timeout=30)
             assert any(stream["codec_type"] == "video" for stream in json.loads(probe.stdout)["streams"])
+            from animan.services.verification_service import verification_service
+            result = verification_service.verify_file(str(target))
+            if not result.valid: raise RuntimeError(f"Packaged media integrity check failed: {result.error}")
             print(json.dumps({"version":__version__, "frontend":True, "http":True,
                               "curl_cffi":True, "media_tools":True, "gui_hardware_tested":False}))
         finally:
