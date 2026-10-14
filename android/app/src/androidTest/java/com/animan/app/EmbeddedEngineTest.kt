@@ -67,9 +67,26 @@ class EmbeddedEngineTest {
             val port = EngineHost.port
             scenario.recreate()
             assertEquals("Activity recreation started another server", port, EngineHost.port)
-            val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe").toString())
+            val includeMedia = InstrumentationRegistry.getArguments().getString("skip_native_media") != "true"
+            val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe", includeMedia).toString())
             report.put("vue_rendered", true)
             report.put("webview_version", WebView.getCurrentWebViewPackage()?.versionName)
+            if (!includeMedia) {
+                val source = File(context.filesDir, "downloads/native-storage-probe.bin")
+                val bytes = ByteArray(65537) { (it % 251).toByte() }
+                source.parentFile?.mkdirs(); source.writeBytes(bytes)
+                assertTrue(NativeHooks.progress(1, 99, "Storage probe", "native-storage-probe", "downloading"))
+                try {
+                    val uri = Uri.parse(NativeHooks.exportFile(source.path, "native-storage-probe"))
+                    val exported = requireNotNull(context.contentResolver.openInputStream(uri)).use { it.readBytes() }
+                    assertArrayEquals(bytes, exported)
+                    context.contentResolver.query(uri, arrayOf(MediaStore.Downloads.IS_PENDING), null, null, null)?.use {
+                        assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+                    } ?: fail("Storage export is not published")
+                    report.put("storage_export", true)
+                } finally { NativeHooks.progress(0, 100, "Storage probe", "native-storage-probe", "completed") }
+            }
+            if (includeMedia) {
             val mediaPaths = report.getJSONArray("media_paths")
             for (index in 0 until mediaPaths.length()) {
                 val source = File(mediaPaths.getString(index))
@@ -91,7 +108,10 @@ class EmbeddedEngineTest {
                 } ?: fail("Shared download was not published")
             }
             report.put("storage_export", true)
-            for (key in listOf("python_engine", "ffmpeg_jni", "tls", "direct_resume", "aes128_hls", "subtitle_mux", "storage_export", "decode_verification")) assertTrue(key, report.getBoolean(key))
+            }
+            val checkedKeys = mutableListOf("python_engine", "ffmpeg_jni", "tls", "java_aes")
+            if (includeMedia) checkedKeys.addAll(listOf("direct_resume", "aes128_hls", "subtitle_mux", "storage_export", "decode_verification"))
+            for (key in checkedKeys) assertTrue(key, report.getBoolean(key))
             assertEquals(200, request("/api/download/status").first)
             println("ANIMAN_ANDROID_PROBE=" + report.toString())
             val instrumentation = InstrumentationRegistry.getInstrumentation()

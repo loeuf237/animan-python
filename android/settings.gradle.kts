@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Animan"
 include(":app")
+include(":media-probe")

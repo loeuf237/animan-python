@@ -18,8 +18,11 @@ Standalone Python 3.13 engine and compiled Vue interface, embedded with Chaquopy
   reopen Animan and resume paused tasks.
 
 Publication requires packaged-engine/16 KB ELF checks and successful emulator
-instrumentation on Android 11 and Android 15: local UI/API, native imports, TLS,
-Activity recreation, Range resume, encrypted HLS, subtitle mux and storage export.
+instrumentation on Android 11 and Android 15: ARM64 runtime/UI/API, native imports,
+TLS, Activity recreation, Java AES and storage export. Media commands use the
+same Kotlin bridge in a separate native x86_64 test application (encode, remux,
+subtitle mux, decode and error handling). Direct/HLS resume has shared Python
+regression coverage. **The full ARM64 media pipeline has not been tested.**
 **Real-phone testing has not been performed.** This is a beta, not a claim of
 validated playback/battery behavior on every phone. Playback depends on the
 device's WebView and codec support; exported MKV files can be opened with a

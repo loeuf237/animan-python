@@ -12,10 +12,12 @@ Android cryptography/OpenSSL wheel.
 instrumentation. Without a production key it builds a **validation APK with a
 temporary debug identity** and refuses publication. With the release identity it
 tests the signed release APK. Both paths inspect the actual packaged engine and
-ELF page alignment and RELRO mapping, then run Android 11/15 Google APIs ARM64
-guests using the SDK's QEMU software backend. An x86 guest's ARM translation
-layer cannot validate FFmpeg reliably. Emulation does not replace a physical
-ARM64 phone test.
+ELF page alignment and RELRO mapping. Android 11/15 Google APIs x86 guests test
+the ARM64 Python/Vue runtime via native translation; a separate test application
+executes the **same Kotlin media bridge** using genuine x86_64 FFmpeg libraries.
+These are separate checks, not a completed ARM64 download-pipeline test. The
+software ARM64 guest probe is retained for diagnosis: current SDK system
+services crash during boot in that environment. A physical ARM64 test is needed.
 
 Run locally with Python 3.13, JDK 17+, Android SDK 35, NDK and native build tools:
 
@@ -45,11 +47,26 @@ Release signing uses `ANIMAN_ANDROID_KEYSTORE`, `ANIMAN_ANDROID_STORE_PASSWORD`,
 Preserve a secure backup of the release identity for updates. Publication uses
 the separate `android-v0.1.0-beta.1` tag and never modifies desktop `v0.1.0`.
 
-Release gates cover native imports, Chrome/TLS requests, SQLite, packaged Vue,
-loopback authentication, Activity recreation, resumed direct media, AES-128 HLS,
-subtitle mux and MediaStore export with matching content hashes. Logs and a screenshot are saved as Actions
-artifacts. A beta may state `physical_device_tested: false`; it must not claim
-that real-device power management or all playback codecs were tested.
+Local signing avoids transferring the private identity to GitHub:
+
+```bash
+python scripts/android_sign_release.py build/android-candidate build/android-signed \
+  --build-tools "$ANDROID_HOME/build-tools/35.0.0"
+```
+
+The validation variant inherits release flags and is not debuggable. The script
+verifies those flags and input hashes, signs both app and instrumentation with a
+dedicated RSA identity, and preserves build provenance. The identity and its
+configuration stay in the ignored, private `android/keystore/` directory. Signed
+APKs must be tested again before publication. No private key is a release asset.
+
+Release checks cover native imports, Chrome/TLS, SQLite, rendered Vue, loopback
+authentication, Activity recreation, Java AES and byte-checked MediaStore export.
+The native media probe covers actual encode, TS/MP4 remux, subtitle mux, decode
+and failure reporting on x86_64; shared direct/HLS resume logic has Python
+regression coverage. Logs and screenshots are Actions artifacts. Metadata must
+record both test ABIs and `full_arm64_media_pipeline_tested: false` while this
+limitation remains. Real-device power management and playback are not validated.
 
 Media copies in the private library and shared Downloads occupy space twice.
 Private partials/cookies/database are excluded from Android backup. Engine state

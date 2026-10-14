@@ -94,7 +94,7 @@ def command(action):
     return True
 
 
-def native_probe():
+def native_probe(include_media=True):
     """Called by instrumentation, not by a public API or untrusted WebView."""
     import cffi, curl_cffi, pydantic, sqlalchemy, lxml.etree, websockets, yt_dlp
     from animan import media_tools
@@ -110,13 +110,19 @@ def native_probe():
     response = curl_cffi.requests.get("https://example.com", impersonate="chrome", timeout=20)
     assert response.status_code == 200
     assert lxml.etree.fromstring(b"<probe/>").tag == "probe"
+    # This exercises the actual Python-to-Java AES boundary even when the
+    # emulator's ARM binary translation cannot execute FFmpeg CLI commands.
+    key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
+    iv = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
+    assert media_tools.decrypt_aes_cbc(bytes.fromhex("7649abac8119b246cee98e9b12e9197d"), key, iv) == bytes.fromhex("6bc1bee22e409f96e93d7e117393172a")
     import subprocess
     try:
-        media = media_pipeline_probe()
+        media = media_pipeline_probe() if include_media else {}
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f"Native media validation failed: {exc}; diagnostics: {str(exc.stderr)[-2048:]}") from exc
     return json.dumps({"python_engine": True, "curl_cffi": curl_cffi.__version__,
-                       "pydantic": pydantic.__version__, "ffmpeg_jni": True, "tls": True, **media})
+                       "pydantic": pydantic.__version__, "ffmpeg_jni": True, "tls": True,
+                       "java_aes": True, "media_commands_tested": bool(include_media), **media})
 
 
 def media_pipeline_probe():
