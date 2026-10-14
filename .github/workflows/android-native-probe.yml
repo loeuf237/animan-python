@@ -20,6 +20,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Install native build utilities
         run: sudo apt-get update && sudo apt-get install -y patchelf
       - name: Build missing Android wheels
