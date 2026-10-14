@@ -27,12 +27,27 @@ def inspect_apk(path):
                             raise ValueError("Non-ARM64 native library: " + name)
                         ph_offset = struct.unpack_from("<Q", content, 32)[0]
                         ph_size, ph_count = struct.unpack_from("<HH", content, 54)
+                        segments = []
                         for index in range(ph_count):
                             offset = ph_offset + index * ph_size
-                            if struct.unpack_from("<I", content, offset)[0] == 1:
-                                alignment = struct.unpack_from("<Q", content, offset + 48)[0]
+                            kind = struct.unpack_from("<I", content, offset)[0]
+                            address = struct.unpack_from("<Q", content, offset + 16)[0]
+                            size = struct.unpack_from("<Q", content, offset + 40)[0]
+                            alignment = struct.unpack_from("<Q", content, offset + 48)[0]
+                            segments.append((kind, address, size, alignment))
+                            if kind == 1:
                                 if alignment < 16384:
                                     raise ValueError("Native library is not 16 KB aligned: " + name)
+                        # p_align alone misses NDK r26 libraries whose RELRO
+                        # protection extends into an unmapped page at load time.
+                        loads = [(a, s, alignment) for k, a, s, alignment in segments if k == 1]
+                        page = max(alignment for _, _, alignment in loads)
+                        last_load_end = max(a + s for a, s, _ in loads)
+                        for kind, address, size, _ in segments:
+                            if kind == 0x6474E552 and size:
+                                end = (address + size + page - 1) // page * page
+                                if end > last_load_end:
+                                    raise ValueError("Native RELRO exceeds mapped 16 KB pages: " + name)
                         native.append(name)
                     elif content.startswith(b"PK"):
                         inspect_zip(io.BytesIO(content), name + "/", depth + 1)
@@ -53,7 +68,7 @@ def manifest(apk, output, validation=False):
     report.update({"version": "0.1.0", "version_code": 211, "min_android_api": 29,
                    "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                    "physical_device_tested": False, "validation_key_only": validation,
-                   "ffmpeg": "dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.3",
+                   "ffmpeg": "dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.4",
                    "python": "3.13", "curl_cffi": "0.16.3"})
     (output / "Android-build-info.json").write_text(json.dumps(report, indent=2))
     (output / "SHA256SUMS.txt").write_text(hashlib.file_digest(apk.open("rb"), "sha256").hexdigest() + "  " + apk.name + "\n")

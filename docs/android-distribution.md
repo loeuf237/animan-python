@@ -12,8 +12,10 @@ Android cryptography/OpenSSL wheel.
 instrumentation. Without a production key it builds a **validation APK with a
 temporary debug identity** and refuses publication. With the release identity it
 tests the signed release APK. Both paths inspect the actual packaged engine and
-ELF page alignment, then run Android 11/15 Google APIs emulators with ARM native
-translation. Translation testing does not replace a physical ARM64 phone test.
+ELF page alignment and RELRO mapping, then run Android 11/15 Google APIs ARM64
+guests using the SDK's QEMU software backend. An x86 guest's ARM translation
+layer cannot validate FFmpeg reliably. Emulation does not replace a physical
+ARM64 phone test.
 
 Run locally with Python 3.13, JDK 17+, Android SDK 35, NDK and native build tools:
 

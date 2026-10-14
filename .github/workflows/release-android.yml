@@ -29,6 +29,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Test native package validation
+        run: python -m pip install pytest && python -m pytest -q tests/test_android_release.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -134,7 +136,7 @@ jobs:
   device-tests:
     needs: build
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -152,23 +154,11 @@ jobs:
         with:
           name: Android-under-test
           path: android-validation
-      - name: Enable emulator acceleration
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: android-actions/setup-android@v3
         with:
-          api-level: ${{ matrix.api }}
-          arch: x86_64
-          target: google_apis
-          ram-size: 4096M
-          heap-size: 512M
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: |
-            adb shell getprop ro.product.cpu.abilist
-            python scripts/android_instrumentation.py android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk android-test-results
+          packages: platform-tools emulator system-images;android-${{ matrix.api }};google_apis;arm64-v8a
+      - name: Test on an ARM64 guest without native translation
+        run: python scripts/android_arm_emulator.py ${{ matrix.api }} android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk android-test-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
