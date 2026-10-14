@@ -1,48 +1,74 @@
 package com.animan.app
 
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFprobeKit
+import com.arthenica.ffmpegkit.FFmpegKitConfig
+import com.arthenica.ffmpegkit.FFmpegSession
+import com.arthenica.ffmpegkit.FFprobeSession
+import com.arthenica.ffmpegkit.LogRedirectionStrategy
 import com.arthenica.ffmpegkit.Session
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicInteger
-import com.arthenica.ffmpegkit.LogCallback
+import java.util.concurrent.atomic.AtomicBoolean
 
 object MediaBridge {
-    @JvmStatic fun execute(tool: String, arguments: String, timeoutMs: Int): String {
+    // FFmpegKit's session history retains every log before invoking callbacks.
+    // Own the bounded output and serialize commands so disabling that history
+    // cannot interfere with another command's diagnostics or cancellation.
+    @JvmStatic @Synchronized fun execute(tool: String, arguments: String, timeoutMs: Int): String {
         require(tool == "ffmpeg" || tool == "ffprobe")
+        require(timeoutMs > 0)
+        check(!unresponsive) { "The native media worker did not stop; restart Animan before retrying" }
         val values = JSONArray(arguments)
         val args = Array(values.length()) { values.getString(it) }
+        if (args.contentEquals(arrayOf("-version"))) {
+            // The native getter does not invoke the CLI's process-exit path.
+            return result(0, "$tool version ${FFmpegKitConfig.getFFmpegVersion()}", "", false)
+        }
+        val output = StringBuilder()
+        val excessiveLogs = AtomicBoolean(false)
         val completed = CountDownLatch(1)
-        val logBytes = AtomicInteger()
-        val boundedLog = LogCallback { log ->
-            if (logBytes.addAndGet(log.message.length) > MAX_DIAGNOSTICS) FFmpegKit.cancel(log.sessionId)
+        FFmpegKitConfig.setLogRedirectionStrategy(LogRedirectionStrategy.NEVER_PRINT_LOGS)
+        val session: Session = if (tool == "ffprobe") FFprobeSession.create(args) else FFmpegSession.create(args)
+        FFmpegKitConfig.clearSessions()
+        FFmpegKitConfig.enableLogCallback { log ->
+            if (log.sessionId == session.sessionId) {
+                synchronized(output) {
+                    val remaining = MAX_DIAGNOSTICS - output.length
+                    if (remaining > 0) output.append(log.message.take(remaining))
+                    if (log.message.length > remaining && excessiveLogs.compareAndSet(false, true)) {
+                        FFmpegKit.cancel(session.sessionId)
+                    }
+                }
+            }
         }
-        val session: Session = if (tool == "ffprobe") {
-            FFprobeKit.executeWithArgumentsAsync(args, { completed.countDown() }, boundedLog)
-        } else {
-            FFmpegKit.executeWithArgumentsAsync(args, { completed.countDown() }, boundedLog, null)
-        }
+        Thread({
+            try {
+                if (session is FFprobeSession) FFmpegKitConfig.ffprobeExecute(session)
+                else FFmpegKitConfig.ffmpegExecute(session as FFmpegSession)
+            } finally { completed.countDown() }
+        }, "AnimanNativeMedia").apply { isDaemon = true }.start()
         val timedOut = !completed.await(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
         if (timedOut) {
             FFmpegKit.cancel(session.sessionId)
-            completed.await(5, TimeUnit.SECONDS)
+            unresponsive = !completed.await(5, TimeUnit.SECONDS)
         }
-        // Avoid AbstractSession.getAllLogsAsString: it creates an unbounded
-        // duplicate of every diagnostic and can exhaust the Java heap.
-        val output = StringBuilder()
-        for (log in session.getAllLogs(1000)) {
-            val remaining = MAX_DIAGNOSTICS - output.length
-            if (remaining <= 0) break
-            output.append(log.message.take(remaining))
+        // Drain the native callback queue without copying FFmpegKit's log list.
+        val drainDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+        while (session.thereAreAsynchronousMessagesInTransmit() && System.nanoTime() < drainDeadline) Thread.sleep(10)
+        FFmpegKitConfig.enableLogCallback(null)
+        val stdout = synchronized(output) { output.toString() }
+        val code = if (excessiveLogs.get()) -1 else session.returnCode?.value ?: -1
+        val stderr = when {
+            excessiveLogs.get() -> "FFmpeg diagnostic limit exceeded; command cancelled. " + stdout.take(2048)
+            tool == "ffprobe" && code == 0 -> ""
+            else -> stdout
         }
-        val excessiveLogs = logBytes.get() > MAX_DIAGNOSTICS
-        val diagnostic = if (excessiveLogs) "FFmpeg diagnostic limit exceeded; command cancelled" else output.toString()
-        return JSONObject().put("returncode", if (excessiveLogs) -1 else session.returnCode?.value ?: -1)
-            .put("stdout", output.toString()).put("stderr", if (tool == "ffprobe" && session.returnCode?.value == 0 && !excessiveLogs) "" else diagnostic)
-            .put("timedOut", timedOut).toString()
+        return result(code, stdout, stderr, timedOut)
     }
+    private fun result(code: Int, stdout: String, stderr: String, timedOut: Boolean): String =
+        JSONObject().put("returncode", code).put("stdout", stdout).put("stderr", stderr).put("timedOut", timedOut).toString()
+    private var unresponsive = false
     private const val MAX_DIAGNOSTICS = 1024 * 1024
 }

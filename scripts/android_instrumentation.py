@@ -14,7 +14,7 @@ def validate(app, tests, output):
         subprocess.run(["adb", "shell", "pm", "grant", "com.animan.app", "android.permission.POST_NOTIFICATIONS"], check=True, timeout=15)
     result = subprocess.run(["adb", "shell", "am", "instrument", "-w", "-r",
                              "com.animan.app.test/androidx.test.runner.AndroidJUnitRunner"],
-                            capture_output=True, text=True, timeout=360)
+                            capture_output=True, text=True, timeout=480)
     report = result.stdout + result.stderr
     (output / "instrumentation.txt").write_text(report)
     logs = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, timeout=30)

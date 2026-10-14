@@ -36,7 +36,7 @@ class EmbeddedEngineTest {
         EngineHost.start(context, true)
         val intent = Intent(context, MainActivity::class.java).putExtra("test_mode", true)
         ActivityScenario.launch<MainActivity>(intent).use { scenario ->
-            val deadline = System.currentTimeMillis() + 120000
+            val deadline = System.currentTimeMillis() + 180000
             while (!EngineHost.ready && EngineHost.error == null && System.currentTimeMillis() < deadline) Thread.sleep(250)
             assertNull(EngineHost.error)
             assertTrue("Embedded Python did not become ready", EngineHost.ready)

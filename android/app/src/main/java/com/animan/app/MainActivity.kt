@@ -57,8 +57,9 @@ class MainActivity : AppCompatActivity() {
         binding.loadingStatus.text = getString(R.string.starting_engine)
         binding.retryButton.visibility = View.GONE
         connectJob = lifecycleScope.launch {
-            var attempts = 0
-            while (attempts++ < 120 && EngineHost.error == null) {
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(3)
+            while (System.nanoTime() < deadline && EngineHost.error == null) {
+                if (!EngineHost.ready) { delay(500); continue }
                 val reachable = withContext(Dispatchers.IO) {
                     try {
                         val conn = URL(EngineHost.baseUrl + "/manifest.json").openConnection(Proxy.NO_PROXY) as HttpURLConnection
