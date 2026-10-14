@@ -29,7 +29,7 @@ def fetch(release_id, output):
         with build_opener(SafeRedirect()).open(request, timeout=60) as response: return response.read()
     release = json.loads(get('/releases/' + str(release_id)))
     assert release['draft'] and release['tag_name'] == 'android-v0.1.0-beta.1'
-    assets = {a['name']: a for a in release['assets']}
+    assets = {a['name']: a for a in json.loads(get('/releases/' + str(release_id) + '/assets?per_page=100'))}
     for name, destination in NAMES.items():
         asset = assets[name]
         data = get('/releases/assets/' + str(asset['id']), 'application/octet-stream')

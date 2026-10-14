@@ -17,7 +17,7 @@ def assemble(release_id, output):
         with build_opener(SafeRedirect()).open(req,timeout=60) as r: return r.read()
     release=json.loads(get('/releases/'+str(release_id)))
     assert release['draft'] and release['tag_name']=='android-v0.1.0-beta.1'
-    assets={a['name']:a for a in release['assets']}
+    assets={a['name']:a for a in json.loads(get('/releases/'+str(release_id)+'/assets?per_page=100'))}
     manifest=json.loads(get('/releases/assets/'+str(assets['Android-apk-parts.json']['id']),'application/octet-stream'))
     assert manifest['filename']=='Animan-v0.1.0-Android-arm64.apk'
     target=output/manifest['filename']
