@@ -1,5 +1,5 @@
 // Animan Service Worker - PWA Offline & Caching Engine
-const CACHE_NAME = 'animan-cache-v2.1.0';
+const CACHE_NAME = 'animan-cache-v0.1.0';
 
 const PRECACHE_ASSETS = [
   '/',

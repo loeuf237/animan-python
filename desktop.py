@@ -1,5 +1,6 @@
 """Desktop launcher and offline checks for the packaged Python + Vue app."""
 import argparse
+import gc
 import json
 import logging
 import os
@@ -118,6 +119,9 @@ def self_test():
             server.should_exit = True
             worker.join(timeout=20)
             if worker.is_alive(): raise RuntimeError("Packaged server failed to stop")
+            from animan.database import engine
+            engine.dispose()
+            gc.collect()  # Release SQLite handles before Windows removes temporary storage.
 
 
 def main():
@@ -159,6 +163,9 @@ def main():
         download_manager.pause_all_downloads()
         server.should_exit = True
         worker.join(timeout=20)
+        if not worker.is_alive():
+            from animan.database import engine
+            engine.dispose()
 
 
 if __name__ == "__main__":
