@@ -53,7 +53,7 @@ def manifest(apk, output, validation=False):
     report.update({"version": "0.1.0", "version_code": 211, "min_android_api": 29,
                    "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                    "physical_device_tested": False, "validation_key_only": validation,
-                   "ffmpeg": "dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7",
+                   "ffmpeg": "dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.3",
                    "python": "3.13", "curl_cffi": "0.16.3"})
     (output / "Android-build-info.json").write_text(json.dumps(report, indent=2))
     (output / "SHA256SUMS.txt").write_text(hashlib.file_digest(apk.open("rb"), "sha256").hexdigest() + "  " + apk.name + "\n")

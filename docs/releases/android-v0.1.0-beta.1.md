@@ -30,5 +30,5 @@ require uninstalling that old APK; uninstalling removes its private data. Export
 any needed data first. Future releases retain the dedicated release identity.
 
 Assets include the APK, build provenance and SHA-256 checksums. FFmpeg is the
-LGPL variant `dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7`; its corresponding
+LGPL variant `dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.3`; its corresponding
 source is available from [the maintained FFmpegKit project](https://github.com/ffmpegkit-maintained/ffmpeg).
