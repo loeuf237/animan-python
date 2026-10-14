@@ -69,7 +69,7 @@ def sign(source, destination, tools):
                 source_build_variant='validation_with_release_flags', signing_certificate_sha256=fingerprint)
     (destination / 'Android-build-info.json').write_text(json.dumps(info, indent=2))
     (destination / 'SHA256SUMS.txt').write_text(''.join(hashlib.file_digest(p.open('rb'), 'sha256').hexdigest() + '  ' + p.name + '\n'
-                                                    for p in sorted(destination.iterdir()) if p.name != 'SHA256SUMS.txt'))
+                                                    for p in sorted(destination.iterdir()) if p.is_file() and p.name != 'SHA256SUMS.txt'))
     print(json.dumps({'directory': str(destination.resolve()), 'source_commit': info['commit'],
                       'signing_certificate_sha256': fingerprint, 'private_key_uploaded': False}, indent=2))
 
