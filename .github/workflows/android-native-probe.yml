@@ -24,7 +24,13 @@ jobs:
           packages: platform-tools
       - name: Install native build utilities
         run: sudo apt-get update && sudo apt-get install -y patchelf
+      - uses: actions/cache@v4
+        id: wheels
+        with:
+          path: android/wheels
+          key: android-native-arm64-${{ hashFiles('scripts/android_native_wheels.py') }}
       - name: Build missing Android wheels
+        if: steps.wheels.outputs.cache-hit != 'true'
         run: python scripts/android_native_wheels.py
       - uses: actions/upload-artifact@v4
         with:

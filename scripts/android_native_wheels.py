@@ -24,6 +24,7 @@ def build(root: Path):
         checkout.parent.mkdir(parents=True, exist_ok=True)
         run("git", "clone", "https://github.com/chaquo/chaquopy.git", str(checkout))
     run("git", "checkout", "--detach", CHAQUOPY_COMMIT, cwd=checkout)
+    run("git", "restore", "server/pypi/build-wheel.py", "server/pypi/packages/cffi/meta.yaml", cwd=checkout)
     pypi = checkout / "server/pypi"
     run(sys.executable, "-m", "pip", "install", "-r", str(pypi / "requirements.txt"))
     target = checkout / f"maven/com/chaquo/python/target/{TARGET_VERSION}"
@@ -43,7 +44,12 @@ def build(root: Path):
     old = '"PYO3_NO_PYTHON": "1",'
     if old not in contents:
         raise RuntimeError("Chaquopy Rust configuration changed; review the native build")
-    tool.write_text(contents.replace(old, '"PYO3_CROSS_LIB_DIR": f"{self.host_env}/chaquopy/lib",'))
+    contents = contents.replace(old, '"PYO3_CROSS_LIB_DIR": f"{self.host_env}/chaquopy/lib",')
+    # New target packages provide both libpython3 and libpython3.13. The legacy
+    # helper attempts to create the same convenience symlink for both libraries.
+    contents = contents.replace('if link_filename != filename:',
+        'if link_filename != filename and not exists(f"{reqs_lib_dir}/{link_filename}"):')
+    tool.write_text(contents)
     core = pypi / "packages/pydantic-core"
     core.mkdir(exist_ok=True)
     (core / "meta.yaml").write_text('''package:
