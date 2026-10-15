@@ -20,6 +20,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import android.net.Uri
 import android.provider.MediaStore
+import android.os.ParcelFileDescriptor
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -33,6 +34,7 @@ class EmbeddedEngineTest {
             scenario.onActivity { activity ->
                 val webView = activity.findViewById<WebView>(R.id.webView)
                 if (webView.url?.startsWith(EngineHost.baseUrl + "/spa/") != true ||
+                    !activity.hasWindowFocus() ||
                     activity.findViewById<android.view.View>(R.id.loadingLayout).visibility != android.view.View.GONE) checked.countDown()
                 else webView.evaluateJavascript("Boolean(document.querySelector('#main-content .home-container .hero-panel'))") {
                     rendered.set(it == "true"); checked.countDown()
@@ -95,11 +97,17 @@ class EmbeddedEngineTest {
             val pickerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
             var pickerVisible = false
             while (!pickerVisible && System.nanoTime() < pickerDeadline) {
-                pickerVisible = automation.rootInActiveWindow?.packageName?.toString()?.contains("documentsui") == true
+                // Android 15 may expose no accessibility root for DocumentsUI
+                // while its activity is visibly resumed. Inspect the actual
+                // foreground activity, then still require cancellation to
+                // deliver its result and render Animan again.
+                val activities = ParcelFileDescriptor.AutoCloseInputStream(
+                    automation.executeShellCommand("dumpsys activity activities")).bufferedReader().use { it.readText() }
+                pickerVisible = activities.lineSequence().any { it.contains("ResumedActivity") && it.contains("documentsui") }
                 if (!pickerVisible) Thread.sleep(250)
             }
             assertTrue("Android folder picker did not open", pickerVisible)
-            automation.executeShellCommand("input keyevent KEYCODE_BACK").close()
+            ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand("input keyevent KEYCODE_BACK")).use { it.readBytes() }
             val cancelDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
             var pending = true
             while (pending && System.nanoTime() < cancelDeadline) {
