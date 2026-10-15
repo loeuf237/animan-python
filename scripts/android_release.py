@@ -73,7 +73,7 @@ def manifest(apk, output, validation=False):
     report = inspect_apk(apk)
     root = Path(__file__).resolve().parents[1]
     output.mkdir(parents=True, exist_ok=True)
-    report.update({"version": "0.1.0", "version_code": 211, "min_android_api": 29,
+    report.update({"version": "0.1.0", "version_code": 212, "min_android_api": 29,
                    "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
                    "physical_device_tested": False, "validation_key_only": validation,
                    "ffmpeg": "dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.4",

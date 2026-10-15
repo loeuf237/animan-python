@@ -284,6 +284,7 @@
 
     <!-- Onglet 4 : Stockage & Système -->
     <div v-show="currentTab === 'storage'" class="settings-tab-pane" :class="{ active: currentTab === 'storage' }">
+      <AndroidStorageSettings />
       <section class="settings-card-pro">
         <div class="settings-card-header-pro">
           <div class="settings-card-icon-pro">
@@ -539,12 +540,14 @@ import { ref, computed, onMounted } from 'vue';
 import { api } from '@/api/client';
 import { useI18nStore } from '@/stores/i18n';
 import ProxyPoolSettings from '@/components/ProxyPoolSettings.vue';
+import AndroidStorageSettings from '@/components/AndroidStorageSettings.vue';
 import { useRoute } from 'vue-router';
 
 const i18nStore = useI18nStore();
 
 const currentTab = ref<'general' | 'downloads' | 'sources' | 'storage' | 'proxy'>('general');
 if (useRoute().query.tab === 'proxy') currentTab.value = 'proxy';
+if (useRoute().query.tab === 'storage') currentTab.value = 'storage';
 const activeSourceTab = ref<'voir-anime' | 'animepahe' | 'french-manga'>('voir-anime');
 
 const theme = ref('dark');

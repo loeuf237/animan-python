@@ -7,4 +7,5 @@
     <string name="active_downloads">%1$d téléchargement(s) en cours</string>
     <string name="pause_downloads">Mettre en pause</string>
     <string name="return_to_animan">Revenir à Animan</string>
+    <string name="storage_permission_error">Accès au stockage impossible. Autorisez un dossier dans Paramètres → Stockage.</string>
 </resources>

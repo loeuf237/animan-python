@@ -1,6 +1,7 @@
 package com.animan.app
 
 import android.content.ContentValues
+import android.provider.DocumentsContract
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
@@ -9,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 object NativeHooks {
     private var lastNotification = 0L
-    private val exportLock = Any()
+    internal val exportLock = Any()
     private val taskStates = ConcurrentHashMap<String, String>()
     @JvmStatic fun ready() {
         EngineHost.ready = true
@@ -28,15 +29,26 @@ object NativeHooks {
         return DownloadService.update(EngineHost.context)
     }
 
-    @JvmStatic fun exportFile(path: String, taskId: String): String = synchronized(exportLock) { exportCompletedFile(path, taskId) }
+    @JvmStatic fun exportFile(path: String, taskId: String): String = synchronized(exportLock) {
+        try {
+            exportCompletedFile(path, taskId).also { StorageAccess.exportResult(it, null) }
+        } catch (failure: Exception) {
+            StorageAccess.exportResult(null, failure.message ?: "Storage export failed")
+            throw failure
+        }
+    }
 
     private fun exportCompletedFile(path: String, taskId: String): String {
         val context = EngineHost.context
         val root = File(context.filesDir, "downloads").canonicalFile
         val source = File(path).canonicalFile
         require(source.isFile && source.path.startsWith(root.path + File.separator)) { "Invalid completed media path" }
+        val tree = StorageAccess.treeUri()
+        check(if (tree == null) Environment.getExternalStorageState() == Environment.MEDIA_MOUNTED else StorageAccess.authorized(tree)) {
+            "Storage access unavailable; authorize a folder in Settings > Storage"
+        }
         val preferences = context.getSharedPreferences("animan_exports", ContextMode)
-        val key = source.path + ":" + source.length() + ":" + source.lastModified()
+        val key = (tree?.toString() ?: "downloads") + ":" + source.path + ":" + source.length() + ":" + source.lastModified()
         val previous = preferences.getString(key, null)
         if (previous != null) {
             try { context.contentResolver.openFileDescriptor(android.net.Uri.parse(previous), "r")?.use { return previous } }
@@ -47,27 +59,30 @@ object NativeHooks {
             val pendingUri = android.net.Uri.parse(pending)
             var published = false
             try {
-                context.contentResolver.query(pendingUri, arrayOf(MediaStore.Downloads.IS_PENDING), null, null, null)?.use {
+                if (tree == null) context.contentResolver.query(pendingUri, arrayOf(MediaStore.Downloads.IS_PENDING), null, null, null)?.use {
                     published = it.moveToFirst() && it.getInt(0) == 0
                 }
                 if (published) {
                     preferences.edit().putString(key, pending).remove(pendingKey).commit()
                     return pending
                 }
-                context.contentResolver.delete(pendingUri, null, null)
+                if (tree == null) context.contentResolver.delete(pendingUri, null, null)
+                else DocumentsContract.deleteDocument(context.contentResolver, pendingUri)
             } catch (_: Exception) { /* The previous incomplete copy was removed. */ }
             preferences.edit().remove(pendingKey).commit()
         }
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase()) ?: "application/octet-stream"
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, source.name)
-            put(MediaStore.Downloads.MIME_TYPE, MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension) ?: "video/x-matroska")
+            put(MediaStore.Downloads.MIME_TYPE, mime)
             put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Animan")
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val resolver = context.contentResolver
-        val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
-        preferences.edit().putString(pendingKey, uri.toString()).commit()
+        val uri = requireNotNull(if (tree == null) resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            else DocumentsContract.createDocument(resolver, StorageAccess.directory(tree), mime, source.name)) { "The storage provider refused to create the file" }
         try {
+            check(preferences.edit().putString(pendingKey, uri.toString()).commit())
             requireNotNull(resolver.openOutputStream(uri)).use { output -> source.inputStream().use { input ->
                 val buffer = ByteArray(256 * 1024)
                 while (true) {
@@ -77,12 +92,17 @@ object NativeHooks {
                     output.write(buffer, 0, count)
                 }
             } }
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
-            preferences.edit().putString(key, uri.toString()).remove(pendingKey).commit()
+            check(resolver.openFileDescriptor(uri, "r")?.use { it.statSize < 0 || it.statSize == source.length() } == true) { "The exported file size does not match the download" }
+            if (tree == null) check(resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null) == 1) { "The file could not be published in Downloads" }
+            check(preferences.edit().putString(key, uri.toString()).remove(pendingKey).commit())
             return uri.toString()
         } catch (failure: Exception) {
-            resolver.delete(uri, null, null)
-            preferences.edit().remove(pendingKey).commit()
+            var removed = false
+            try {
+                removed = if (tree == null) resolver.delete(uri, null, null) > 0
+                else DocumentsContract.deleteDocument(resolver, uri)
+            } catch (_: Exception) { /* Preserve the original failure and pending URI for cleanup. */ }
+            if (removed) preferences.edit().remove(pendingKey).commit()
             throw failure
         }
     }

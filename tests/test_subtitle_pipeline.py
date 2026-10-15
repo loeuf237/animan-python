@@ -167,14 +167,22 @@ async def test_mux_failure_preserves_files_and_reports_failure(video):
     assert not list(video.parent.glob(".animan-mux-*"))
 
 
-@pytest.mark.parametrize("hardlinks", [True, False])
+@pytest.mark.parametrize("hardlinks", [True, False, "permission_denied", "android"])
 def test_existing_mkv_is_preserved_and_new_export_gets_unique_name(video, monkeypatch, hardlinks):
-    if not hardlinks:
+    if hardlinks is not True:
         import errno
         import os
         def unsupported(*args):
-            raise OSError(errno.EOPNOTSUPP, "Hard links unsupported")
+            if hardlinks == "android":
+                raise AssertionError("Android must reserve and rename instead of creating hard links")
+            raise OSError(errno.EACCES if hardlinks == "permission_denied" else errno.EOPNOTSUPP, "Hard links unavailable")
         monkeypatch.setattr(os, "link", unsupported)
+        if hardlinks == "android":
+            from animan import media_tools
+            monkeypatch.setattr(media_tools, "is_native", lambda: True)
+            # Exercise the real mux/probe pipeline, isolating the storage policy
+            # from the Android-only JNI implementation.
+            monkeypatch.setattr(media_tools, "run", subprocess.run)
     target = video.with_suffix(".mkv")
     target.write_bytes(b"existing video")
     sidecar = video.with_suffix(".srt")

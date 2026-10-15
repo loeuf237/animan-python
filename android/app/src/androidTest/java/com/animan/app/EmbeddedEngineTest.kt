@@ -21,14 +21,41 @@ import java.util.concurrent.TimeUnit
 import android.net.Uri
 import android.provider.MediaStore
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(AndroidJUnit4::class)
 class EmbeddedEngineTest {
-    private fun request(path: String, authenticated: Boolean = true): Pair<Int, String> {
+    private fun waitForHome(scenario: ActivityScenario<MainActivity>, message: String) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60)
+        while (System.nanoTime() < deadline) {
+            val checked = CountDownLatch(1)
+            val rendered = AtomicBoolean(false)
+            scenario.onActivity { activity ->
+                val webView = activity.findViewById<WebView>(R.id.webView)
+                if (webView.url?.startsWith(EngineHost.baseUrl + "/spa/") != true ||
+                    activity.findViewById<android.view.View>(R.id.loadingLayout).visibility != android.view.View.GONE) checked.countDown()
+                else webView.evaluateJavascript("Boolean(document.querySelector('#main-content .home-container .hero-panel'))") {
+                    rendered.set(it == "true"); checked.countDown()
+                }
+            }
+            // A renderer can start slowly after recreation. A missed callback
+            // does not bypass the overall deadline or the actual DOM check.
+            checked.await(5, TimeUnit.SECONDS)
+            if (rendered.get()) return
+            Thread.sleep(250)
+        }
+        fail(message)
+    }
+    private fun request(path: String, authenticated: Boolean = true, body: String? = null): Pair<Int, String> {
         val connection = URL(EngineHost.baseUrl + path).openConnection(Proxy.NO_PROXY) as HttpURLConnection
         try {
             connection.connectTimeout = 5000; connection.readTimeout = 20000
             if (authenticated) connection.setRequestProperty("X-Animan-Session", EngineHost.token)
+            if (body != null) {
+                connection.requestMethod = "POST"; connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.outputStream.use { it.write(body.toByteArray()) }
+            }
             val code = connection.responseCode
             val stream = if (code < 400) connection.inputStream else connection.errorStream
             return Pair(code, stream?.bufferedReader()?.use { it.readText() } ?: "")
@@ -51,38 +78,36 @@ class EmbeddedEngineTest {
             assertTrue(page!!.second.contains("id=\"app\""))
             assertEquals(401, request("/api/download/status", false).first)
             assertEquals(200, request("/api/download/status").first)
-            var hydrated = false
-            val uiDeadline = System.currentTimeMillis() + 60000
-            while (!hydrated && System.currentTimeMillis() < uiDeadline) {
-                val checked = CountDownLatch(1)
-                scenario.onActivity { activity ->
-                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#main-content .home-container .hero-panel'))") {
-                        hydrated = it == "true"; checked.countDown()
-                    }
-                }
-                assertTrue(checked.await(5, TimeUnit.SECONDS))
-                if (!hydrated) Thread.sleep(500)
-            }
-            assertTrue("Vue did not render in the installed System WebView", hydrated)
+            waitForHome(scenario, "Vue did not render in the installed System WebView")
             val port = EngineHost.port
             scenario.recreate()
             assertEquals("Activity recreation started another server", port, EngineHost.port)
             // Recreating the Activity creates a new WebView. Its server stays
             // alive, but its page must render again before capturing the UI.
-            var recreated = false
-            val recreatedDeadline = System.currentTimeMillis() + 60000
-            while (!recreated && System.currentTimeMillis() < recreatedDeadline) {
-                val checked = CountDownLatch(1)
-                scenario.onActivity { activity ->
-                    activity.findViewById<WebView>(R.id.webView).evaluateJavascript("Boolean(document.querySelector('#main-content .home-container .hero-panel'))") {
-                        recreated = it == "true" && activity.findViewById<android.view.View>(R.id.loadingLayout).visibility == android.view.View.GONE
-                        checked.countDown()
-                    }
-                }
-                assertTrue(checked.await(5, TimeUnit.SECONDS))
-                if (!recreated) Thread.sleep(500)
+            waitForHome(scenario, "Recreated WebView did not become visible")
+            val storage = JSONObject(request("/api/system/android/storage").second)
+            assertTrue(storage.getBoolean("authorized"))
+            assertEquals("Downloads/Animan", storage.getString("destination"))
+            assertEquals(401, request("/api/system/android/storage", false, "{\"action\":\"choose_directory\"}").first)
+            val selection = JSONObject(request("/api/system/android/storage", body = "{\"action\":\"choose_directory\"}").second)
+            assertTrue(selection.getBoolean("selectionPending"))
+            val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+            val pickerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+            var pickerVisible = false
+            while (!pickerVisible && System.nanoTime() < pickerDeadline) {
+                pickerVisible = automation.rootInActiveWindow?.packageName?.toString()?.contains("documentsui") == true
+                if (!pickerVisible) Thread.sleep(250)
             }
-            assertTrue("Recreated WebView did not become visible", recreated)
+            assertTrue("Android folder picker did not open", pickerVisible)
+            automation.executeShellCommand("input keyevent KEYCODE_BACK").close()
+            val cancelDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+            var pending = true
+            while (pending && System.nanoTime() < cancelDeadline) {
+                pending = JSONObject(request("/api/system/android/storage").second).getBoolean("selectionPending")
+                if (pending) Thread.sleep(250)
+            }
+            assertFalse("Folder picker cancellation did not restore permission controls", pending)
+            waitForHome(scenario, "Home did not return after cancelling folder selection")
             val includeMedia = InstrumentationRegistry.getArguments().getString("skip_native_media") != "true"
             val report = JSONObject(Python.getInstance().getModule("android_runtime").callAttr("native_probe", includeMedia).toString())
             report.put("vue_rendered", true)
@@ -125,7 +150,7 @@ class EmbeddedEngineTest {
             }
             report.put("storage_export", true)
             }
-            val checkedKeys = mutableListOf("python_engine", "ffmpeg_jni", "tls", "java_aes")
+            val checkedKeys = mutableListOf("python_engine", "ffmpeg_jni", "tls", "java_aes", "atomic_media_publish")
             if (includeMedia) checkedKeys.addAll(listOf("direct_resume", "aes128_hls", "subtitle_mux", "storage_export", "decode_verification"))
             for (key in checkedKeys) assertTrue(key, report.getBoolean(key))
             assertEquals(200, request("/api/download/status").first)

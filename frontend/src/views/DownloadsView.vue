@@ -397,6 +397,8 @@
 
           <!-- Terminé : Lire (Mode Cinéma local), Vérifier l'intégrité, Supprimer -->
           <template v-else-if="task.status === 'completed'">
+            <button v-if="androidStorage" class="btn btn-secondary btn-sm" :disabled="exportingTask === task.id" @click="exportToStorage(task)">{{ tx('Exporter vers le stockage') }}</button>
+            <RouterLink v-if="androidStorage && task.error" class="btn btn-secondary btn-sm" to="/settings?tab=storage">{{ tx('Autorisations Android') }}</RouterLink>
             <button class="btn btn-primary btn-sm btn-icon" :title="tx('Lire la vidéo locale (Mode Cinéma)')" @click="playTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8Z"/></svg>
             </button>
@@ -479,6 +481,7 @@ import { useLibraryStore } from '@/stores/library';
 import { usePlayerStore } from '@/stores/player';
 import { useNotifications } from '@/stores/notifications';
 import type { DownloadTask } from '@/types';
+import { api } from '@/api/client';
 
 defineOptions({name: 'DownloadsView'});
 const notifications = useNotifications();
@@ -488,6 +491,17 @@ let firstActivation = true;
 onActivated(() => { if (firstActivation) firstActivation = false; else void downloadStore.fetchTasks(); });
 const libraryStore = useLibraryStore();
 const playerStore = usePlayerStore();
+const androidStorage = ref(false);
+const exportingTask = ref<string | null>(null);
+async function exportToStorage(task: DownloadTask) {
+  exportingTask.value = String(task.id);
+  try {
+    const result = await api.exportAndroidDownload(String(task.id));
+    showToast(`${tx('Fichiers exportés vers')} ${result.destination}`, 'success');
+    await downloadStore.fetchTasks();
+  } catch (failure) { showToast(failure instanceof Error ? failure.message : String(failure), 'error'); }
+  finally { exportingTask.value = null; }
+}
 
 const tab = ref<'queue' | 'done' | 'errors' | 'all'>('queue');
 const isSettingsOpen = ref(false);
@@ -513,6 +527,7 @@ async function performAction(action: () => Promise<unknown>) {
 }
 
 onMounted(async () => {
+  api.getAndroidStorage().then(state => { androidStorage.value = Boolean(state?.android); }).catch(() => {});
   await downloadStore.fetchTasks();
   if (libraryStore.favorites.length === 0) {
     libraryStore.fetchFavorites().catch(() => {});

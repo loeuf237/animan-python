@@ -1,6 +1,8 @@
 """Optional native lifecycle hooks. No platform imports in the shared engine."""
 progress_handler = None
 completed_handler = None
+storage_status_handler = None
+storage_action_handler = None
 
 
 def progress(task):
@@ -10,4 +12,8 @@ def progress(task):
 
 def completed(task):
     if completed_handler:
-        completed_handler(task)
+        return completed_handler(task)
+
+
+def storage_status():
+    return storage_status_handler() if storage_status_handler else None

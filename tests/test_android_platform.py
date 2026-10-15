@@ -121,3 +121,59 @@ def test_interrupted_mux_is_restored_as_paused(monkeypatch, tmp_path):
     monkeypatch.setattr(manager, "_trigger_process_queue", lambda: None)
     manager.pause_all_downloads()
     assert task.paused and task.status == DownloadStatus.PAUSED
+
+
+@pytest.mark.asyncio
+async def test_storage_controls_validate_actions_and_retry_export(monkeypatch, tmp_path):
+    from fastapi import FastAPI
+    from animan import platform_events
+    from animan.routers.library import router
+    from animan.routers.download import router as downloads_router
+    from animan.services.download_manager import download_manager
+    from animan.services.library_service import library_service
+    from animan.models.download_task import DownloadTask, DownloadStatus
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(downloads_router)
+    calls = []
+    monkeypatch.setattr(platform_events, 'storage_status_handler', lambda: {'android': True, 'authorized': False})
+    monkeypatch.setattr(platform_events, 'storage_action_handler', lambda action: calls.append(action) or {'authorized': True})
+    source = tmp_path / 'download.mp4'
+    source.write_bytes(b'private media')
+    task = DownloadTask(status=DownloadStatus.COMPLETED, savePath=str(source))
+    monkeypatch.setattr(download_manager, 'tasks', {task.id: task})
+    monkeypatch.setattr(download_manager, 'broadcast_update', lambda task: None)
+    monkeypatch.setattr(library_service, 'save_task', lambda task: None)
+    def failed_export(task):
+        raise PermissionError('Folder access was revoked')
+    monkeypatch.setattr(platform_events, 'completed_handler', failed_export)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url='http://127.0.0.1') as client:
+        assert (await client.get('/api/system/android/storage')).json()['authorized'] is False
+        assert (await client.post('/api/download', json={})).status_code == 409
+        assert (await client.post('/api/system/android/storage', json={'action': 'arbitrary_command'})).status_code == 400
+        assert calls == []
+        assert (await client.post('/api/system/android/storage', json={'action': 'choose_directory'})).json()['authorized'] is True
+        assert calls == ['choose_directory']
+        assert (await client.post('/api/system/android/export', json={'taskId': task.id})).status_code == 409
+        assert task.status == DownloadStatus.COMPLETED and source.read_bytes() == b'private media'
+        assert 'Folder access was revoked' in task.error
+        monkeypatch.setattr(platform_events, 'completed_handler', lambda task: {'uris': ['content://downloads/1'], 'destination': 'Downloads/Animan'})
+        assert (await client.post('/api/system/android/export', json={'taskId': task.id})).json()['success']
+        assert task.error is None and source.exists()
+        task.status = DownloadStatus.PAUSED
+        assert (await client.post('/api/system/android/export', json={'taskId': task.id})).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_storage_failure_never_invents_available_capacity(monkeypatch, tmp_path):
+    from animan.routers.library import get_system_storage
+    from animan.config import settings
+    from animan import platform_events
+    import shutil
+    monkeypatch.setattr(settings, 'DOWNLOAD_DIR', str(tmp_path))
+    monkeypatch.setattr(platform_events, 'storage_status_handler', None)
+    def denied(path): raise PermissionError('Storage unavailable')
+    monkeypatch.setattr(shutil, 'disk_usage', denied)
+    result = await get_system_storage()
+    assert result['totalBytes'] is None and result['freeBytes'] is None
+    assert result['error'] == 'Storage unavailable'

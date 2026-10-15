@@ -3,7 +3,7 @@ import logging
 import shutil
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from animan.config import settings
@@ -13,6 +13,8 @@ from animan.services.voiranime_service import voiranime_service
 from animan.services.watchdog_service import watchdog_service
 from animan.security import anonymize_path, is_safe_url
 from animan.templates_config import templates
+from animan import platform_events
+from animan.models.download_task import DownloadStatus
 
 logger = logging.getLogger("animan.router.library")
 router = APIRouter()
@@ -235,17 +237,72 @@ async def get_system_storage():
             "usedBytes": used,
             "freeBytes": free,
             "usedPercent": percent,
-            "downloadDir": anonymize_path(str(download_dir))
+            "downloadDir": anonymize_path(str(download_dir)),
+            "native": await asyncio.to_thread(platform_events.storage_status),
         }
     except Exception as e:
         logger.error("Error reading disk usage: %s", e)
         return {
-            "totalBytes": 1024**4,
-            "usedBytes": 300 * (1024**3),
-            "freeBytes": 700 * (1024**3),
-            "usedPercent": 30.0,
-            "downloadDir": anonymize_path(str(download_dir))
+            "totalBytes": None,
+            "usedBytes": None,
+            "freeBytes": None,
+            "usedPercent": None,
+            "downloadDir": anonymize_path(str(download_dir)),
+            "error": str(e),
+            "native": await asyncio.to_thread(platform_events.storage_status),
         }
+
+
+@router.get("/api/system/android/storage")
+async def android_storage_status():
+    return await asyncio.to_thread(platform_events.storage_status)
+
+
+@router.post("/api/system/android/storage")
+async def android_storage_action(request: Request):
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Invalid permission request")
+    action = body.get("action")
+    if action not in {"choose_directory", "use_downloads", "notifications", "app_settings", "open_downloads"}:
+        raise HTTPException(400, "Unknown permission action")
+    if platform_events.storage_action_handler is None:
+        raise HTTPException(404, "Android storage controls are unavailable")
+    try:
+        return await asyncio.to_thread(platform_events.storage_action_handler, action)
+    except Exception as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/api/system/android/export")
+async def android_export_download(request: Request):
+    if platform_events.completed_handler is None:
+        raise HTTPException(404, "Android export is unavailable")
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Invalid export request")
+    task_id = body.get("taskId")
+    if not isinstance(task_id, str) or len(task_id) > 36:
+        raise HTTPException(400, "Invalid download ID")
+    task = download_manager.tasks.get(task_id)
+    if task is None:
+        entity = await asyncio.to_thread(library_service.get_task_entity, task_id)
+        task = entity.to_task() if entity else None
+    if task is None:
+        raise HTTPException(404, "Download not found")
+    if task.status != DownloadStatus.COMPLETED:
+        raise HTTPException(409, "Complete and verify the download before exporting it")
+    try:
+        result = await asyncio.to_thread(platform_events.completed, task)
+    except Exception as exc:
+        task.error = f"Android export failed; media is available in the library: {exc}"
+        await asyncio.to_thread(library_service.save_task, task)
+        raise HTTPException(409, str(exc)) from exc
+    if task.error and task.error.startswith("Android export failed;"):
+        task.error = None
+        await asyncio.to_thread(library_service.save_task, task)
+    download_manager.broadcast_update(task)
+    return {"success": True, **(result or {})}
 
 @router.post("/api/watchdog/check")
 async def trigger_watchdog_check():

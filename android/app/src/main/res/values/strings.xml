@@ -13,5 +13,6 @@
     <string name="active_downloads">%1$d active download(s)</string>
     <string name="pause_downloads">Pause downloads</string>
     <string name="return_to_animan">Return to Animan</string>
+    <string name="storage_permission_error">Storage access failed. Select a writable folder in Settings → Storage.</string>
     <string name="download_started">Téléchargement lancé</string>
 </resources>

@@ -1,8 +1,11 @@
 # Android: complete embedded Python engine and Vue interface
 
-Status: the Android implementation and native dependency wheels are now in the
-repository. APK/emulator validation and production signing are tracked by
-`release-android.yml`; physical-device validation remains pending. See
+Status: the implementation, native dependency wheels and a locally signed
+[0.1.0 beta](https://github.com/loeuf237/animan-python/releases/tag/android-v0.1.0-beta.1)
+are available. Emulator checks cover the ARM64 runtime through native translation
+and native media commands separately on x86_64. Physical-device validation and
+the complete ARM64 download/media pipeline remain pending. The ordered route
+below retains the additional targets for broader, stable support. See
 [Android distribution](android-distribution.md) for the build and publication gates.
 
 ## Architecture to retain
@@ -118,9 +121,11 @@ access and native permissions to actual application needs.
 
 ### 6. Validate, sign, then publish
 
-Produce an arm64 device APK and an x86_64 emulator APK first, then a universal APK
-if needed, plus an AAB when store distribution is desired. Store a release keystore
-and its passwords in GitHub secrets; preserve the signing identity for updates.
+The current beta provides an ARM64 device APK; a separate x86_64 application
+tests native media commands. A full x86_64 engine requires additional compatible
+HTTP dependency wheels. Add other ABIs or an AAB when distribution requires them.
+Preserve the dedicated release signing identity for updates. Local signing keeps
+the private key off GitHub; CI signing is an optional, separate setup.
 The new release must not reuse the old debug signing configuration. Choose a
 `versionCode` that remains monotonically increasing for supported installations,
 even if the public semantic version series is reset to 0.x.
@@ -130,7 +135,9 @@ access, a real direct download and an AES-128 HLS fixture, interruption/restart,
 subtitle mux/integrity checks, storage export, and service notification actions.
 Run emulator instrumentation and real-device tests with screen off, rotation,
 network loss, app restart and background restrictions. Record tested Android
-versions/ABIs and publish checksums only after these gates succeed.
+versions/ABIs and distinguish passing checks from outstanding tests. The first
+beta records its untested physical-device and complete ARM64 pipeline status;
+those checks remain gates for claiming stable support.
 
 ## Proposed milestones
 

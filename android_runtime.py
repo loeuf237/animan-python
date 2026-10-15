@@ -53,6 +53,9 @@ def start(data_dir, cache_dir, port, token, test_mode=False):
     media_tools.configure_android(jclass("com.animan.app.MediaBridge"), jclass("com.animan.app.CryptoBridge"))
     hooks = jclass("com.animan.app.NativeHooks")
     verification = jclass("com.animan.app.VerificationBridge")
+    storage = jclass("com.animan.app.StorageAccess")
+    platform_events.storage_status_handler = lambda: json.loads(str(storage.status()))
+    platform_events.storage_action_handler = lambda action: json.loads(str(storage.request(action)))
     import run
     from animan.android_security import AndroidSessionMiddleware
     from animan.models.download_task import DownloadStatus
@@ -67,7 +70,26 @@ def start(data_dir, cache_dir, port, token, test_mode=False):
             _loop.call_soon_threadsafe(download_manager.pause_all_downloads)
 
     platform_events.progress_handler = notify
-    platform_events.completed_handler = lambda task: hooks.exportFile(task.savePath, task.id)
+    def export_completed(task):
+        from animan.services.subtitle_service import normalize_subtitles
+        if not task.savePath or not Path(task.savePath).is_file():
+            raise FileNotFoundError("The private download is missing")
+        paths = [task.savePath]
+        for track in normalize_subtitles(task.subtitlesJson):
+            if not track.get("muxed") and track.get("path"):
+                paths.append(track["path"])
+        if task.savePathSubtitle and not any(track.get("muxed") for track in normalize_subtitles(task.subtitlesJson)):
+            try:
+                sidecars = json.loads(task.savePathSubtitle)
+            except (ValueError, TypeError):
+                sidecars = task.savePathSubtitle
+            paths.extend(sidecars if isinstance(sidecars, list) else [sidecars])
+        uris = [str(hooks.exportFile(path, task.id)) for path in dict.fromkeys(paths) if path and Path(path).is_file()]
+        if not uris:
+            raise FileNotFoundError("The private download is missing")
+        return {"uris": uris, "destination": json.loads(str(storage.status()))["destination"]}
+
+    platform_events.completed_handler = export_completed
     original_lifespan = run.app.router.lifespan_context
 
     @asynccontextmanager
@@ -105,6 +127,20 @@ def native_probe(include_media=True):
     with engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT 1").scalar() == 1
     assert media_tools.which("ffmpeg") and media_tools.which("ffprobe")
+    # Exercise the exact publication step implicated in Errno 13 without
+    # relying on ARM-translated FFmpeg command execution in the emulator.
+    from animan.config import settings
+    from animan.services.download_manager import download_manager
+    publish_root = Path(settings.DOWNLOAD_DIR) / "native-publish-probe"
+    publish_root.mkdir(parents=True, exist_ok=True)
+    original = publish_root / "episode.mkv"
+    staging = publish_root / "staging.tmp"
+    original.write_bytes(b"existing episode")
+    staging.write_bytes(b"verified mux output")
+    published = download_manager._publish_mux_file(staging, publish_root / "episode.mp4", original, "native-publish")
+    assert published != original and original.read_bytes() == b"existing episode"
+    assert published.read_bytes() == b"verified mux output"
+    published.unlink(); original.unlink(); staging.unlink(missing_ok=True)
     assert media_tools.run(["ffmpeg", "-version"], check=True).stdout
     # TLS + Chrome impersonation, outside source security/cache policy.
     response = curl_cffi.requests.get("https://example.com", impersonate="chrome", timeout=20)
@@ -122,7 +158,7 @@ def native_probe(include_media=True):
         raise RuntimeError(f"Native media validation failed: {exc}; diagnostics: {str(exc.stderr)[-2048:]}") from exc
     return json.dumps({"python_engine": True, "curl_cffi": curl_cffi.__version__,
                        "pydantic": pydantic.__version__, "ffmpeg_jni": True, "tls": True,
-                       "java_aes": True, "media_commands_tested": bool(include_media), **media})
+                       "java_aes": True, "atomic_media_publish": True, "media_commands_tested": bool(include_media), **media})
 
 
 def media_pipeline_probe():

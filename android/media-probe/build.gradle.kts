@@ -19,11 +19,12 @@ android {
     sourceSets["main"].java.srcDir(layout.buildDirectory.dir("generated/bridges"))
 }
 val copyBridges by tasks.registering(Sync::class) {
-    from("../app/src/main/java/com/animan/app") { include("MediaBridge.kt", "CryptoBridge.kt") }
+    from("../app/src/main/java/com/animan/app") { include("MediaBridge.kt", "CryptoBridge.kt", "NativeHooks.kt", "StorageAccess.kt") }
     into(layout.buildDirectory.dir("generated/bridges/com/animan/app"))
 }
 tasks.named("preBuild") { dependsOn(copyBridges) }
 dependencies {
+    implementation("androidx.core:core-ktx:1.13.0")
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.4")
     implementation("com.arthenica:smart-exception-java:0.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

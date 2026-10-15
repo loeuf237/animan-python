@@ -791,5 +791,22 @@
   "Catalogue plein ; retirez la liste importée avant cet import": "Catalog full; remove the imported list before importing again",
   "Aucune session connue pour cette source": "No known session for this source",
   "Une requête ou un téléchargement est en cours pour ce domaine ; réessayez à sa fin": "A request or download is active for this domain; retry when it finishes",
-  "Aucun autre proxy HTTPS testé disponible ; actualisez et testez la liste dans les paramètres": "No other tested HTTPS proxy available; refresh and test the list in settings"
+  "Aucun autre proxy HTTPS testé disponible ; actualisez et testez la liste dans les paramètres": "No other tested HTTPS proxy available; refresh and test the list in settings",
+  "Autorisations Android": "Android permissions",
+  "Les fichiers terminés sont copiés dans le stockage partagé. Les téléchargements en cours restent privés.": "Completed files are copied to shared storage. Downloads in progress remain private.",
+  "Dossier de destination": "Destination folder",
+  "Accès autorisé": "Access granted",
+  "Autorisation requise": "Permission required",
+  "Downloads/Animan fonctionne sans accès global au stockage. Pour un autre dossier ou une carte SD, utilisez le sélecteur Android pour autoriser l’accès.": "Downloads/Animan works without access to all files. For another folder or an SD card, grant access through the Android folder picker.",
+  "Choisir et autoriser un dossier": "Choose and authorize a folder",
+  "Utiliser Downloads/Animan": "Use Downloads/Animan",
+  "Ouvrir le dossier": "Open folder",
+  "Choisissez un sous-dossier dans la fenêtre Android, puis confirmez l’accès.": "Choose a subfolder in the Android window, then confirm access.",
+  "Notifications de téléchargement": "Download notifications",
+  "Autoriser les notifications": "Allow notifications",
+  "Permissions dans les paramètres Android": "Permissions in Android settings",
+  "Actualiser les accès": "Refresh permissions",
+  "Exporter vers le stockage": "Export to storage",
+  "Fichiers exportés vers": "Files exported to",
+  "Storage access unavailable; authorize a folder in Settings > Storage": "Storage access unavailable; authorize a folder in Settings > Storage"
 }

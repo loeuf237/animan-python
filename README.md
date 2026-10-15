@@ -21,16 +21,24 @@ Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/a
 | Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
 | macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
 | macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
+| Android ARM64 | `.apk` | [Download beta](https://github.com/loeuf237/animan-python/releases/download/android-v0.1.0-beta.1/Animan-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
 | Web / Mobile | PWA | [Browser installation](#pwa-installation) | Standalone browser installation on Chrome, Edge, Safari iOS and Android. |
 
 Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
 
-The **Android beta pipeline** embeds the shared Python engine, compiled Vue interface,
-curl_cffi and native FFmpeg for **Android 10+ / ARM64**. It validates the installed
-app on emulators before publication; production signing and real-phone testing
-are tracked separately. Validation APKs use a temporary identity and are not
-distributed as production releases. See [Android distribution](docs/android-distribution.md)
-and the [technical roadmap](docs/android-embedded-roadmap.md).
+The [**Android 0.1.0 beta**](https://github.com/loeuf237/animan-python/releases/tag/android-v0.1.0-beta.1)
+runs independently of a desktop server. Install the APK on an **Android 10+ / ARM64**
+device; Android may ask you to allow installation from your browser. Verified
+downloads are exported to `Downloads/Animan`, with a private library copy retained.
+The APK uses a dedicated release signing identity kept locally, outside GitHub.
+
+Android 11 and 15 emulator checks cover the signed ARM64 Python/Vue runtime through
+native translation. Encode, remux, subtitle mux and decode checks run separately
+with the same media bridge on x86_64. **The complete ARM64 media pipeline and
+physical-phone behavior remain untested.** The beta includes build provenance
+and SHA-256 checksums. See [Android distribution](docs/android-distribution.md),
+[release notes](docs/releases/android-v0.1.0-beta.1.md) and the
+[technical roadmap](docs/android-embedded-roadmap.md).
 
 ## Language and default source
 

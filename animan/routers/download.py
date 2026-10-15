@@ -12,6 +12,7 @@ from animan.services.download_manager import download_manager
 from animan.services.proxy_service import proxy_service
 from animan.services.voiranime_service import voiranime_service
 from animan.templates_config import templates
+from animan import platform_events
 
 logger = logging.getLogger("animan.router.download")
 router = APIRouter()
@@ -41,6 +42,9 @@ async def settings_page(request: Request):
 
 @router.post("/api/download")
 async def start_download(request: Request):
+    storage = await asyncio.to_thread(platform_events.storage_status)
+    if storage is not None and not storage.get("authorized"):
+        return JSONResponse(status_code=409, content={"error": "Storage access unavailable; authorize a folder in Settings > Storage", "code": "storage_permission_required"})
     body = await request.json()
     anime_name = body.get("animeName", "Unknown")
     episode_number = int(body.get("episodeNumber", 0))

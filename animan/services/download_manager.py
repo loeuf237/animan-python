@@ -2990,35 +2990,7 @@ class DownloadManagerService:
                 raise ValueError("Pistes de sous-titres manquantes après fusion")
             if task.cancelled or task.paused:
                 return
-            if output_path == video_path:
-                staging.replace(output_path)
-            else:
-                # Publish atomically without overwriting another episode or a previous export.
-                # link() also handles a destination created concurrently after our check.
-                for collision in range(1000):
-                    candidate = output_path if collision == 0 else output_path.with_name(
-                        f"{output_path.stem}.subtitled-{self.sanitize_file_name(task.id)[:12]}-{collision}.mkv")
-                    try:
-                        try:
-                            os.link(staging, candidate)
-                        except OSError as exc:
-                            if exc.errno not in (errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP):
-                                raise
-                            # FAT/removable drives may not support hard links. Reserve
-                            # exclusively, then atomically replace only our placeholder.
-                            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                            os.close(fd)
-                            try:
-                                staging.replace(candidate)
-                            except BaseException:
-                                candidate.unlink(missing_ok=True)
-                                raise
-                        output_path = candidate
-                        break
-                    except FileExistsError:
-                        continue
-                else:
-                    raise FileExistsError("Impossible de réserver un nom de fichier pour la fusion")
+            output_path = self._publish_mux_file(staging, video_path, output_path, task.id)
             task.fileName = output_path.name
             task.savePath = str(output_path)
             task.totalBytes = task.downloadedBytes = output_path.stat().st_size
@@ -3037,6 +3009,36 @@ class DownloadManagerService:
             logger.info("FFmpeg muxing succeeded: %s", output_path.name)
         finally:
             staging.unlink(missing_ok=True)
+
+    def _publish_mux_file(self, staging: Path, video_path: Path, output_path: Path, task_id: str) -> Path:
+        if output_path == video_path:
+            staging.replace(output_path)
+            return output_path
+        # Preserve unrelated episodes, including a destination created during mux.
+        for collision in range(1000):
+            candidate = output_path if collision == 0 else output_path.with_name(
+                f"{output_path.stem}.subtitled-{self.sanitize_file_name(task_id)[:12]}-{collision}.mkv")
+            try:
+                if not media_tools.is_native():
+                    try:
+                        os.link(staging, candidate)
+                        return candidate
+                    except OSError as exc:
+                        if exc.errno not in (errno.EACCES, errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP):
+                            raise
+                # Android/FAT may reject hard links despite allowing ordinary
+                # writes. Reserve exclusively and replace only our placeholder.
+                fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                os.close(fd)
+                try:
+                    staging.replace(candidate)
+                except BaseException:
+                    candidate.unlink(missing_ok=True)
+                    raise
+                return candidate
+            except FileExistsError:
+                continue
+        raise FileExistsError("Impossible de réserver un nom de fichier pour la fusion")
 
     # -------------------------------------------------------------------------
     # Plex / Jellyfin NFO

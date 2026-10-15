@@ -3,6 +3,11 @@ package com.animan.nativeprobe
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.animan.app.MediaBridge
+import com.animan.app.NativeHooks
+import com.animan.app.EngineHost
+import com.animan.app.StorageAccess
+import android.provider.MediaStore
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -19,7 +24,11 @@ class NativeMediaTest {
         return result.getString("stdout")
     }
     @Test fun realNativeMediaCommands() {
-        val root = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        EngineHost.context = context
+        StorageAccess.useDownloads()
+        assertTrue(JSONObject(StorageAccess.status()).getBoolean("authorized"))
+        val root = context.cacheDir
         val source = File(root, "native fixture.mp4")
         run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=160x90:r=10",
             "-f", "lavfi", "-i", "sine=frequency=440", "-t", "40", "-c:v", "mpeg4", "-c:a", "aac", source.path)
@@ -37,7 +46,33 @@ class NativeMediaTest {
         val bad = JSONObject(MediaBridge.execute("ffprobe", JSONArray(listOf("-v", "error", File(root, "missing.mp4").path)).toString(), 30000))
         assertNotEquals(0, bad.getInt("returncode"))
         assertTrue(bad.getString("stderr").isNotBlank())
+        val privateRoot = File(context.filesDir, "downloads").apply { mkdirs() }
+        val published = mutableListOf<Uri>()
+        try {
+            for (file in listOf(muxed, subtitle)) {
+                val privateFile = File(privateRoot, file.name)
+                file.copyTo(privateFile, overwrite = true)
+                val uri = Uri.parse(NativeHooks.exportFile(privateFile.path, "storage-probe"))
+                published.add(uri)
+                assertArrayEquals(privateFile.readBytes(), context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+                context.contentResolver.query(uri, arrayOf(MediaStore.Downloads.IS_PENDING, MediaStore.Downloads.RELATIVE_PATH), null, null, null)!!.use {
+                    assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Download/Animan/", it.getString(1))
+                }
+                assertEquals(uri.toString(), NativeHooks.exportFile(privateFile.path, "storage-probe"))
+            }
+            val blocked = File(privateRoot, "paused.mp4").apply { writeBytes(ByteArray(300000)) }
+            NativeHooks.progress(0, 0, "Paused", "paused-storage-probe", "paused")
+            try {
+                NativeHooks.exportFile(blocked.path, "paused-storage-probe")
+                fail("A paused export must not become a shared file")
+            } catch (_: IllegalStateException) { assertTrue(blocked.exists()) }
+            try {
+                NativeHooks.exportFile(source.path, "outside-private-root")
+                fail("Export must reject media outside the private downloads directory")
+            } catch (_: IllegalArgumentException) { assertTrue(source.exists()) }
+        } finally { for (uri in published) context.contentResolver.delete(uri, null, null) }
         println("ANIMAN_NATIVE_MEDIA_PROBE=" + JSONObject().put("abi", android.os.Build.SUPPORTED_ABIS[0])
-            .put("encode", true).put("subtitle_mux", true).put("hls_remux", true).put("decode", true).put("errors_reported", true))
+            .put("encode", true).put("subtitle_mux", true).put("hls_remux", true).put("decode", true).put("errors_reported", true)
+            .put("storage_export", true).put("storage_permission_required", false).put("paused_export_rejected", true))
     }
 }

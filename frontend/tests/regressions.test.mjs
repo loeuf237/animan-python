@@ -220,6 +220,7 @@ test('download display distinguishes finalization and unknown sizes without inve
   assert.equal(store.stats.activeCount, 2);
   const inline = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   const view = await import(await moduleUrl('../src/views/DownloadsView.vue', {
+    '@/api/client': apiUrl,
     '@/stores/downloads': downloadsUrl,
     '@/stores/notifications': notificationsUrl,
     '@/stores/library': inline('export const useLibraryStore=()=>({favorites:[]});'),

@@ -6,6 +6,10 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.net.Uri
+import android.app.DownloadManager
+import android.provider.Settings
+import android.widget.Toast
+import android.view.ViewGroup
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -32,6 +36,41 @@ class MainActivity : AppCompatActivity() {
         fileCallback?.onReceiveValue(uris.toTypedArray()); fileCallback = null
     }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val directoryPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        lifecycleScope.launch {
+            try {
+                if (result.resultCode == RESULT_OK) {
+                    val data = requireNotNull(result.data)
+                    withContext(Dispatchers.IO) { StorageAccess.select(requireNotNull(data.data), data.flags) }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                StorageAccess.error(failure.message ?: getString(R.string.storage_permission_error))
+                Toast.makeText(this@MainActivity, R.string.storage_permission_error, Toast.LENGTH_LONG).show()
+            } finally { StorageAccess.selectionPending = false }
+        }
+    }
+    private val permissionAction: (String) -> Unit = { action ->
+        try {
+            when (action) {
+                "choose_directory" -> directoryPicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                })
+                "notifications" -> if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    else startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                "app_settings" -> startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                "open_downloads" -> {
+                    val uri = StorageAccess.treeUri()
+                    if (uri == null) startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+                    else startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(StorageAccess.directory(uri), "vnd.android.document/directory").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                }
+            }
+        } catch (failure: Exception) {
+            StorageAccess.selectionPending = false
+            StorageAccess.error(failure.message ?: getString(R.string.storage_permission_error))
+            Toast.makeText(this, R.string.storage_permission_error, Toast.LENGTH_LONG).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -45,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         }
         setupWebView()
         EngineHost.start(applicationContext, BuildConfig.DEBUG && intent.getBooleanExtra("test_mode", false))
+        StorageAccess.actionHandler = permissionAction
         DownloadService.update(applicationContext)
         if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         binding.retryButton.setOnClickListener { connect() }
@@ -158,7 +198,9 @@ class MainActivity : AppCompatActivity() {
         else super.onBackPressed()
     }
     override fun onDestroy() {
+        if (StorageAccess.actionHandler === permissionAction) StorageAccess.actionHandler = null
         fileCallback?.onReceiveValue(null); fileCallback = null
+        (binding.webView.parent as? ViewGroup)?.removeView(binding.webView)
         binding.webView.stopLoading(); binding.webView.destroy()
         super.onDestroy()
     }

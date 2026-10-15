@@ -1,5 +1,11 @@
 import { language } from '@/utils/locale';
 
+export interface AndroidStorageState {
+  android: boolean; apiLevel: number; mode: 'downloads' | 'directory'; destination: string;
+  authorized: boolean; selectionPending: boolean; notificationsGranted: boolean;
+  error: string | null; exportError: string | null;
+}
+
 export interface ProxyPoolSnapshot {
   automatic: boolean; refreshing: boolean; checking: boolean;
   lastRefresh: number | null; total: number; healthy: number; importedCount: number;
@@ -397,9 +403,13 @@ export const api = {
     freeBytes: number;
     usedPercent: number;
     downloadDir: string;
+    native?: AndroidStorageState | null;
   }> {
     return request('/api/system/storage');
   },
+  getAndroidStorage() { return request<AndroidStorageState | null>('/api/system/android/storage'); },
+  androidStorageAction(action: string) { return request<AndroidStorageState>('/api/system/android/storage', {method: 'POST', body: JSON.stringify({action})}); },
+  exportAndroidDownload(taskId: string) { return request<{success: boolean; destination: string}>('/api/system/android/export', {method: 'POST', body: JSON.stringify({taskId})}); },
 
   // --- i18n ---
   async getTranslations(lang?: string): Promise<{

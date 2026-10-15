@@ -10,6 +10,14 @@ Standalone Python 3.13 engine and compiled Vue interface, embedded with Chaquopy
 - Downloads run under an Android foreground service with a pause notification.
   Partial files and SQLite remain private; verified media is copied into
   `Downloads/Animan` through MediaStore. The private library copy is retained.
+- **Settings → Storage → Android permissions** displays storage and notification
+  access. The Android folder picker can authorize a different folder or an SD
+  card with a persistent grant. Revoked access is detected; finished downloads
+  can be exported again without downloading the video again. Sidecar subtitles
+  are exported when they have not been merged.
+- Subtitle publication uses exclusive file reservation and rename on Android;
+  filesystems rejecting hard links with `Permission denied` no longer prevent
+  an otherwise successful mux from completing. Existing files remain protected.
 - The engine listens only on an authenticated IPv4 loopback port. Source
   verification uses a separate WebView; external browsers cannot transfer their
   private cookies to Animan. Managed verification with a proxy remains unavailable.
@@ -19,11 +27,14 @@ Standalone Python 3.13 engine and compiled Vue interface, embedded with Chaquopy
 
 Publication requires packaged-engine/16 KB ELF checks and successful emulator
 instrumentation on Android 11 and Android 15: ARM64 runtime/UI/API, native imports,
-TLS, Activity recreation, Java AES and storage export. Media commands use the
-same Kotlin bridge in a separate native x86_64 test application (encode, remux,
-subtitle mux, decode and error handling). Direct/HLS resume has shared Python
+TLS, Activity recreation, Java AES, atomic file publication, storage export and
+folder-picker cancellation. Android 10, 11 and 15 native storage/media checks use
+the same Kotlin implementations in a separate x86_64 test application (encode,
+remux, subtitle mux, byte-checked export, paused-export cleanup and error handling).
+Android 10's x86 image lacks ARM64 translation; its full-engine check requires
+a phone. Direct/HLS resume has shared Python
 regression coverage. **The full ARM64 media pipeline has not been tested.**
-**Real-phone testing has not been performed.** This is a beta, not a claim of
+**The corrected APK has not yet been retested on a physical phone.** This is a beta, not a claim of
 validated playback/battery behavior on every phone. Playback depends on the
 device's WebView and codec support; exported MKV files can be opened with a
 compatible Android player.
