@@ -107,10 +107,18 @@ class EmbeddedEngineTest {
                 if (!pickerVisible) Thread.sleep(250)
             }
             assertTrue("Android folder picker did not open", pickerVisible)
-            ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand("input keyevent KEYCODE_BACK")).use { it.readBytes() }
-            val cancelDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+            val cancelDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
             var pending = true
             while (pending && System.nanoTime() < cancelDeadline) {
+                // Back can first close a DocumentsUI drawer/search panel. Only
+                // send another Back while that picker still owns the foreground;
+                // never accidentally back out of Animan after its result arrives.
+                val activities = ParcelFileDescriptor.AutoCloseInputStream(
+                    automation.executeShellCommand("dumpsys activity activities")).bufferedReader().use { it.readText() }
+                if (activities.lineSequence().any { it.contains("ResumedActivity") && it.contains("documentsui") }) {
+                    ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand("input keyevent KEYCODE_BACK")).use { it.readBytes() }
+                    Thread.sleep(1000)
+                }
                 pending = JSONObject(request("/api/system/android/storage").second).getBoolean("selectionPending")
                 if (pending) Thread.sleep(250)
             }
