@@ -58,6 +58,11 @@ class NativeMediaTest {
                 context.contentResolver.query(uri, arrayOf(MediaStore.Downloads.IS_PENDING, MediaStore.Downloads.RELATIVE_PATH), null, null, null)!!.use {
                     assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Download/Animan/", it.getString(1))
                 }
+                // Reconstruct the registry format used by installed APKs;
+                // upgrading must reuse this shared copy, not create another.
+                val legacyKey = privateFile.canonicalPath + ":" + privateFile.length() + ":" + privateFile.lastModified()
+                context.getSharedPreferences("animan_exports", android.content.Context.MODE_PRIVATE).edit()
+                    .clear().putString(legacyKey, uri.toString()).commit()
                 assertEquals(uri.toString(), NativeHooks.exportFile(privateFile.path, "storage-probe"))
             }
             val blocked = File(privateRoot, "paused.mp4").apply { writeBytes(ByteArray(300000)) }
