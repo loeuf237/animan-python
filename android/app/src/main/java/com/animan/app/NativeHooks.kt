@@ -82,8 +82,19 @@ object NativeHooks {
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val resolver = context.contentResolver
-        val uri = requireNotNull(if (tree == null) resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            else DocumentsContract.createDocument(resolver, StorageAccess.directory(tree), mime, source.name)) { "The storage provider refused to create the file" }
+        val uri = requireNotNull(if (tree == null) {
+            try { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) }
+            catch (failure: IllegalArgumentException) {
+                if (source.extension.lowercase() !in setOf("srt", "vtt", "ass", "ssa", "ttml")) throw failure
+                // Android 11's original MediaProvider forces subtitle MIME
+                // types into Movies/Music, even through the Downloads table.
+                // Keep their real extension and use its supported collection.
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Animan")
+                resolver.insert(MediaStore.Files.getContentUri("external"), values).also {
+                    if (it != null) StorageAccess.subtitleDestination(Environment.DIRECTORY_MOVIES + "/Animan")
+                }
+            }
+        } else DocumentsContract.createDocument(resolver, StorageAccess.directory(tree), mime, source.name)) { "The storage provider refused to create the file" }
         try {
             check(preferences.edit().putString(pendingKey, uri.toString()).commit())
             requireNotNull(resolver.openOutputStream(uri)).use { output -> source.inputStream().use { input ->

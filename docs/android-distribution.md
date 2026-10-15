@@ -115,3 +115,7 @@ Completed tasks offer **Export to storage** to retry a failed export or copy the
 private download into a newly selected folder. The private copy is retained on
 export failure. A subtitle mux failing at the publication stage with `Errno 13`
 is handled by reserving a filename and renaming, without Android hard links.
+Some Android 11 MediaProvider versions only accept subtitle MIME types in
+`Movies/Animan`; Animan falls back there for separate subtitles and displays
+that location. A folder authorized through the system picker keeps videos and
+subtitles together, independently of MediaStore's MIME/directory restrictions.

@@ -53,6 +53,7 @@ object StorageAccess {
     }
 
     fun error(message: String?) { preferences.edit().putString("permission_error", message).apply() }
+    fun subtitleDestination(path: String) { preferences.edit().putString("subtitle_destination", path).apply() }
     fun exportResult(uri: String?, error: String?) {
         preferences.edit().putString("export_error", error).putString("last_export_uri", uri).apply()
     }
@@ -64,6 +65,7 @@ object StorageAccess {
         return JSONObject().put("android", true).put("apiLevel", Build.VERSION.SDK_INT)
             .put("mode", if (uri == null) "downloads" else "directory")
             .put("destination", if (uri == null) "Downloads/Animan" else preferences.getString("tree_name", ""))
+            .put("subtitleDestination", if (uri == null) preferences.getString("subtitle_destination", null) ?: JSONObject.NULL else JSONObject.NULL)
             .put("authorized", allowed).put("selectionPending", selectionPending)
             .put("notificationsGranted", NotificationManagerCompat.from(context).areNotificationsEnabled() &&
                 (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED))

@@ -15,6 +15,9 @@ Standalone Python 3.13 engine and compiled Vue interface, embedded with Chaquopy
   card with a persistent grant. Revoked access is detected; finished downloads
   can be exported again without downloading the video again. Sidecar subtitles
   are exported when they have not been merged.
+  If an older Android 11 MediaProvider refuses their MIME type in Downloads,
+  separate subtitles are published in `Movies/Animan`, shown in Storage settings.
+  An authorized custom folder keeps video and sidecar subtitles together.
 - Subtitle publication uses exclusive file reservation and rename on Android;
   filesystems rejecting hard links with `Permission denied` no longer prevent
   an otherwise successful mux from completing. Existing files remain protected.

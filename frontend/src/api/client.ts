@@ -3,6 +3,7 @@ import { language } from '@/utils/locale';
 export interface AndroidStorageState {
   android: boolean; apiLevel: number; mode: 'downloads' | 'directory'; destination: string;
   authorized: boolean; selectionPending: boolean; notificationsGranted: boolean;
+  subtitleDestination?: string | null;
   error: string | null; exportError: string | null;
 }
 

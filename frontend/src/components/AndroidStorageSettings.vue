@@ -7,6 +7,7 @@
       <span :class="state.authorized ? 'badge-ok' : 'badge-err'">{{ tx(state.authorized ? 'Accès autorisé' : 'Autorisation requise') }}</span>
     </div>
     <p>{{ tx('Downloads/Animan fonctionne sans accès global au stockage. Pour un autre dossier ou une carte SD, utilisez le sélecteur Android pour autoriser l’accès.') }}</p>
+    <p v-if="state.subtitleDestination">{{ tx('Sous-titres séparés :') }} {{ state.subtitleDestination }}. {{ tx('Un dossier autorisé avec le sélecteur Android conserve la vidéo et les sous-titres au même endroit.') }}</p>
     <div class="storage-access-actions">
       <button class="btn btn-primary" :disabled="busy || state.selectionPending" @click="act('choose_directory')">{{ tx('Choisir et autoriser un dossier') }}</button>
       <button class="btn btn-secondary" :disabled="busy || state.selectionPending" @click="act('use_downloads')">{{ tx('Utiliser Downloads/Animan') }}</button>
@@ -63,5 +64,6 @@ onUnmounted(() => { if (timer) clearInterval(timer); window.removeEventListener(
 .storage-access-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 20px 0 12px; }
 .storage-access-row p { margin: 6px 0; }
 .storage-access-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.storage-access-actions .btn { max-width: 100%; white-space: normal; text-align: center; }
 .storage-access-error { color: var(--danger, #ef4444) !important; }
 </style>

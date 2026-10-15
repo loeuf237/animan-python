@@ -56,7 +56,10 @@ class NativeMediaTest {
                 published.add(uri)
                 assertArrayEquals(privateFile.readBytes(), context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
                 context.contentResolver.query(uri, arrayOf(MediaStore.Downloads.IS_PENDING, MediaStore.Downloads.RELATIVE_PATH), null, null, null)!!.use {
-                    assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)); assertEquals("Download/Animan/", it.getString(1))
+                    assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0))
+                    val directory = it.getString(1)
+                    if (file == subtitle) assertTrue(directory == "Download/Animan/" || directory == "Movies/Animan/")
+                    else assertEquals("Download/Animan/", directory)
                 }
                 // Reconstruct the registry format used by installed APKs;
                 // upgrading must reuse this shared copy, not create another.

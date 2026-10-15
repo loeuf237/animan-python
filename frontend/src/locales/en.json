@@ -808,5 +808,7 @@
   "Actualiser les accès": "Refresh permissions",
   "Exporter vers le stockage": "Export to storage",
   "Fichiers exportés vers": "Files exported to",
-  "Storage access unavailable; authorize a folder in Settings > Storage": "Storage access unavailable; authorize a folder in Settings > Storage"
+  "Storage access unavailable; authorize a folder in Settings > Storage": "Storage access unavailable; authorize a folder in Settings > Storage",
+  "Sous-titres séparés :": "Separate subtitles:",
+  "Un dossier autorisé avec le sélecteur Android conserve la vidéo et les sous-titres au même endroit.": "A folder authorized through the Android picker keeps video and subtitles together."
 }
