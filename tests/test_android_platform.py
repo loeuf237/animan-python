@@ -151,6 +151,7 @@ async def test_storage_controls_validate_actions_and_retry_export(monkeypatch, t
         assert (await client.get('/api/system/android/storage')).json()['authorized'] is False
         assert (await client.post('/api/download', json={})).status_code == 409
         assert (await client.post('/api/system/android/storage', json={'action': 'arbitrary_command'})).status_code == 400
+        assert (await client.post('/api/system/android/storage', json={'action': {}})).status_code == 400
         assert calls == []
         assert (await client.post('/api/system/android/storage', json={'action': 'choose_directory'})).json()['authorized'] is True
         assert calls == ['choose_directory']

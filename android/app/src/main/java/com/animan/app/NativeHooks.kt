@@ -48,7 +48,10 @@ object NativeHooks {
             "Storage access unavailable; authorize a folder in Settings > Storage"
         }
         val preferences = context.getSharedPreferences("animan_exports", ContextMode)
-        val key = (tree?.toString() ?: "downloads") + ":" + source.path + ":" + source.length() + ":" + source.lastModified()
+        val sourceKey = source.path + ":" + source.length() + ":" + source.lastModified()
+        // Retain the existing Downloads registry across app updates. Only a
+        // user-selected directory needs a separate destination identity.
+        val key = if (tree == null) sourceKey else tree.toString() + ":" + sourceKey
         val previous = preferences.getString(key, null)
         if (previous != null) {
             try { context.contentResolver.openFileDescriptor(android.net.Uri.parse(previous), "r")?.use { return previous } }
