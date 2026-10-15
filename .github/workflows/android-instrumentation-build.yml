@@ -1,0 +1,36 @@
+name: Build Android instrumentation only
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  instrumentation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platforms;android-35 build-tools;35.0.0
+      - name: Compile test driver without rebuilding Python dependencies
+        working-directory: android
+        run: ./gradlew :app:assembleValidationAndroidTest --no-daemon --max-workers=2 --stacktrace
+      - name: Record test provenance
+        run: |
+          mkdir -p instrumentation-only
+          cp android/app/build/outputs/apk/androidTest/validation/app-validation-androidTest.apk instrumentation-only/Animan-instrumentation.apk
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path('instrumentation-only/Android-build-info.json').write_text(json.dumps({'commit': os.environ['GITHUB_SHA']}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-instrumentation-only
+          path: instrumentation-only/*
+          if-no-files-found: error
