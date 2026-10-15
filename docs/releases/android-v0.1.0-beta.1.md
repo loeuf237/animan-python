@@ -28,8 +28,9 @@ Standalone Python 3.13 engine and compiled Vue interface, embedded with Chaquopy
   start is refused or its Android 15 time allowance expires. After process death,
   reopen Animan and resume paused tasks.
 
-Publication requires packaged-engine/16 KB ELF checks and successful emulator
-instrumentation on Android 11 and Android 15: ARM64 runtime/UI/API, native imports,
+The signed distribution APK passed packaged-engine/16 KB ELF checks and
+[emulator validation](https://github.com/loeuf237/animan-python/actions/runs/38713001446)
+on Android 11 and Android 15: ARM64 runtime/UI/API, native imports,
 TLS, Activity recreation, Java AES, atomic file publication, storage export and
 folder-picker cancellation. Android 10, 11 and 15 native storage/media checks use
 the same Kotlin implementations in a separate x86_64 test application (encode,
