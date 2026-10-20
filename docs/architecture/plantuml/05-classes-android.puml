@@ -1,0 +1,97 @@
+@startuml
+!include theme.iuml
+title Animan — classes et objets de l'hôte Android
+' @source android/app/src/main/java/com/animan/app/MainActivity.kt:MainActivity
+' @source android/app/src/main/java/com/animan/app/EngineHost.kt:EngineHost
+' @source android/app/src/main/java/com/animan/app/DownloadService.kt:DownloadService
+' @source android/app/src/main/java/com/animan/app/StorageAccess.kt:StorageAccess
+' @source android/app/src/main/java/com/animan/app/NativeHooks.kt:NativeHooks
+' @source android/app/src/main/java/com/animan/app/MediaBridge.kt:MediaBridge
+' @source android/app/src/main/java/com/animan/app/CryptoBridge.kt:CryptoBridge
+' @source android/app/src/main/java/com/animan/app/VerificationBridge.kt:VerificationBridge
+' @source android/app/src/main/java/com/animan/app/VerificationActivity.kt:VerificationActivity
+' @source android_runtime.py:start
+' @source animan/android_security.py:AndroidSessionMiddleware
+package "Kotlin / cycle de vie" {
+  class MainActivity {
+    +onCreate(savedInstanceState)
+    -connect()
+    -setupWebView()
+  }
+  class EngineHost <<object>> {
+    port: int
+    token: secret éphémère
+    ready: bool
+    activeCount: int
+    +start(applicationContext, testMode)
+    +command(action)
+  }
+  class DownloadService <<foreground Service>> {
+    +onStartCommand(...)
+    +onTimeout(...)
+    +update(context)
+    +finishIdle(context)
+  }
+  MainActivity ..> EngineHost : démarre / se reconnecte
+  DownloadService ..> EngineHost : état / pause / reprise
+}
+package "Kotlin / ponts appelés depuis Python" {
+  class NativeHooks <<object>> {
+    +ready()
+    +progress(...): bool
+    +exportFile(path, taskId): str
+  }
+  class StorageAccess <<object>> {
+    +status(): JSON
+    +request(action): JSON
+    +select(uri, flags)
+    +authorized(uri): bool
+  }
+  class MediaBridge <<object>> {
+    +execute(tool, arguments, timeoutMs): JSON
+  }
+  class CryptoBridge <<object>> {
+    +decrypt(...): str
+  }
+  class VerificationBridge <<object>> {
+    +open(url, userAgent)
+    +cookies(url): str
+    +close(url)
+  }
+  class VerificationActivity {
+    +onCreate(...)
+    +onDestroy()
+  }
+  NativeHooks ..> DownloadService : notification / maintien transfert
+  NativeHooks ..> StorageAccess : destination et droits
+  StorageAccess ..> MainActivity : sélecteur système
+  VerificationBridge ..> VerificationActivity : WebView isolée
+}
+package "Python embarqué par Chaquopy" {
+  class "android_runtime" as Runtime <<module>> {
+    +start(data_dir, cache_dir, port, token, ...)
+    +command(action)
+  }
+  class AndroidSessionMiddleware {
+    token: secret attendu
+  }
+  Runtime ..> AndroidSessionMiddleware : protège l'API loopback
+  Runtime ..> NativeHooks : callbacks plateforme
+  Runtime ..> StorageAccess : état / actions autorisées
+  Runtime ..> MediaBridge : configure media_tools
+  Runtime ..> CryptoBridge : AES-CBC
+  Runtime ..> VerificationBridge : capture cookies dédiée
+}
+EngineHost ..> Runtime : thread moteur / appel Chaquopy
+note bottom of MediaBridge
+FFmpeg et FFprobe par JNI ; commandes sérialisées,
+timeout et volume des diagnostics bornés.
+Pas d'exécutable lancé depuis le stockage de l'app.
+end note
+note bottom of StorageAccess
+MediaStore : destination par défaut, sans droit global.
+SAF : URI de dossier avec permission persistante.
+Les classes Activity/Service héritent du SDK Android ;
+les « object » sont des singletons Kotlin réels.
+end note
+@enduml

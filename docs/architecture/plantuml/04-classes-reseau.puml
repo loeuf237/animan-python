@@ -1,0 +1,113 @@
+@startuml
+!include theme.iuml
+title Animan — sessions HTTP, protection des sites et proxies
+' @source animan/services/source_http.py:SourceHTTPService
+' @source animan/services/source_http.py:DomainSession
+' @source animan/services/source_http.py:SourceClient
+' @source animan/services/source_http.py:AsyncSourceClient
+' @source animan/services/source_http.py:SourceStreamResponse
+' @source animan/services/source_http.py:VerificationRequired
+' @source animan/services/source_http.py:RateLimited
+' @source animan/services/source_http.py:SourceNetworkError
+' @source animan/services/proxy_pool.py:ProxyPool
+' @source animan/services/proxy_service.py:ProxyService
+' @source animan/services/browser_verification.py:BrowserVerificationService
+class SourceHTTPService {
+  _domains: dict
+  _cache: dict
+  _inflight: dict
+  executor: ThreadPoolExecutor
+  +state(url): DomainSession
+  +lease(state)
+  +request(method, url, ...)
+  +async_client(...)
+  +classify(response, ...)
+  +rotate_proxy(domain, automatic)
+  +import_cookies(url, cookies)
+  +diagnostics()
+}
+class DomainSession <<dataclass>> {
+  domain: str
+  proxy: Optional[str]
+  cookies: MozillaCookieJar
+  clients: list
+  leased: int
+  generation: int
+  blocked_url: Optional[str]
+  pending_reset: bool
+  cooldown: float
+}
+class SourceClient {
+  +request(...)
+  +get(...)
+  +post(...)
+}
+class AsyncSourceClient {
+  +request(...)
+  +send(...)
+  +stream(...)
+  +aclose()
+}
+class SourceStreamResponse {
+  +raise_for_status()
+  +aiter_bytes(...)
+  +aclose()
+}
+class ProxyService {
+  +save_proxy_settings(data)
+  +get_active_proxy()
+  +get_random_proxy()
+  +test_proxy_connection(...)
+}
+class ProxyPool {
+  +snapshot()
+  +refresh()
+  +import_json(data)
+  +check(...)
+  +choose(domain, current, ...)
+  +watch()
+}
+class BrowserVerificationService {
+  transport: SourceHTTPService
+  jobs: dict
+  webview_opener: callback
+  +installed_browsers()
+  +start(domain, browser, mode)
+  +complete(job_id)
+  +cancel(job_id)
+  +expire()
+}
+class VerificationRequired <<exception>> {
+  url: str
+  domain: str
+  +to_dict(): dict
+}
+class RateLimited <<exception>> {
+  retry_after: float
+}
+class SourceNetworkError <<exception>> {
+  kind: str
+}
+SourceHTTPService "1" *-- "0..*" DomainSession : une session logique / domaine
+SourceHTTPService ..> SourceClient : fabrique façade synchrone
+SourceClient <|-- AsyncSourceClient
+SourceClient --> SourceHTTPService : délègue les opérations
+AsyncSourceClient ..> SourceStreamResponse : streaming
+SourceHTTPService ..> VerificationRequired : challenge détecté
+SourceHTTPService ..> RateLimited : délai serveur
+SourceHTTPService ..> SourceNetworkError : DNS / TLS / timeout
+SourceHTTPService ..> ProxyService : configuration manuelle
+SourceHTTPService ..> ProxyPool : candidat public testé
+BrowserVerificationService --> SourceHTTPService : import cookies + contrôle réel
+note bottom of DomainSession
+Cookies et connexions partagés au niveau du domaine,
+pas au niveau d'un compte utilisateur.
+Un handle curl est loué exclusivement par requête.
+Une rotation est refusée si leased > 0.
+end note
+note bottom of BrowserVerificationService
+Navigateur installé via CDP ou fenêtre WebView dédiée.
+Même route réseau exigée. Un simple onglet externe
+ne transfère pas automatiquement ses cookies.
+end note
+@enduml

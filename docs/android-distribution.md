@@ -113,7 +113,16 @@ choose a subfolder or use the MediaStore default.
 
 Completed tasks offer **Export to storage** to retry a failed export or copy the
 private download into a newly selected folder. The private copy is retained on
-export failure. A subtitle mux failing at the publication stage with `Errno 13`
+export failure. In the current source checkout (A02), the verified video is
+`COMPLETED` independently of `exportStatus`: `PENDING`, `EXPORTING`, `EXPORTED`
+or `EXPORT_FAILED`. Destination, confirmed URIs, attempts, date and errors are
+persisted. **Retry export** reads the private files without fetching the media
+again. Interrupted exports return to `PENDING`; unresolved exports remain visible
+and are preserved by bulk cleanup. Legacy tasks without export evidence remain
+`NOT_REQUESTED` and show an unknown export state. These changes require rebuilding
+the app; they do not update the previously published beta APK.
+
+A subtitle mux failing at the publication stage with `Errno 13`
 is handled by reserving a filename and renaming, without Android hard links.
 Some Android 11 MediaProvider versions only accept subtitle MIME types in
 `Movies/Animan`; Animan falls back there for separate subtitles and displays

@@ -1,3 +1,4 @@
+from .aniworld_adapter import AniWorldAdapter
 from .anisama_adapter import AniSamaAdapter
 from .franime_adapter import FrAnimeAdapter
 import logging
@@ -15,6 +16,7 @@ class AdapterRegistry:
         self._register_defaults()
 
     def _register_defaults(self):
+        self.register(AniWorldAdapter())
         self.register(HanimeAdapter())
         self.register(AniSamaAdapter())
         self.register(FrAnimeAdapter())

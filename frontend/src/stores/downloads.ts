@@ -53,13 +53,14 @@ export const useDownloadStore = defineStore('downloads', () => {
 
     for (const t of tasks.value) {
       const s = normalizeStatus(t.status);
-      if (s === 'downloading') {
+      if (s === 'downloading' || t.exportStatus === 'EXPORTING') {
         active++;
         speed += t.downloadSpeed || 0;
       } else if (s === 'queued') {
         queued++;
       } else if (s === 'completed') {
         completed++;
+        if (t.exportStatus === 'EXPORT_FAILED' || t.exportStatus === 'PENDING') errCount++;
       } else if (s === 'error') {
         errCount++;
       }

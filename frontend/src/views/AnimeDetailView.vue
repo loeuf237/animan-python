@@ -672,6 +672,7 @@ async function toggleFav() {
     imageUrl: detail.value.anime.imageUrl,
     source: detail.value.source,
     autoDownload: detail.value.autoDownload,
+    autoDownloadVersion: versionFilter.value || (episodeVersions.value.length === 1 ? episodeVersions.value[0] : ''),
   });
   detail.value.isFavorite = res.isFavorite;
   } catch (error) { showToast(error instanceof Error ? error.message : 'Impossible de modifier la bibliothèque.', 'error'); }
@@ -681,7 +682,11 @@ async function toggleAutoDl() {
   if (!detail.value) return;
   const newAuto = !detail.value.autoDownload;
   try {
-    await libraryStore.toggleAutoDownload(detail.value.anime.url, detail.value.autoDownload);
+    await libraryStore.toggleAutoDownload(detail.value.anime.url, detail.value.autoDownload, newAuto ? {
+      ...(versionFilter.value ? {autoDownloadVersion: versionFilter.value} : {}),
+      ...(batchQuality.value !== 'auto' ? {autoDownloadQuality: batchQuality.value} : {}),
+      ...(batchSubtitles.value ? {autoDownloadSubtitles: true} : {}),
+    } : {});
     detail.value.autoDownload = newAuto;
   } catch { /* The store reports the error and restores its state. */ }
 }

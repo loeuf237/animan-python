@@ -1,10 +1,11 @@
+from animan.api_contracts import ContractRoute
 from animan.services.source_http import VerificationRequired
 import asyncio
 import json
 import logging
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Request, Query
+from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from animan.models.download_task import DownloadStatus
@@ -15,7 +16,7 @@ from animan.templates_config import templates
 from animan import platform_events
 
 logger = logging.getLogger("animan.router.download")
-router = APIRouter()
+router = APIRouter(route_class=ContractRoute)
 
 @router.get("/downloads", response_class=HTMLResponse)
 async def downloads_page(request: Request):
@@ -153,6 +154,8 @@ async def start_batch_download(request: Request):
 
 @router.delete("/api/download/{task_id}")
 async def cancel_download(task_id: str, remove: bool = False):
+    if download_manager._export_in_progress(task_id):
+        raise HTTPException(status_code=409, detail="Wait for the current export before removing this download")
     if remove:
         removed = download_manager.remove_task(task_id)
         if removed:
@@ -186,7 +189,10 @@ async def resume_download(task_id: str):
 
 @router.delete("/api/download/{task_id}/remove")
 async def remove_task(task_id: str):
-    removed = download_manager.remove_task(task_id)
+    try:
+        removed = download_manager.remove_task(task_id)
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
     if removed:
         return {"success": True, "message": "Tâche supprimée"}
     return JSONResponse(status_code=404, content={"error": "Tâche introuvable"})
@@ -435,7 +441,10 @@ async def verify_all_tasks():
 
 @router.post("/api/download/{task_id}/redownload")
 async def redownload_task(task_id: str):
-    task = download_manager.redownload_task(task_id)
+    try:
+        task = download_manager.redownload_task(task_id)
+    except ValueError as exc:
+        return JSONResponse(status_code=409, content={"error": str(exc)})
     if not task:
         return JSONResponse(status_code=404, content={"error": "Tâche introuvable pour re-téléchargement"})
     return {

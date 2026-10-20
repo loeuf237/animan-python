@@ -92,7 +92,7 @@ async def test_closed_browser_can_be_reopened(verification, monkeypatch):
     new.wait.return_value = 0
     monkeypatch.setattr(service, 'installed_browsers', lambda: [{'name': 'installed', 'path': '/fake/browser'}])
     monkeypatch.setattr(module, 'is_safe_url', lambda url: True)
-    monkeypatch.setattr(module.subprocess, 'Popen', lambda *args, **kwargs: new)
+    monkeypatch.setattr(importlib.import_module('animan.services.verification_platform').subprocess, 'Popen', lambda *args, **kwargs: new)
     monkeypatch.setenv('DISPLAY', ':test')
     job = await service.start('SOURCE.EXAMPLE')
     assert job['domain'] == 'source.example' and job['id'] != 'job'

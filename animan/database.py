@@ -30,7 +30,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     # Migrations de schéma légères pour SQLite
     try:
-        with engine.connect() as conn:
+        with engine.begin() as conn:
             # Vérifier colonnes existantes de download_tasks
             result = conn.exec_driver_sql("PRAGMA table_info(download_tasks)").fetchall()
             existing_cols = {row[1] for row in result}
@@ -44,13 +44,36 @@ def init_db():
                 ("verificationError", "VARCHAR"),
                 ("selectedServer", "VARCHAR"),
                 ("selectedQuality", "VARCHAR"),
+                ("exportStatus", "VARCHAR NOT NULL DEFAULT 'NOT_REQUESTED'"),
+                ("exportUrisJson", "VARCHAR NOT NULL DEFAULT '[]'"),
+                ("exportDestination", "VARCHAR"),
+                ("exportError", "VARCHAR"),
+                ("exportAttempts", "INTEGER NOT NULL DEFAULT 0"),
+                ("exportedAt", "DATETIME"),
             ]
             for col_name, col_type in new_cols:
                 if col_name not in existing_cols:
                     conn.exec_driver_sql(f"ALTER TABLE download_tasks ADD COLUMN {col_name} {col_type}")
-            conn.commit()
+            existing_favorites = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(favorites)")}
+            for name, declaration in [
+                ("autoDownloadVersion", "VARCHAR DEFAULT ''"),
+                ("autoDownloadSubtitles", "BOOLEAN DEFAULT 0"),
+                ("autoDownloadServer", "VARCHAR"),
+                ("autoDownloadQuality", "VARCHAR"),
+                ("autoDownloadInitialized", "BOOLEAN DEFAULT 0"),
+                ("autoDownloadError", "VARCHAR"),
+            ]:
+                if name not in existing_favorites:
+                    conn.exec_driver_sql(f'ALTER TABLE favorites ADD COLUMN "{name}" {declaration}')
+            # Older Android builds stored export failure in the transfer error.
+            # Do not infer EXPORTED for old completed tasks without URI evidence.
+            conn.exec_driver_sql("""
+                UPDATE download_tasks SET exportStatus='EXPORT_FAILED', exportError=error,
+                    exportAttempts=MAX(exportAttempts, 1), error=NULL
+                WHERE status='COMPLETED' AND error LIKE 'Android export failed;%'
+            """)
     except Exception as e:
-        logger.warning("[database] Migration de schéma SQLite ignorée ou déjà appliquée: %s", e)
+        raise RuntimeError("Unable to update the Animan database schema") from e
 
 def get_db():
     db = SessionLocal()

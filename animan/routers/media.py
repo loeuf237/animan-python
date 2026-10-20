@@ -1,7 +1,9 @@
+from animan.api_contracts import ContractRoute
 from animan.services.source_http import source_http, VerificationRequired
 import asyncio
 import json
 import logging
+import mimetypes
 import re
 import urllib.parse
 from pathlib import Path
@@ -24,7 +26,7 @@ from animan.services.extractors import extractor_registry
 import hashlib
 
 logger = logging.getLogger("animan.router.media")
-router = APIRouter()
+router = APIRouter(route_class=ContractRoute)
 
 import os
 from collections import OrderedDict
@@ -490,7 +492,7 @@ async def resolve_stream(
         "subtitles": tracks,
     }
 
-@router.get("/api/media/stream/{task_id}")
+@router.api_route("/api/media/stream/{task_id}", methods=["GET", "HEAD"])
 async def stream_video(task_id: str, request: Request, range: Optional[str] = Header(None)):
     task = download_manager.get_task(task_id)
     if not task or not task.savePath:
@@ -502,11 +504,17 @@ async def stream_video(task_id: str, request: Request, range: Optional[str] = He
         logger.warning("Path Traversal blocked on streaming: %s", file_path)
         raise HTTPException(status_code=403, detail="Accès refusé : fichier hors du répertoire autorisé")
 
-    if not file_path.exists():
+    if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Fichier vidéo introuvable sur le disque")
 
     file_size = file_path.stat().st_size
-    content_type = "video/x-matroska" if file_path.suffix == ".mkv" else "video/mp4"
+    content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+
+    # Media players may probe metadata without downloading the video body.
+    if request.method == "HEAD":
+        return Response(media_type=content_type, headers={
+            "Content-Length": str(file_size), "Accept-Ranges": "bytes",
+        })
 
     if not range:
         def iter_full():

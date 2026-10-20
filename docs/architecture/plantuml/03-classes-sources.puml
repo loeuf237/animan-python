@@ -1,0 +1,130 @@
+@startuml
+!include theme.iuml
+title Animan — sources, recettes importées et extracteurs
+' @source animan/services/source_catalogue.py:SourceCatalogueService
+' @source animan/services/scraping_service.py:ScrapingService
+' @source animan/services/voiranime_service.py:VoirAnimeScrapingService
+' @source animan/services/animepahe_service.py:AnimepaheService
+' @source animan/services/extension_service.py:ExtensionService
+' @source animan/services/aniyomi_dex_parser.py:SourceRecipe
+' @source animan/services/aniyomi_dex_parser.py:AniyomiDexParser
+' @source animan/services/aniyomi_container.py:AniyomiContainerSource
+' @source animan/services/container_adapters/base.py:BaseSourceAdapter
+' @source animan/services/container_adapters/registry.py:AdapterRegistry
+' @source animan/services/extractors/base.py:BaseVideoExtractor
+' @source animan/services/extractors/base.py:ExtractorResult
+' @source animan/services/extractors/registry.py:ExtractorRegistry
+' @source animan/services/extractors/ytdlp_fallback.py:YtDlpFallbackExtractor
+package "Catalogue et sources natives" {
+  class SourceCatalogueService {
+    +provider(source_id)
+    +descriptor(source_id, service)
+    +sources()
+    +filters(source_id)
+    +browse(...)
+  }
+  class ScrapingService {
+    +search_anime(...)
+    +get_latest_releases(...)
+    +get_anime_detail(...)
+    +extract_download_info(...)
+  }
+  class VoirAnimeScrapingService {
+    +search_anime(...)
+    +get_anime_detail(...)
+    +get_episode_servers(...)
+    +extract_download_info(...)
+  }
+  class AnimepaheService {
+    +search_anime(...)
+    +get_anime_detail(...)
+    +get_episode_sources(...)
+  }
+  SourceCatalogueService ..> ScrapingService
+  SourceCatalogueService ..> VoirAnimeScrapingService
+  SourceCatalogueService ..> AnimepaheService
+}
+package "Extensions : conversion et exécution Python" {
+  class ExtensionService {
+    +import_repository(repo_url)
+    +toggle_extension(ext_id, enabled)
+    +configure_extension(ext_id, data)
+    +diagnose_extension(ext_id)
+    +get_enabled_container_sources()
+  }
+  class AniyomiDexParser {
+    {static} +parse_apk(apk_bytes, ...): SourceRecipe
+  }
+  class SourceRecipe <<dataclass>> {
+    pkg: str
+    base_url: str
+    supports_latest: bool
+    search_selector: str
+    search_request_path: str
+    episode_list_selector: str
+    +to_dict()
+    {static} +from_dict(data)
+  }
+  class AniyomiContainerSource {
+    recipe: SourceRecipe
+    +search_anime(...)
+    +get_latest_releases(...)
+    +get_anime_detail(...)
+    +get_episode_sources(...)
+  }
+  abstract class BaseSourceAdapter {
+    +matches(pkg, base_url)
+    +search_anime(query, container)
+    +get_latest_releases(page, container)
+    +get_anime_detail(anime_url, container)
+    +get_episode_sources(play_url, container)
+  }
+  class AdapterRegistry {
+    +register(adapter)
+    +find_adapter(pkg, base_url)
+  }
+  ExtensionService ..> AniyomiDexParser : compile la recette
+  AniyomiDexParser ..> SourceRecipe : produit heuristiquement
+  ExtensionService "1" o-- "0..*" AniyomiContainerSource : instances activées
+  AniyomiContainerSource "1" --> "1" SourceRecipe : utilise
+  AniyomiContainerSource ..> AdapterRegistry : sélection spécifique si connue
+  AdapterRegistry "1" o-- "0..*" BaseSourceAdapter : registre
+  SourceCatalogueService ..> ExtensionService : sources importées activées
+  SourceCatalogueService ..> AniyomiContainerSource : capacités / navigation
+}
+package "Lecteurs et URL médias" {
+  abstract class BaseVideoExtractor {
+    name: str
+    domains: List[str]
+    +matches(url): bool
+    +extract(...): Optional[ExtractorResult]
+  }
+  class ExtractorRegistry {
+    +register(extractor)
+    +find_extractor(url)
+    +extract(...)
+  }
+  class ExtractorResult <<dataclass>> {
+    video_url: str
+    qualities: Dict
+    headers: Dict
+    subtitles: List[Dict]
+    +to_download_info(): dict
+  }
+  class YtDlpFallbackExtractor
+  BaseVideoExtractor <|-- YtDlpFallbackExtractor
+  ExtractorRegistry "1" o-- "0..*" BaseVideoExtractor
+  BaseVideoExtractor ..> ExtractorResult
+  AniyomiContainerSource ..> ExtractorRegistry : résout un lecteur
+}
+note bottom of SourceRecipe
+Un APK d'extension n'est pas exécuté dans une VM Aniyomi.
+DEX est analysé pour extraire une recette ; les logiques
+personnalisées nécessitent un adaptateur Python compatible.
+end note
+note bottom of SourceCatalogueService
+Les capacités sont calculées par source ; aucun
+héritage commun aux trois services natifs aujourd'hui.
+Les requêtes de sources utilisent SourceHTTPService.
+end note
+@enduml

@@ -23,6 +23,7 @@ export const usePlayerStore = defineStore('player', () => {
   const serverType = ref('En ligne');
   const isLoading = ref(false);
   const error = ref<string | null>(null);
+  let requestVersion = 0;
 
   const hasNext = computed(() => {
     if (!currentEpisode.value || !episodes.value.length) return false;
@@ -38,6 +39,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   async function resolveStream() {
     if (!currentEpisode.value) return;
+    const request = ++requestVersion;
     const targetUrl = currentEpisode.value.playerUrl || currentEpisode.value.downloadPageUrl;
     if (!targetUrl) {
       error.value = "Aucun lien de streaming disponible pour cet épisode.";
@@ -59,6 +61,7 @@ export const usePlayerStore = defineStore('player', () => {
         server: selectedServer.value !== 'auto' ? selectedServer.value : undefined,
         quality: selectedQuality.value !== 'auto' ? selectedQuality.value : undefined,
       });
+      if (request !== requestVersion) return;
 
       const finalUrl = res.streamUrl || res.videoUrl;
       if (res && finalUrl) {
@@ -82,9 +85,10 @@ export const usePlayerStore = defineStore('player', () => {
         error.value = res.error || "Impossible d'extraire la vidéo directe pour cet hébergeur.";
       }
     } catch (e: any) {
+      if (request !== requestVersion) return;
       error.value = e.message || 'Erreur lors de la résolution du flux vidéo.';
     } finally {
-      isLoading.value = false;
+      if (request === requestVersion) isLoading.value = false;
     }
   }
 
@@ -109,12 +113,14 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   function closePlayer() {
+    ++requestVersion;
     isOpen.value = false;
     videoUrl.value = null;
     currentEpisode.value = null;
     error.value = null;
     subtitles.value = [];
     selectedSubtitle.value = null;
+    isLoading.value = false;
   }
 
   async function playNext() {
@@ -153,7 +159,8 @@ export const usePlayerStore = defineStore('player', () => {
     selectedSubtitle.value = src;
   }
 
-  function playLocalFile(taskId: string | number, title: string, epNum: number | string, fileName?: string) {
+  async function playLocalFile(taskId: string | number, title: string, epNum: number | string, fileName?: string) {
+    const request = ++requestVersion;
     animeTitle.value = title;
     animeUrl.value = '';
     source.value = 'local';
@@ -167,19 +174,22 @@ export const usePlayerStore = defineStore('player', () => {
     isLoading.value = false;
     error.value = null;
     isDownloaded.value = true;
-    videoUrl.value = `/api/media/stream/${taskId}`;
+    videoUrl.value = `/api/media/stream/${encodeURIComponent(taskId)}`;
     availableQualities.value = {};
     availableServers.value = [];
     serverType.value = 'Local (Disque)';
-    subtitles.value = [
-      {
-        label: 'Sous-titres locaux',
-        src: `/api/media/subtitles/${taskId}`,
-        srclang: 'fr',
-        default: true,
-      }
-    ];
-    selectedSubtitle.value = subtitles.value[0]?.src || null;
+    selectedServer.value = 'auto';
+    selectedQuality.value = 'HD';
+    subtitles.value = [];
+    selectedSubtitle.value = null;
+    try {
+      const tracks = await api.getLocalSubtitles(taskId);
+      if (request !== requestVersion) return;
+      subtitles.value = tracks;
+      selectedSubtitle.value = tracks[0]?.src || null;
+    } catch {
+      // Optional captions must never prevent the local video from playing.
+    }
   }
 
   return {

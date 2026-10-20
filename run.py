@@ -222,9 +222,11 @@ async def get_offline_page():
     )
 
 # Enregistrement des routeurs
-@app.exception_handler(VerificationRequired)
-async def source_verification_error(request: Request, exc: VerificationRequired):
-    return JSONResponse(status_code=409, content=exc.to_dict())
+from animan.api_errors import ErrorContractMiddleware, install_error_handlers
+install_error_handlers(app)
+from animan.api_contracts import install_contract_schema
+install_contract_schema(app)
+app.add_middleware(ErrorContractMiddleware)
 
 app.include_router(network_router)
 app.include_router(anime_router)

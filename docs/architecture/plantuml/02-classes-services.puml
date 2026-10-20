@@ -1,0 +1,116 @@
+@startuml
+!include theme.iuml
+title Animan — orchestration des téléchargements et bibliothèque
+' @source animan/services/download_manager.py:DownloadManagerService
+' @source animan/services/download_manager.py:ResolvedVideoInfo
+' @source animan/services/library_service.py:LibraryService
+' @source animan/services/verification_service.py:DownloadVerificationService
+' @source animan/services/verification_service.py:VerificationResult
+' @source animan/services/watchdog_service.py:WatchdogService
+' @source animan/media_tools.py:run
+' @source animan/platform_events.py:completed
+package "Services partagés Python" {
+  class DownloadManagerService {
+    tasks: Dict[str, DownloadTask]
+    task_order: List[str]
+    max_concurrent_downloads: int
+    +init_from_db()
+    +start_download(...): DownloadTask
+    +start_batch_download(...)
+    +process_queue()
+    +pause_download(task_id)
+    +resume_download(task_id)
+    +resume_verified_domain(domain)
+    +cancel_download(task_id)
+    +get_or_resolve_episode_info(...)
+    +subscribe_sse()
+    +broadcast_update(task)
+    +export_task(task, manual=false)
+    -_execute_download(task)
+    -_finalize_task(task)
+    -_publish_mux_file(...)
+  }
+  class LibraryService {
+    +save_task(task)
+    +get_unfinished_tasks()
+    +find_downloaded_episode(...)
+    +add_favorite(...)
+    +mark_as_downloaded(...)
+    +mark_as_watched(...)
+    +get_history(...)
+    +discover_auto_episodes(...)
+    +attach_auto_download_task(...)
+    +recover_interrupted_exports()
+  }
+  class WatchdogService {
+    interval: int
+    +start()
+    +stop()
+    +check_new_episodes(): int
+    -_check_anime(fav)
+  }
+  class DownloadVerificationService {
+    +verify_file(...): VerificationResult
+  }
+  class VerificationResult <<Pydantic>> {
+    valid: bool
+    status: str
+    error: Optional[str]
+    duration: Optional[float]
+    relocatedPath: Optional[str]
+  }
+  class ResolvedVideoInfo {
+    direct_url: str
+    subtitles_json: str
+    server_type: str
+    selected_server: str
+    selected_quality: str
+    size: int
+  }
+  class "media_tools" as MediaTools <<module>> {
+    +run(args, ...)
+    +which(name)
+    +decrypt_aes_cbc(...)
+    +configure_android(media, aes)
+  }
+  class "platform_events" as PlatformEvents <<module callbacks>> {
+    progress_handler
+    completed_handler
+    storage_status_handler
+    storage_action_handler
+    +progress(task)
+    +completed(task)
+  }
+}
+class DownloadTask
+class DownloadTaskEntity
+class ExtractorRegistry
+class SourceCatalogueService {
+  +provider(source_id)
+}
+DownloadManagerService "1" o-- "0..*" DownloadTask : tasks (index en mémoire)
+DownloadManagerService ..> LibraryService : sauvegarde / restauration
+LibraryService ..> DownloadTaskEntity : conversion / transactions ORM
+DownloadManagerService ..> ResolvedVideoInfo : résolution des lecteurs
+DownloadManagerService ..> ExtractorRegistry : extractions dédiées puis repli
+DownloadManagerService ..> DownloadVerificationService : vérifie média local
+DownloadVerificationService ..> VerificationResult : produit
+DownloadVerificationService ..> MediaTools : FFprobe + décodage FFmpeg
+DownloadManagerService ..> MediaTools : AES / remux / sous-titres
+DownloadManagerService ..> PlatformEvents : notification / export natif
+WatchdogService ..> LibraryService : favoris autoDownload
+WatchdogService ..> SourceCatalogueService : choisir le fournisseur exact
+WatchdogService ..> DownloadManagerService : planification / nouvelles tâches
+note bottom of WatchdogService
+SourceCatalogueService.provider() sélectionne la source
+intégrée ou l'extension activée. Source, URL, version et
+préférences accompagnent chaque nouvelle tâche.
+Le registre persistant sépare découverte et résultat.
+end note
+note bottom of PlatformEvents
+Pas de classe abstraite PlatformAdapter aujourd'hui.
+Callbacks configurés par android_runtime.py ;
+la façade media_tools utilise subprocess sur bureau,
+et les ponts JNI sur Android.
+end note
+@enduml

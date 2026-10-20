@@ -125,7 +125,10 @@ async def test_animesama_detail_episodes_parsing():
     assert detail.episodes[1].number == 2
 
 
-def test_api_search_includes_extensions(client):
+def test_api_search_includes_extensions(client, monkeypatch):
+    from animan.routers import anime
+    for source in (anime.scraping_service, anime.voiranime_service, anime.animepahe_service):
+        monkeypatch.setattr(source, "search_anime", AsyncMock(return_value=[]))
     mock_source = MagicMock()
     mock_source.pkg = "eu.kanade.tachiyomi.animeextension.fr.mockext"
     mock_source.name = "MockExtension"

@@ -441,9 +441,12 @@ class SourceHTTPService:
         return Cookie(0, name, value, None, False, domain, domain.startswith("."), domain.startswith("."),
                       path, True, secure, expires, expires is None, None, None, {}, False)
 
-    def import_cookies(self, url, cookies):
+    def import_cookies(self, url, cookies, *, expected_route=None):
         state = self.state(url)
         with state.condition:
+            if expected_route is not None and (state.proxy, state.generation) != expected_route:
+                from animan.api_errors import APIProblem
+                raise APIProblem('verification_route_changed', status=409, category='protection', action='verify')
             for item in cookies:
                 domain = str(item.get("domain", state.domain)).lower()
                 if state.domain != domain.lstrip(".") and not (domain.startswith(".") and state.domain.endswith(domain)):
@@ -456,6 +459,7 @@ class SourceHTTPService:
                                                      int(expires) if expires and expires > 0 else None))
             state.generation += 1
             self._save(state)
+            return state.generation
 
     def diagnostics(self):
         with self._lock:

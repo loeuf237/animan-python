@@ -1,0 +1,71 @@
+@startuml
+!include theme.iuml
+' @source android_runtime.py:start
+' @source animan/routers/library.py:android_export_download
+' @source animan/services/download_manager.py:DownloadManagerService.export_task
+' @source android/app/src/main/java/com/animan/app/StorageAccess.kt:StorageAccess
+' @source android/app/src/main/java/com/animan/app/NativeHooks.kt:NativeHooks
+title Animan Android — autoriser une destination et publier un média
+autonumber
+actor Utilisateur as U
+boundary "Vue paramètres / téléchargements" as UI
+control "API Python / platform_events" as API
+control StorageAccess as Storage
+boundary "DocumentsUI Android" as Picker
+database "Permission URI persistante" as Grant
+control "DownloadManagerService\nfinalisation" as DM
+control "android_runtime.export_completed\n+ NativeHooks" as Export
+database "MediaStore / dossier SAF" as Shared
+database "Copie privée de la bibliothèque" as Private
+opt choix d'un dossier personnalisé
+  U -> UI : choisir le dossier de destination
+  UI -> API : POST /api/system/android/storage\n{action: choose_directory}
+  API -> Storage : request(choose_directory)
+  Storage -> Picker : ACTION_OPEN_DOCUMENT_TREE
+  U -> Picker : sélectionner et autoriser le dossier
+  Picker -> Storage : URI + droits de lecture/écriture
+  Storage -> Grant : takePersistableUriPermission ; mémoriser URI
+  Storage --> UI : authorized=true ; destination
+end
+note over Storage,Grant
+Mode par défaut Downloads/Animan : MediaStore, sans
+permission globale de stockage sur Android 10+.
+Une permission de dossier révoquée doit être redemandée.
+end note
+DM -> Private : média téléchargé, sous-titres fusionnés si demandés
+DM -> DM : intégrité valide
+DM -> DM : persister COMPLETED + progression téléchargée
+DM -> DM : export_task() ; verrou par tâche
+DM -> DM : persister EXPORTING ; tentative + 1
+DM -> API : platform_events.completed(task)
+API -> Export : exporter vidéo + pistes non fusionnées
+Export -> Storage : destination et validité des droits
+alt destination accessible
+  Export -> Shared : réserver un nom et une entrée / document
+  Export -> Shared : copie bornée ; contrôle de taille
+  Export -> Shared : publier (IS_PENDING=0 pour MediaStore)
+  Export -> Storage : mémoriser URI d'export / état
+  Export --> DM : URI(s)
+  DM -> DM : persister EXPORTED + URI + destination + date
+else droits révoqués / stockage indisponible
+  Export -> Shared : nettoyer la copie incomplète si créée
+  Export --> DM : exception d'export
+  DM -> DM : persister EXPORT_FAILED + exportError
+end
+DM -> Private : conserver la copie locale vérifiée
+DM --> UI : COMPLETED + exportStatus indépendant
+opt réexport manuel après correction des droits
+  U -> UI : exporter le téléchargement terminé
+  UI -> API : POST /api/system/android/export {taskId}
+  API -> API : vérifier tâche COMPLETED
+  API -> DM : export_task(manual=true)
+  DM -> Export : exporter la copie privée existante
+  Export --> UI : succès ou erreur 409 ; pas de retéléchargement
+end
+note over DM,Shared
+Une interruption conserve COMPLETED et ramène l'export à PENDING.
+Au redémarrage, les exports interrompus restent à reprendre.
+Les anciens exports sans preuve URI restent NOT_REQUESTED.
+Certains MediaProvider imposent Movies/Animan pour les SRT.
+end note
+@enduml

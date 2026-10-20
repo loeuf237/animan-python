@@ -80,6 +80,12 @@ export interface AnimeDetailResponse {
 }
 
 export interface DownloadTask {
+  exportStatus?: 'NOT_REQUESTED' | 'PENDING' | 'EXPORTING' | 'EXPORTED' | 'EXPORT_FAILED';
+  exportUris?: string[];
+  exportDestination?: string | null;
+  exportError?: string | null;
+  exportAttempts?: number;
+  exportedAt?: string | null;
   id: number | string;
   animeName: string;
   episodeNumber: number | string;
@@ -134,13 +140,21 @@ export interface DownloadStats {
   totalSpeed: number;
 }
 
-export interface FavoriteItem {
+export interface AutoDownloadOptions {
+  autoDownloadVersion?: string;
+  autoDownloadSubtitles?: boolean;
+  autoDownloadServer?: string | null;
+  autoDownloadQuality?: string | null;
+}
+
+export interface FavoriteItem extends AutoDownloadOptions {
   id?: number;
   url: string;
   title: string;
   imageUrl: string;
   source: string;
   autoDownload: boolean;
+  autoDownloadError?: string | null;
   lastEpisodeChecked?: string | null;
   newEpisodesCount?: number;
   createdAt?: string;

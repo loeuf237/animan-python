@@ -10,7 +10,7 @@ import pytest
 
 from animan.models.download_task import DownloadTask, DownloadStatus
 from animan.services.download_manager import download_manager, DownloadManagerService
-from animan.services.download_resume import prepare_hls_cache
+from animan.services.download_resume import prepare_hls_cache, write_metadata, segment_digest
 
 
 @pytest.mark.asyncio
@@ -184,6 +184,8 @@ async def test_hls_segment_level_resumption():
         prepare_hls_cache(segments_dir, "http://example.com/hls/master.m3u8", m3u8_content)
         seg0.write_bytes(b"MPEGTS_SEGMENT_0")
         seg1.write_bytes(b"MPEGTS_SEGMENT_1")
+        write_metadata(seg0.with_suffix(".json"), segment_digest(seg0))
+        write_metadata(seg1.with_suffix(".json"), segment_digest(seg1))
 
         downloaded_urls = []
 

@@ -186,6 +186,7 @@ def test_legacy_shared_destination_is_paused_before_file_validation(isolated, mo
     tasks = [DownloadTask(animeName='Anime', episodeNumber=1, savePath=str(path), fileName=path.name,
              downloadPageUrl=f'https://anime/{version}/1', status=DownloadStatus.PENDING) for version in ['vf','vo']]
     monkeypatch.setattr(library_service, 'get_unfinished_tasks', lambda: [task.to_entity() for task in tasks])
+    monkeypatch.setattr(library_service, 'get_completed_tasks', lambda: [])
     manager.init_from_db()
     assert all(t.status == DownloadStatus.PAUSED for t in manager.tasks.values())
     assert manager.resume_download(tasks[0].id) is False

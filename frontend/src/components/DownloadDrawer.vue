@@ -65,6 +65,7 @@
             </span>
           </div>
 
+          <ExportStatusNotice :task="task" />
           <!-- Progress bar -->
           <div class="progress-track">
             <div
@@ -133,6 +134,7 @@
 <script setup lang="ts">
 import { tx } from '@/utils/locale';
 import { useDownloadStore } from '@/stores/downloads';
+import ExportStatusNotice from '@/components/ExportStatusNotice.vue';
 
 const downloadStore = useDownloadStore();
 

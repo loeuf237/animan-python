@@ -1,0 +1,66 @@
+@startuml
+!include theme.iuml
+title Animan — architecture cible proposée (non implémentée)
+left to right direction
+skinparam componentBackgroundColor #ECFDF5
+skinparam componentBorderColor #047857
+boundary "Vue / Pinia\nAPI typée" as UI
+package "Monolithe modulaire Python proposé" {
+  component "Couche application\ncas d'usage et validation" as App
+  component "SourceRegistry\ncapabilities + identité stable" as Registry
+  interface "SourceProvider\nProtocol commun" as SourcePort
+  component "DownloadOrchestrator\ntransitions et idempotence" as Orchestrator
+  component "TransferWorker\ndirect / HLS / reprise" as Transfer
+  component "MediaPipeline\npistes / fusion / intégrité" as Media
+  component "ExportCoordinator\nétat distinct et réexport" as Export
+  component "Scheduler\npolitiques de suivi par version" as Schedule
+  interface "Repository\ntransactions / migrations" as RepoPort
+  interface "PlatformAdapter\nmedia, stockage, cycle de vie" as PlatformPort
+  component "Événements typés\nprogression, erreurs, export" as Events
+  component "Transport source\nsessions, cache, routes, métriques" as HTTP
+}
+component "Adaptateurs sources\nnatives et importées" as Sources
+database "SQLite\nmigrations versionnées" as DB
+component "Adaptateur bureau\nsubprocess / fichiers" as Desktop
+component "Adaptateur Android\nJNI / MediaStore / SAF" as Android
+UI --> App
+App --> Registry
+Registry --> SourcePort
+Sources ..|> SourcePort
+Sources --> HTTP
+App --> Orchestrator
+Schedule --> Registry
+Schedule --> Orchestrator : source + URL + épisode + version
+Orchestrator --> Transfer
+Orchestrator --> Media
+Orchestrator --> Export
+Orchestrator --> RepoPort
+Transfer --> HTTP
+Media --> PlatformPort
+Export --> PlatformPort
+Desktop ..|> PlatformPort
+Android ..|> PlatformPort
+RepoPort --> DB
+Orchestrator --> Events
+Export --> Events
+Events --> UI : SSE versionné
+note bottom of Export
+États d'export indépendants : NOT_REQUESTED,
+PENDING, EXPORTING, EXPORTED, EXPORT_FAILED.
+Un média peut être localement valide sans être exporté.
+Ces états sont déjà implémentés (A02) ; l'extraction
+d'un ExportCoordinator séparé reste proposée (A03).
+end note
+note bottom of Registry
+La même résolution de source sert recherche,
+catalogue, lecture, téléchargement et watchdog.
+Contrats testés par source et corpus HTML/JSON.
+end note
+note bottom of Orchestrator
+Tous les composants verts sont une proposition.
+Le suivi par version (A01) et les états (A02) existent
+déjà dans les services actuels, sans ce découpage.
+Conserver Python et les garanties de reprise déjà présentes.
+Découper progressivement avec tests de contrat et métriques.
+end note
+@enduml

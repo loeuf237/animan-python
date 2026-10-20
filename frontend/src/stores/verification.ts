@@ -1,20 +1,23 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api, ApiError } from '@/api/client';
+import type { NetworkSession, NetworkOptions, VerificationMode, VerificationJob } from '@/types/api';
 import type { SourceChallenge } from '@/types';
 import { detectBrowser } from '@/utils/browser';
 
 export function challengeFromError(error: unknown): SourceChallenge | null {
-  if (error instanceof ApiError && error.data?.code === 'verification_required') return error.data;
+  if (error instanceof ApiError && error.data?.code === 'verification_required' && error.data.domain) return {domain: error.data.domain, url: error.data.url, code: error.data.code, error: error.data.error || error.message};
   return null;
 }
 
 export const useVerificationStore = defineStore('verification', () => {
-  const sessions = ref<{domain: string; verificationRequired: boolean; usesProxy: boolean}[]>([]);
+  const sessions = ref<NetworkSession[]>([]);
   const browsers = ref<{name: string}[]>([]);
   const webviewAvailable = ref(false);
   const browser = ref('');
-  const job = ref<{id: string; domain: string} | null>(null);
+  const options = ref<NetworkOptions | null>(null);
+  function modes(domain: string) { return sessions.value.find(s => s.domain === domain)?.modes || options.value?.modes || []; }
+  const job = ref<VerificationJob | null>(null);
   const busy = ref(false);
   const error = ref('');
   const notice = ref('');
@@ -32,6 +35,7 @@ export const useVerificationStore = defineStore('verification', () => {
     refreshing = (async () => {
       try {
         const result = await api.getNetworkSessions();
+        options.value = result;
         sessions.value = result.sessions;
         browsers.value = result.browsers;
         webviewAvailable.value = result.webviewAvailable;
@@ -43,7 +47,7 @@ export const useVerificationStore = defineStore('verification', () => {
     })();
     try { await refreshing; } finally { refreshing = null; }
   }
-  async function start(domain: string, mode = 'browser') {
+  async function start(domain: string, mode: VerificationMode = 'browser') {
     if (busy.value || job.value) return;
     busy.value = true; error.value = ''; notice.value = '';
     try { job.value = await api.startNetworkVerification(domain, browser.value, mode); }
@@ -85,6 +89,6 @@ export const useVerificationStore = defineStore('verification', () => {
     catch (exc) { error.value = exc instanceof Error ? exc.message : 'Impossible de fermer la vérification.'; }
     finally { busy.value = false; }
   }
-  return {sessions, browsers, browser, job, busy, error, notice, webviewAvailable,
+  return {options, modes, sessions, browsers, browser, job, busy, error, notice, webviewAvailable,
           waitForVerification, clearPending, refresh, start, complete, cancel, retry};
 });

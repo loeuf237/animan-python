@@ -1,3 +1,4 @@
+from animan.api_contracts import ContractRoute
 from animan.services.source_http import VerificationRequired
 import logging
 from typing import Dict, Any
@@ -9,7 +10,7 @@ from animan.services.source_settings_service import source_settings_service
 from animan.services.source_catalogue import source_catalogue, CatalogueError
 
 logger = logging.getLogger("animan.router.sources")
-router = APIRouter(prefix="/api/sources", tags=["sources"])
+router = APIRouter(route_class=ContractRoute, prefix="/api/sources", tags=["sources"])
 
 
 @router.get("")

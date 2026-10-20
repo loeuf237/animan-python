@@ -2,12 +2,18 @@ import pytest
 from fastapi.testclient import TestClient
 from run import app
 from animan.database import init_db
+from unittest.mock import AsyncMock
 
 @pytest.fixture(scope="module")
 def client():
     init_db()
-    with TestClient(app, headers={"Accept-Language": "fr"}) as c:
-        yield c
+    from animan.routers import anime
+    # Page rendering tests should not depend on a live source challenge.
+    with pytest.MonkeyPatch.context() as patch:
+        for source in (anime.scraping_service, anime.voiranime_service, anime.animepahe_service):
+            patch.setattr(source, "get_latest_releases", AsyncMock(return_value=[]))
+        with TestClient(app, headers={"Accept-Language": "fr"}) as c:
+            yield c
 
 def test_html_pages(client):
     # Home
@@ -305,5 +311,4 @@ def test_tachiyomi_detail_page_and_source_correction(client, monkeypatch):
     assert "btn-play-ep" in html
     assert "btn-download-ep" in html
     assert "subtitle-check" in html
-
 

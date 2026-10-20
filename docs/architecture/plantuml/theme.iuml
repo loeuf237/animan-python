@@ -1,0 +1,25 @@
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam ArrowColor #475569
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+skinparam classBackgroundColor #F5F3FF
+skinparam classBorderColor #7C3AED
+skinparam packageBackgroundColor #F8FAFC
+skinparam packageBorderColor #94A3B8
+skinparam usecaseBackgroundColor #F5F3FF
+skinparam usecaseBorderColor #7C3AED
+skinparam participantBackgroundColor #F5F3FF
+skinparam participantBorderColor #7C3AED
+skinparam sequenceLifeLineBorderColor #94A3B8
+skinparam noteBackgroundColor #FFF7ED
+skinparam noteBorderColor #D97706
+skinparam componentStyle uml2
+skinparam componentBackgroundColor #F5F3FF
+skinparam componentBorderColor #7C3AED
+skinparam databaseBackgroundColor #F5F3FF
+skinparam databaseBorderColor #7C3AED
+hide empty members

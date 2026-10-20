@@ -1,8 +1,9 @@
+from animan.api_contracts import ContractRoute
 from fastapi import APIRouter, Request, Response, Query
 from fastapi.responses import JSONResponse
 from animan.services.i18n_service import i18n_service, SUPPORTED_LANGUAGES, DEFAULT_LANGUAGE, current_lang
 
-router = APIRouter(tags=["i18n"])
+router = APIRouter(route_class=ContractRoute, tags=["i18n"])
 
 @router.get("/api/i18n")
 async def get_translations(lang: str = Query(None)):

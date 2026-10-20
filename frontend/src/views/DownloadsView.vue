@@ -347,6 +347,7 @@
             </div>
           </div>
 
+          <ExportStatusNotice :task="task" :native="androidStorage" />
           <!-- Alerte explicite si erreur / flux endommagé -->
           <div v-if="task.error || (task.verificationStatus && task.verificationStatus !== 'VALID' && task.verificationStatus !== 'UNVERIFIED')" class="task-error-box">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -397,8 +398,8 @@
 
           <!-- Terminé : Lire (Mode Cinéma local), Vérifier l'intégrité, Supprimer -->
           <template v-else-if="task.status === 'completed'">
-            <button v-if="androidStorage" class="btn btn-secondary btn-sm" :disabled="exportingTask === task.id" @click="exportToStorage(task)">{{ tx('Exporter vers le stockage') }}</button>
-            <RouterLink v-if="androidStorage && task.error" class="btn btn-secondary btn-sm" to="/settings?tab=storage">{{ tx('Autorisations Android') }}</RouterLink>
+            <button v-if="androidStorage" class="btn btn-secondary btn-sm" :disabled="exportingTask === String(task.id) || task.exportStatus === 'EXPORTING'" @click="exportToStorage(task)">{{ tx(task.exportStatus === 'EXPORT_FAILED' || task.exportStatus === 'PENDING' ? 'Réessayer l’export' : 'Exporter vers le stockage') }}</button>
+            <RouterLink v-if="androidStorage && (task.exportError || task.error)" class="btn btn-secondary btn-sm" to="/settings?tab=storage">{{ tx('Autorisations Android') }}</RouterLink>
             <button class="btn btn-primary btn-sm btn-icon" :title="tx('Lire la vidéo locale (Mode Cinéma)')" @click="playTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8Z"/></svg>
             </button>
@@ -475,6 +476,7 @@
 import { language, tx } from '@/utils/locale';
 import ProxyRotationButton from '@/components/ProxyRotationButton.vue';
 import VerificationPrompt from '@/components/VerificationPrompt.vue';
+import ExportStatusNotice from '@/components/ExportStatusNotice.vue';
 import { ref, computed, onMounted, onActivated } from 'vue';
 import { useDownloadStore } from '@/stores/downloads';
 import { useLibraryStore } from '@/stores/library';
@@ -498,9 +500,8 @@ async function exportToStorage(task: DownloadTask) {
   try {
     const result = await api.exportAndroidDownload(String(task.id));
     showToast(`${tx('Fichiers exportés vers')} ${result.destination}`, 'success');
-    await downloadStore.fetchTasks();
   } catch (failure) { showToast(failure instanceof Error ? failure.message : String(failure), 'error'); }
-  finally { exportingTask.value = null; }
+  finally { await downloadStore.fetchTasks(); exportingTask.value = null; }
 }
 
 const tab = ref<'queue' | 'done' | 'errors' | 'all'>('queue');
@@ -565,10 +566,14 @@ async function saveSettings() {
 }
 
 // Catégories de tâches
+function exportNeedsAttention(task: DownloadTask): boolean {
+  return task.status === 'completed' && (task.exportStatus === 'PENDING' || task.exportStatus === 'EXPORT_FAILED');
+}
 const activeAndQueuedCount = computed(() => {
   return downloadStore.tasks.filter((t) => {
     const s = (t.status || '').toLowerCase();
-    return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing', 'verification_required'].includes(s);
+    return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing', 'verification_required'].includes(s)
+      || t.exportStatus === 'EXPORTING' || exportNeedsAttention(t);
   }).length;
 });
 
@@ -579,7 +584,7 @@ const completedCount = computed(() => {
 const errorTasksCount = computed(() => {
   return downloadStore.tasks.filter((t) => {
     const s = (t.status || '').toLowerCase();
-    return ['error', 'failed'].includes(s);
+    return ['error', 'failed'].includes(s) || exportNeedsAttention(t);
   }).length;
 });
 
@@ -592,7 +597,8 @@ const filteredTasks = computed<DownloadTask[]>(() => {
   if (tab.value === 'queue') {
     return list.filter((t) => {
       const s = (t.status || '').toLowerCase();
-      return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing', 'verification_required'].includes(s);
+      return ['downloading', 'queued', 'paused', 'pending', 'scheduled', 'retrying', 'muxing', 'verification_required'].includes(s)
+        || t.exportStatus === 'EXPORTING' || exportNeedsAttention(t);
     });
   }
   if (tab.value === 'done') {
@@ -601,7 +607,7 @@ const filteredTasks = computed<DownloadTask[]>(() => {
   if (tab.value === 'errors') {
     return list.filter((t) => {
       const s = (t.status || '').toLowerCase();
-      return ['error', 'failed'].includes(s);
+      return ['error', 'failed'].includes(s) || exportNeedsAttention(t);
     });
   }
   return list;
@@ -660,6 +666,8 @@ function getStatusBadgeClass(task: DownloadTask): string {
 }
 
 function getStatusLabel(task: DownloadTask): string {
+  if (task.exportStatus === 'EXPORTING') return 'Copie vers le stockage en cours';
+  if (task.status === 'completed' && ['PENDING', 'EXPORT_FAILED'].includes(task.exportStatus || '')) return 'Vidéo vérifiée';
   const s = (task.status || '').toLowerCase();
   switch (s) {
     case 'downloading': return ({resolving: 'Préparation', video: 'Téléchargement vidéo', subtitles: 'Sous-titres', assembling: 'Assemblage', muxing: 'Fusion des sous-titres', verifying: 'Vérification du fichier'} as Record<string, string>)[task.phase || 'video'] || 'En cours';

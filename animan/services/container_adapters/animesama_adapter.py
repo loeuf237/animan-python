@@ -1,4 +1,4 @@
-from animan.services.source_http import source_http, VerificationRequired
+from animan.services.source_http import VerificationRequired
 import html
 import logging
 import re
@@ -6,11 +6,9 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus, urljoin
 
 from bs4 import BeautifulSoup
-import httpx
 
 from animan.models.anime import AnimeDetail, AnimeResult, Episode
 from animan.services.container_adapters.base import BaseSourceAdapter
-from animan.services.proxy_service import proxy_service
 
 logger = logging.getLogger(__name__)
 
@@ -20,31 +18,9 @@ class AnimeSamaAdapter(BaseSourceAdapter):
     domains = ["anime-sama.fr", "anime-sama.me", "anime-sama.to"]
 
     async def _fetch_text(self, url: str, container: Any) -> str:
-        if hasattr(container, "_fetch_html"):
-            try:
-                res = await container._fetch_html(url)
-                if res:
-                    return res
-            except VerificationRequired:
-                raise
-            except Exception as e:
-                logger.debug("[animesama_adapter] container._fetch_html error on %s: %s", url, e)
-
-        try:
-            proxy = proxy_service.get_proxy()
-            headers = {
-                "User-Agent": proxy_service.get_user_agent(),
-                "Referer": getattr(container, "base_url", "https://anime-sama.fr/") + "/",
-            }
-            async with source_http.async_client(timeout=12.0, proxy=proxy, headers=headers, follow_redirects=True) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    return resp.text
-        except VerificationRequired:
-            raise
-        except Exception as e:
-            logger.debug("[animesama_adapter] Erreur fetch %s: %s", url, e)
-        return ""
+        # Use the shared session once; never turn network/challenge errors
+        # into a successful empty catalogue or retry through another proxy.
+        return await container._fetch_html(url)
 
     async def search_anime(self, query: str, container: Any) -> List[AnimeResult]:
         clean_q = query.strip()
@@ -81,7 +57,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                 continue
 
             href = urljoin(base_url, link.get("href", ""))
-            if href in seen_hrefs:
+            if "/scan/" in href or href in seen_hrefs:
                 continue
             seen_hrefs.add(href)
 
@@ -132,14 +108,16 @@ class AnimeSamaAdapter(BaseSourceAdapter):
         results: List[AnimeResult] = []
         seen_hrefs = set()
 
-        cards = soup.select(".catalog-card, .carte, .card, div[class*='recent'], div[class*='sortie']")
+        cards = soup.select("#containerSorties .as-carte-anime, #containerAjoutsAnimes .as-carte-anime")
+        if not cards:
+            cards = soup.select(".as-carte-anime, .catalog-card, .carte, .card")
         for card in cards[:24]:
             link = card if card.name == "a" else card.find("a", href=True)
             if not link:
                 continue
 
             href = urljoin(base_url, link.get("href", ""))
-            if href in seen_hrefs:
+            if "/scan/" in href or href in seen_hrefs:
                 continue
             seen_hrefs.add(href)
             title_el = card.find(["h1", "h2", "h3", "h4", "p"], class_=re.compile(r"titre|title", re.I)) or link
@@ -155,7 +133,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                     title=title,
                     imageUrl=img_url,
                     url=href,
-                    version="VOSTFR",
+                    version="VF" if "/vf/" in href else "VOSTFR",
                     type="Anime",
                     episodeInfo="Récents",
                     source=container.source_id,
@@ -181,6 +159,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
         return player_arrays
 
     async def get_anime_detail(self, anime_url: str, container: Any) -> Optional[AnimeDetail]:
+        version = "VF" if "/vf/" in anime_url else "VOSTFR"
         html = await self._fetch_text(anime_url, container)
         if not html:
             return None
@@ -284,7 +263,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                         downloadPageUrl=ep_url,
                         playerUrl=best_url or anime_url,
                         thumbnailUrl=img_url,
-                        version="VOSTFR",
+                        version=version,
                     )
                 )
 
@@ -296,7 +275,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
                     downloadPageUrl=anime_url,
                     playerUrl=anime_url,
                     thumbnailUrl=img_url,
-                    version="VOSTFR",
+                    version=version,
                 )
             ]
 
@@ -308,7 +287,7 @@ class AnimeSamaAdapter(BaseSourceAdapter):
             episodes=episodes,
             source=container.source_id,
             url=anime_url,
-            version="VOSTFR",
+            version=version,
         )
 
     async def get_episode_sources(self, play_url: str, container: Any) -> List[Dict[str, Any]]:

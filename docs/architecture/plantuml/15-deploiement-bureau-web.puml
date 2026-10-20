@@ -1,0 +1,69 @@
+@startuml
+!include theme.iuml
+' @source desktop.py:start_server
+' @source run.py:lifespan
+' @source animan/services/tmdb_service.py:TmdbService.enrich_anime_detail
+title Animan — déploiements actuels bureau et navigateur / PWA
+left to right direction
+node "Poste utilisateur — Windows / Linux / macOS" as Desktop {
+  node "Processus de l'application Python empaquetée" {
+    artifact "desktop.py + Python embarqué\nPyInstaller" as Launcher
+    component "Fenêtre pywebview\nou navigateur installé" as Window
+    component "Uvicorn + FastAPI\nthread serveur, loopback" as LocalAPI
+    artifact "Vue compilée /frontend/dist\n+ statiques et pages Jinja" as Assets
+    component "Services Python\nfile, catalogue, réseau, bibliothèque" as Engine
+  }
+  node "Processus outils média" {
+    component "FFmpeg / FFprobe embarqués" as FF
+  }
+  database "SQLite ~/.animan/db\nfavoris, tâches, progression, paramètres" as LocalDB
+  folder "Fichiers et état privé\nDownloads/Animan ; cache ; cookies ; extensions" as LocalFiles
+  Window --> LocalAPI : HTTP / SSE\n127.0.0.1:port
+  Launcher --> LocalAPI : démarre et surveille
+  LocalAPI --> Assets : sert la même interface
+  LocalAPI --> Engine : appels Python
+  Engine --> FF : subprocess
+  Engine --> LocalDB : SQLAlchemy + sqlite3
+  Engine --> LocalFiles : lecture / écriture
+}
+node "Client navigateur / PWA\nPC, téléphone, tablette" as Web {
+  artifact "Vue / Pinia\npréférences FR/EN locales" as WebUI
+}
+node "Hôte du serveur Web (mode configuré)" as Server {
+  component "run.py : Uvicorn / FastAPI\nHTTP + SSE ; port configuré" as WebAPI
+  component "Moteur Python + outils média" as WebEngine
+  database "SQLite et fichiers du serveur" as WebData
+  WebAPI --> WebEngine
+  WebEngine --> WebData
+}
+cloud "Services tiers" {
+  component "Sites anime / lecteurs / CDN" as Sources
+  component "Dépôts d'extensions\nlistes publiques de proxies" as Repos
+  component "TMDB (facultatif)" as TMDB
+}
+WebUI --> WebAPI : HTTP / SSE\naccès LAN si l'hôte l'autorise
+Engine --> Sources : HTTPS via curl_cffi\nproxy éventuel
+Engine --> Repos : catalogue / APK / listes
+Engine --> TMDB : HTTPX (client séparé actuel)
+WebEngine --> Sources : même code de sources / transport
+WebEngine --> Repos
+WebEngine --> TMDB
+note bottom of Server
+Mode serveur et application de bureau sont deux lancements
+alternatifs du même moteur. ANIMAN_HOST vaut 127.0.0.1
+par défaut ; l'exposition réseau doit être configurée.
+État de file et sessions en mémoire : un seul worker applicatif.
+end note
+note bottom of Web
+La PWA est un client du serveur ; elle n'embarque pas Python.
+Les téléchargements sont écrits sur l'hôte du moteur.
+Le nouvel onglet manuel s'ouvre sur l'appareil du client ;
+la capture CDP dédiée s'ouvre sur la machine du serveur,
+via une action réservée au client loopback.
+end note
+note bottom of Desktop
+Les packages incluent Python, Vue et les outils média.
+macOS : distribution explicitement non testée sur Mac physique.
+Les ressources de WebView restent fournies par la plateforme.
+end note
+@enduml

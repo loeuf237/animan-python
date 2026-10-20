@@ -1,3 +1,4 @@
+from animan.api_contracts import ContractRoute
 """Local browser verification and safe transport diagnostics."""
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -5,7 +6,7 @@ from pydantic import BaseModel, Field
 from animan.services.browser_verification import browser_verification
 from animan.services.download_manager import download_manager
 
-router = APIRouter(prefix="/api/network")
+router = APIRouter(route_class=ContractRoute, prefix="/api/network")
 
 
 @router.get("/proxy-pool")
@@ -100,15 +101,19 @@ async def rotate_proxy(body: StartVerification, request: Request):
         raise HTTPException(409, str(exc)) from exc
 
 
+def is_local(request):
+    return bool(request.client and request.client.host in ("127.0.0.1", "::1", "testclient"))
+
+
 def local_only(request):
-    if not request.client or request.client.host not in ("127.0.0.1", "::1", "testclient"):
+    if not is_local(request):
         raise HTTPException(403, "La vérification dans le navigateur doit être ouverte depuis cette machine")
 
 
 @router.get("/sessions")
 async def sessions(request: Request):
     await browser_verification.expire()
-    return browser_verification.options()
+    return browser_verification.options(client_local=is_local(request))
 
 
 @router.post("/verification")

@@ -1,8 +1,10 @@
+from animan.api_contracts import ContractRoute
 import asyncio
 import logging
 import shutil
 from pathlib import Path
 from typing import Optional
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Request, Query, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
@@ -17,7 +19,22 @@ from animan import platform_events
 from animan.models.download_task import DownloadStatus
 
 logger = logging.getLogger("animan.router.library")
-router = APIRouter()
+router = APIRouter(route_class=ContractRoute)
+
+
+class AutoDownloadRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=4096)
+    autoDownload: Optional[bool] = None
+    autoDownloadVersion: str = Field(default="", max_length=40)
+    autoDownloadSubtitles: bool = False
+    autoDownloadServer: Optional[str] = Field(default=None, max_length=100)
+    autoDownloadQuality: Optional[str] = Field(default=None, max_length=100)
+
+
+class FavoriteRequest(AutoDownloadRequest):
+    title: str = ""
+    imageUrl: str = ""
+    source: str = "french-manga"
 
 # -------------------------------------------------------------------------
 # Pages HTML
@@ -97,18 +114,14 @@ async def voiranime_detail_page(request: Request, url: str = Query(...)):
 # -------------------------------------------------------------------------
 
 @router.post("/api/favorites")
-async def add_favorite(request: Request):
-    body = await request.json()
-    url = body.get("url")
-    title = body.get("title", "")
-    image_url = body.get("imageUrl", "")
-    source = body.get("source", "french-manga")
-
-    if not url:
-        return JSONResponse(status_code=400, content={"error": "URL manquante"})
-
-    fav = library_service.add_favorite(url, title, image_url, source)
-    return {"success": True, "id": fav.id, "message": f"Ajouté aux favoris: {title}"}
+async def add_favorite(body: FavoriteRequest):
+    fav = library_service.add_favorite(body.url, body.title, body.imageUrl, body.source, body.autoDownloadVersion)
+    options = body.model_dump(exclude_unset=True, include={"autoDownloadVersion", "autoDownloadSubtitles",
+                                                         "autoDownloadServer", "autoDownloadQuality"})
+    if body.autoDownload is not None or options:
+        fav = library_service.update_auto_download(body.url,
+            body.autoDownload if body.autoDownload is not None else fav.autoDownload, **options)
+    return {"success": True, "id": fav.id, "message": "Favori ajouté", "favorite": fav.to_dict()}
 
 @router.delete("/api/favorites")
 async def remove_favorite(request: Request):
@@ -127,14 +140,14 @@ async def get_favorites():
     return [f.to_dict() for f in library_service.get_all_favorites()]
 
 @router.patch("/api/favorites/auto-download")
-async def toggle_auto_download(request: Request):
-    body = await request.json()
-    url = body.get("url")
-    auto = bool(body.get("autoDownload", False))
-    if not url:
-        return JSONResponse(status_code=400, content={"error": "URL manquante"})
-    library_service.update_auto_download(url, auto)
-    return {"success": True}
+async def toggle_auto_download(body: AutoDownloadRequest):
+    current = library_service.get_favorite(body.url)
+    if current is None:
+        raise HTTPException(404, "Ajoutez cet animé à la bibliothèque avant d'activer le suivi.")
+    options = body.model_dump(exclude_unset=True, exclude={"url", "autoDownload"})
+    fav = library_service.update_auto_download(body.url,
+        body.autoDownload if body.autoDownload is not None else current.autoDownload, **options)
+    return {"success": True, "favorite": fav.to_dict()}
 
 @router.delete("/api/favorites/all")
 async def clear_all_favorites():
@@ -178,7 +191,10 @@ async def get_history(animeName: Optional[str] = Query(None)):
 
 @router.delete("/api/history/{task_id}")
 async def delete_history_entry(task_id: str):
-    success = library_service.delete_task_entity(task_id)
+    try:
+        success = download_manager.remove_task(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if success:
         return {"success": True}
     return JSONResponse(status_code=400, content={"error": "Entrée introuvable"})
@@ -284,25 +300,17 @@ async def android_export_download(request: Request):
     task_id = body.get("taskId")
     if not isinstance(task_id, str) or len(task_id) > 36:
         raise HTTPException(400, "Invalid download ID")
-    task = download_manager.tasks.get(task_id)
-    if task is None:
-        entity = await asyncio.to_thread(library_service.get_task_entity, task_id)
-        task = entity.to_task() if entity else None
+    task = download_manager.get_task(task_id)
     if task is None:
         raise HTTPException(404, "Download not found")
     if task.status != DownloadStatus.COMPLETED:
         raise HTTPException(409, "Complete and verify the download before exporting it")
     try:
-        result = await asyncio.to_thread(platform_events.completed, task)
+        result = await download_manager.export_task(task, manual=True)
     except Exception as exc:
-        task.error = f"Android export failed; media is available in the library: {exc}"
-        await asyncio.to_thread(library_service.save_task, task)
-        raise HTTPException(409, str(exc)) from exc
-    if task.error and task.error.startswith("Android export failed;"):
-        task.error = None
-        await asyncio.to_thread(library_service.save_task, task)
-    download_manager.broadcast_update(task)
-    return {"success": True, **(result or {})}
+        return JSONResponse(status_code=409, content={"success": False, "code": "export_failed",
+            "error": str(exc), "task": task.to_dict()})
+    return {"success": True, **result, "task": task.to_dict()}
 
 @router.post("/api/watchdog/check")
 async def trigger_watchdog_check():

@@ -59,3 +59,59 @@ def prepare_hls_cache(directory, playlist_url, playlist_text):
         shutil.rmtree(directory)
         directory.mkdir(parents=True, exist_ok=True)
     write_metadata(manifest, {"fingerprint": fingerprint})
+
+
+def segment_digest(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return {'size': path.stat().st_size, 'sha256': digest.hexdigest()}
+
+
+def valid_cached_segment(path):
+    metadata = read_metadata(path.with_suffix('.json'))
+    return path.is_file() and path.stat().st_size > 0 and metadata == segment_digest(path)
+
+
+def commit_segment(staging, destination):
+    # Persist bytes before the identity record. A crash in between results in a
+    # safe re-download, never reuse of an uncommitted partial segment.
+    with staging.open('rb') as source:
+        os.fsync(source.fileno())
+    staging.replace(destination)
+    write_metadata(destination.with_suffix('.json'), segment_digest(destination))
+
+
+def publish_file(staging, destination):
+    """Publish completed bytes without replacing a destination created meanwhile."""
+    import errno
+    try:
+        os.link(staging, destination)
+    except OSError as exc:
+        if exc.errno not in (errno.EACCES, errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP):
+            raise
+        # Android filesystems/providers may refuse hard links. Reserve our own
+        # name exclusively; never delete or replace a file owned by another task.
+        fd = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        try:
+            os.replace(staging, destination)
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
+    else:
+        staging.unlink()
+
+
+def media_resource(url):
+    from urllib.parse import urlsplit, urlunsplit
+    parsed = urlsplit(url)
+    # Signed query parameters can expire while the resource stays identical.
+    # Ports are part of the origin, credentials are never part of this record.
+    host = parsed.hostname or ''
+    if ':' in host:
+        host = '[' + host + ']'
+    authority = host + (':' + str(parsed.port) if parsed.port else '')
+    identity = urlunsplit((parsed.scheme, authority, parsed.path, '', ''))
+    return hashlib.sha256(identity.encode()).hexdigest()

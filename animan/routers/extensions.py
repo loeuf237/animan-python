@@ -1,3 +1,4 @@
+from animan.api_contracts import ContractRoute
 import logging
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Body, Query
@@ -7,7 +8,7 @@ from animan.services.extension_service import extension_service
 from animan.templates_config import templates
 
 logger = logging.getLogger("animan.router.extensions")
-router = APIRouter()
+router = APIRouter(route_class=ContractRoute)
 
 
 @router.get("/extensions", response_class=HTMLResponse)

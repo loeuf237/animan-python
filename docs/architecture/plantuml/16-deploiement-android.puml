@@ -1,0 +1,68 @@
+@startuml
+!include theme.iuml
+' @source android_runtime.py:start
+' @source android/app/src/main/java/com/animan/app/EngineHost.kt:EngineHost
+' @source animan/android_security.py:AndroidSessionMiddleware
+title Animan — déploiement Android autonome actuel
+top to bottom direction
+node "Appareil Android 10+ / ARM64\nAPK com.animan.app ; target SDK 35" as Device {
+  node "Processus de l'application / UID privé" {
+    component "MainActivity\nWebView système + Vue/Pinia" as UI
+    component "EngineHost\nthread Python Chaquopy" as Host
+    component "FastAPI / Uvicorn\n127.0.0.1:port éphémère\nAndroidSessionMiddleware" as API
+    component "Moteur Python partagé\nDownloadManager, sources, HTTP, SQLite" as Engine
+    component "DownloadService\nforeground dataSync + notification" as Foreground
+    component "MediaBridge / CryptoBridge\nJNI FFmpeg-FFprobe / javax.crypto" as JNI
+    component "VerificationActivity\nWebView dédiée / cookies du domaine" as Verify
+    component "StorageAccess / NativeHooks\nContentResolver" as Storage
+    artifact "assets Chaquopy / .imy\nCPython + dépendances + frontend/dist" as Bundle
+    UI --> Host : démarrer / se reconnecter
+    Host --> API : android_runtime.start()
+    UI --> API : HTTP / SSE loopback\ncookie ou en-tête secret éphémère
+    API --> Engine : appels dans le moteur
+    Host --> Bundle : importer l'application embarquée
+    Engine --> JNI : appels Chaquopy / JNI
+    Engine --> Foreground : callbacks progression / pause
+    Engine --> Verify : vérification assistée dédiée
+    Engine --> Storage : callbacks export / permissions
+  }
+  folder "filesDir persistant de l'application" {
+    database "db/animan.sqlite3" as DB
+    artifact "downloads/\npartiels et médias privés vérifiés" as Private
+    artifact "engine-state/\ncookies persistants / proxies / cache métier" as State
+  }
+  folder "cacheDir (évictable)" {
+    artifact "temporaires" as Temp
+  }
+  node "Services Android hors du processus" {
+    component "DocumentsUI\nsélecteur de dossier SAF" as Picker
+    component "MediaStore / fournisseur de documents" as Provider
+  }
+  folder "Stockage partagé" {
+    artifact "Downloads/Animan\nou dossier / carte SD choisi via SAF" as Shared
+    artifact "Movies/Animan\nrepli sous-titres selon MediaProvider" as Sidecars
+  }
+  Engine --> DB
+  Engine --> Private
+  Engine --> State
+  Engine --> Temp
+  Storage --> Picker : ACTION_OPEN_DOCUMENT_TREE
+  Storage --> Provider : URI + permission persistante\nou MediaStore par défaut
+  Provider --> Shared : copie / publication
+  Provider --> Sidecars : si requis
+}
+cloud "Internet : sources, CDN, dépôts\nTMDB et listes de proxies" as Internet
+Engine --> Internet : HTTPS ; sessions et route par domaine
+Verify --> Internet : action humaine sur le site
+note bottom of Private
+Une copie privée demeure pour la bibliothèque locale et la reprise.
+L'export partagé est une seconde copie : taille APK et espace
+occupé par les médias sont deux mesures différentes.
+end note
+note bottom of Device
+Aucun serveur de bureau requis. Pas de Chromium inclus.
+La WebView de vérification actuelle refuse une session avec proxy.
+Le secret loopback change à chaque processus ; ce n'est pas un compte utilisateur.
+La validité du déploiement dessiné ne constitue pas un test sur téléphone physique.
+end note
+@enduml

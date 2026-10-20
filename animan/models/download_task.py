@@ -100,6 +100,14 @@ class DownloadStatus(str, Enum):
     CANCELLED = "CANCELLED"
     MUXING = "MUXING"
 
+
+class ExportStatus(str, Enum):
+    NOT_REQUESTED = "NOT_REQUESTED"
+    PENDING = "PENDING"
+    EXPORTING = "EXPORTING"
+    EXPORTED = "EXPORTED"
+    EXPORT_FAILED = "EXPORT_FAILED"
+
 def format_bytes(b: int) -> str:
     if b <= 0:
         return "0 B"
@@ -160,6 +168,12 @@ class DownloadTaskEntity(Base):
     verificationError = Column(String, nullable=True)
     selectedServer = Column(String, nullable=True)
     selectedQuality = Column(String, nullable=True)
+    exportStatus = Column(String, default=ExportStatus.NOT_REQUESTED.value, nullable=False)
+    exportUrisJson = Column(String, default="[]", nullable=False)
+    exportDestination = Column(String, nullable=True)
+    exportError = Column(String, nullable=True)
+    exportAttempts = Column(Integer, default=0, nullable=False)
+    exportedAt = Column(DateTime, nullable=True)
 
     def to_task(self) -> "DownloadTask":
         return DownloadTask(
@@ -195,6 +209,12 @@ class DownloadTaskEntity(Base):
             verificationError=self.verificationError,
             selectedServer=self.selectedServer,
             selectedQuality=self.selectedQuality,
+            exportStatus=self.exportStatus or ExportStatus.NOT_REQUESTED.value,
+            exportUrisJson=self.exportUrisJson or "[]",
+            exportDestination=self.exportDestination,
+            exportError=self.exportError,
+            exportAttempts=self.exportAttempts or 0,
+            exportedAt=_db_utc(self.exportedAt),
         )
 
 class DownloadTask:
@@ -232,6 +252,12 @@ class DownloadTask:
         selectedQuality: Optional[str] = None,
         version: str = "",
         animeUrl: str = "",
+        exportStatus: str = ExportStatus.NOT_REQUESTED.value,
+        exportUrisJson: str = "[]",
+        exportDestination: Optional[str] = None,
+        exportError: Optional[str] = None,
+        exportAttempts: int = 0,
+        exportedAt: Optional[datetime] = None,
     ):
         self.id = id or str(uuid.uuid4())
         self.animeName = animeName
@@ -266,6 +292,12 @@ class DownloadTask:
         self.verificationError = verificationError
         self.selectedServer = selectedServer
         self.selectedQuality = selectedQuality
+        self.exportStatus = ExportStatus(exportStatus)
+        self.exportUrisJson = exportUrisJson or "[]"
+        self.exportDestination = exportDestination
+        self.exportError = exportError
+        self.exportAttempts = exportAttempts
+        self.exportedAt = exportedAt
 
         self.phase: Optional[str] = None
 
@@ -318,6 +350,12 @@ class DownloadTask:
         return format_duration(self.videoDuration)
 
     def to_dict(self) -> dict:
+        try:
+            export_uris = json.loads(self.exportUrisJson)
+            if not isinstance(export_uris, list):
+                export_uris = []
+        except (TypeError, ValueError):
+            export_uris = []
         return {
             "id": self.id,
             "animeName": self.animeName,
@@ -351,6 +389,12 @@ class DownloadTask:
             "verificationError": self.verificationError,
             "selectedServer": self.selectedServer,
             "selectedQuality": self.selectedQuality,
+            "exportStatus": self.exportStatus.value,
+            "exportUris": export_uris,
+            "exportDestination": self.exportDestination,
+            "exportError": self.exportError,
+            "exportAttempts": self.exportAttempts,
+            "exportedAt": self.exportedAt.isoformat() if self.exportedAt else None,
         }
 
     def to_entity(self) -> DownloadTaskEntity:
@@ -387,4 +431,10 @@ class DownloadTask:
             verificationError=self.verificationError,
             selectedServer=self.selectedServer,
             selectedQuality=self.selectedQuality,
+            exportStatus=self.exportStatus.value,
+            exportUrisJson=self.exportUrisJson,
+            exportDestination=self.exportDestination,
+            exportError=self.exportError,
+            exportAttempts=self.exportAttempts,
+            exportedAt=self.exportedAt,
         )

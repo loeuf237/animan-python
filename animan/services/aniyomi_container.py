@@ -113,6 +113,21 @@ class AniyomiContainerSource:
                 recipe.item_title_selector = ".post-title a, h3.h5 a, h3 a"
             if not recipe.item_link_selector:
                 recipe.item_link_selector = ".post-title a[href], .item-thumb a[href], .tab-thumb a[href]"
+        # Repair known incomplete paths emitted by older DEX imports without
+        # replacing user-configured selectors or arbitrary request paths.
+        if recipe.pkg.endswith(".jetanime"):
+            if recipe.latest_request_path == "/page/":
+                recipe.latest_request_path = "/page/1/"
+            if recipe.latest_selector == "div.content article > div.poster":
+                recipe.latest_selector = "div.content article"
+            if recipe.episode_list_selector == "ul.episodios > li":
+                recipe.episode_list_selector = "ul.episodios > li, .episodiotitle a"
+        if recipe.pkg.endswith(".vostfree") and recipe.search_request_path == "/animes-vostfr/page/":
+            recipe.search_request_path = "/index.php?do=search"
+        for field in ("popular_request_path", "latest_request_path"):
+            path = getattr(recipe, field)
+            if path.endswith("?page="):
+                setattr(recipe, field, path + "1")
         self.recipe = recipe
         self.name = recipe.name or recipe.pkg.split(".")[-1].capitalize()
         self.base_url = recipe.base_url.rstrip("/")

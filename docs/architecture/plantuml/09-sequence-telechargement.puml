@@ -1,0 +1,71 @@
+@startuml
+!include theme.iuml
+' @source animan/services/download_manager.py:DownloadManagerService._execute_download
+' @source animan/services/download_manager.py:DownloadManagerService._finalize_task
+' @source animan/services/download_manager.py:DownloadManagerService._publish_mux_file
+title Animan — téléchargement, HLS, sous-titres et finalisation
+autonumber
+actor Utilisateur as U
+boundary "Vue / store downloads" as UI
+control "API download" as API
+control DownloadManagerService as DM
+control "Source / ExtractorRegistry" as Resolver
+control SourceHTTPService as HTTP
+database "Fichiers locaux\n.part / cache HLS / média" as Files
+control "media_tools\nsubprocess ou JNI" as Media
+control DownloadVerificationService as Verify
+control "LibraryService / SQLite" as DB
+U -> UI : épisode + VF/VOSTFR/VO + serveur/qualité + options
+UI -> API : POST /api/download ou /api/download/batch
+API -> API : contrôler destination Android si disponible
+API -> DM : start_download(..., source, version, anime_url)
+DM -> DM : identité / nom versionné / conflits de destination
+DM -> DB : save_task(PENDING ou SCHEDULED)
+API --> UI : tâche enregistrée
+UI -> API : GET /api/download/stream (SSE)
+DM -> DM : process_queue() ; réserver une place
+DM -> Resolver : get_or_resolve_episode_info / résolution spécifique
+Resolver -> HTTP : pages source puis lecteurs
+Resolver --> DM : URL média, pistes et qualités
+alt fichier direct
+  DM -> HTTP : stream GET ; Range / If-Range si reprise
+  HTTP --> DM : octets validés (pas une page HTML)
+  DM -> Files : écrire .part puis publier le média
+else flux HLS
+  DM -> HTTP : playlist + variantes + segments + clé éventuelle
+  DM -> Files : cache identifié par playlist ; segments complets
+  opt AES-128-CBC
+    DM -> Media : decrypt_aes_cbc(...)
+  end
+  DM -> Media : remuxer les segments vers MP4
+  Media -> Files : fichier vidéo local
+end
+opt sous-titres demandés et pistes connues
+  DM -> HTTP : récupérer les pistes ; contrôler leur contenu
+  DM -> Files : écrire les sous-titres valides
+  DM -> Media : FFmpeg vers MKV temporaire
+  Media -> Files : sortie temporaire
+  DM -> Files : _publish_mux_file() sans écraser un MKV existant
+end
+DM -> Verify : verify_file(savePath, expected_size, ...)
+Verify -> Media : FFprobe + échantillons de décodage si applicables
+Verify --> DM : VerificationResult
+alt valide
+  DM -> DB : COMPLETED ; progression téléchargée
+  opt hôte Android configuré
+    ref over DM,Files : export natif détaillé dans la séquence 12
+  end
+  DM --> UI : événement SSE download-update
+  UI --> U : état final + éventuelle erreur d'export distincte
+else média invalide ou fusion échouée
+  DM -> DB : FAILED + diagnostic
+  DM --> UI : événement SSE ; possibilité de réessayer
+end
+note over DM,DB
+Challenge : VERIFICATION_REQUIRED, sans retry aveugle.
+Pause/annulation : sauvegarde de l'état et arrêt du travail.
+La fusion s'effectue avant le contrôle final d'intégrité.
+L'échec d'export Android conserve COMPLETED et renseigne
+exportStatus=EXPORT_FAILED et exportError séparément.
+end note
+@enduml

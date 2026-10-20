@@ -2,12 +2,17 @@ import pytest
 from fastapi.testclient import TestClient
 from run import app
 from animan.database import init_db
+from unittest.mock import AsyncMock
 
 @pytest.fixture(scope="module")
 def client():
     init_db()
-    with TestClient(app) as c:
-        yield c
+    from animan.routers import anime
+    with pytest.MonkeyPatch.context() as patch:
+        for source in (anime.scraping_service, anime.voiranime_service, anime.animepahe_service):
+            patch.setattr(source, "get_latest_releases", AsyncMock(return_value=[]))
+        with TestClient(app) as c:
+            yield c
 
 def test_pwa_manifest(client):
     resp = client.get("/manifest.json")

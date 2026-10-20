@@ -1,0 +1,59 @@
+@startuml
+!include theme.iuml
+' @source animan/services/source_http.py:SourceHTTPService.rotate_proxy
+' @source animan/services/download_manager.py:DownloadManagerService._download_single_file
+' @source animan/services/download_resume.py:prepare_hls_cache
+title Animan — rotation de proxy et reprise sans mélanger les représentations
+autonumber
+actor Utilisateur as U
+control "API network" as API
+control SourceHTTPService as HTTP
+control "ProxyPool / DomainSession" as Session
+control DownloadManagerService as DM
+database ".part + .resume.json\nou cache HLS" as Disk
+participant "CDN / média" as CDN
+U -> API : POST /api/network/proxy-pool/rotate {domain}
+API -> API : client loopback + domaine déjà connu
+API -> HTTP : rotate_proxy(domain)
+HTTP -> Session : vérifier leased / pending_reset
+alt une requête ou un flux est encore actif
+  Session --> HTTP : leased > 0
+  HTTP --> API : rotation refusée pour le moment
+  API --> U : HTTP 409 ; réessayer après libération
+else session inactive et candidat testé disponible
+  HTTP -> Session : sélectionner nouveau proxy ; vider cookies et handles
+  HTTP -> Session : incrémenter generation ; sauvegarder l'état de route
+  HTTP --> API : succès
+  API -> DM : resume_verified_domain(domain)
+  note over API,DM
+  Reprise automatique ciblée des tâches VERIFICATION_REQUIRED.
+  Une tâche simplement PAUSED reste à reprendre explicitement.
+  end note
+  DM -> Disk : lire taille partielle + validateur HTTP
+  DM -> HTTP : GET Range avec recouvrement\net If-Range si disponible
+  HTTP -> CDN : nouvelle requête sur la nouvelle route
+  CDN --> HTTP : 206 / 200 / 416 / refus
+  HTTP --> DM : réponse contrôlée
+  alt 206 et identité compatible
+    DM -> DM : valider Content-Range, taille, ETag/Last-Modified\net octets de recouvrement (jusqu'à 64 Kio)
+    DM -> Disk : ajouter seulement les octets nouveaux
+  else 200 ou représentation différente
+    DM -> DM : refuser l'assemblage de contenus différents
+    DM -> HTTP : nouvelle requête complète admissible
+    DM -> Disk : réinitialiser la reprise quand réponse acceptée
+  else challenge / réseau / plage invalide
+    DM -> Disk : préserver le partiel utile
+    DM -> DM : vérification requise / pause / retry borné
+  end
+end
+note over HTTP,CDN
+La rotation automatique est optionnelle et bornée.
+Elle agit avant d'exposer les octets d'une réponse,
+jamais au milieu d'un flux encore loué.
+end note
+note over DM,Disk
+Pour HLS, l'identité playlist/variante est hachée.
+Une playlist modifiée invalide le cache de segments ;
+un segment incomplet n'est pas considéré comme acquis.
+end note
+@enduml

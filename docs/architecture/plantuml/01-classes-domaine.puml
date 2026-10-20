@@ -1,0 +1,158 @@
+@startuml
+!include theme.iuml
+title Animan — classes du domaine et persistance actuelle
+top to bottom direction
+' @source animan/models/anime.py:AnimeDetail
+' @source animan/models/anime.py:AnimeResult
+' @source animan/models/anime.py:Episode
+' @source animan/models/download_task.py:DownloadTask
+' @source animan/models/download_task.py:DownloadTaskEntity.to_task
+' @source animan/models/download_task.py:SpeedTracker
+' @source animan/models/download_task.py:DownloadStatus
+' @source animan/models/download_task.py:ExportStatus
+' @source animan/models/auto_download.py:AutoDownloadEpisode
+' @source animan/models/favorite.py:FavoriteAnime
+' @source animan/models/watch_progress.py:WatchProgress
+package "DTO Pydantic — catalogue" {
+  class AnimeResult {
+    id: str
+    title: str
+    url: str
+    source: str
+    version: str
+    genres: List[str]
+  }
+  class AnimeDetail {
+    title: str
+    url: str
+    source: str
+    version: str
+    tmdbId: Optional[int]
+    episodes: List[Episode]
+  }
+  class Episode {
+    number: int
+    title: str
+    version: str
+    playerUrl: str
+    downloadPageUrl: str
+    directDownloadUrl: Optional[str]
+    subtitleUrl: Optional[str]
+  }
+  AnimeDetail "1" *-- "0..*" Episode : episodes
+  AnimeResult ..> AnimeDetail : ouverture de la fiche\n(pas un héritage)
+}
+package "Tâches en mémoire" {
+  class DownloadTask {
+    id: str
+    animeName: str
+    animeUrl: str
+    episodeNumber: int
+    version: str
+    source: str
+    status: DownloadStatus
+    exportStatus: ExportStatus
+    exportUrisJson: str
+    exportDestination: Optional[str]
+    exportError: Optional[str]
+    exportAttempts: int
+    exportedAt: Optional[datetime]
+    phase: str
+    savePath: Optional[str]
+    subtitlesJson: str
+    downloadedBytes: int
+    totalBytes: int
+    paused: bool
+    cancelled: bool
+    +to_dict(): dict
+  }
+  class SpeedTracker {
+    window_seconds: float
+    samples: Deque
+    +add_sample(current_bytes, now): int
+    +get_speed(now): int
+    +reset()
+  }
+  enum DownloadStatus {
+    PENDING
+    SCHEDULED
+    DOWNLOADING
+    RETRYING
+    PAUSED
+    VERIFICATION_REQUIRED
+    MUXING
+    COMPLETED
+    FAILED
+    CANCELLED
+  }
+  DownloadTask "1" *-- "1" SpeedTracker : speed_tracker
+  DownloadTask --> DownloadStatus
+  enum ExportStatus {
+    NOT_REQUESTED
+    PENDING
+    EXPORTING
+    EXPORTED
+    EXPORT_FAILED
+  }
+  DownloadTask --> ExportStatus
+}
+package "Entités SQLAlchemy — SQLite" {
+  class DownloadTaskEntity <<table download_tasks>> {
+    id: PK UUID
+    source: str
+    version: str
+    status: str
+    savePath: str
+    verificationStatus: str
+    exportStatus / exportUrisJson / exportDestination
+    exportError / exportAttempts / exportedAt
+    +to_task(): DownloadTask
+  }
+  class FavoriteAnime <<table favorites>> {
+    id: PK int
+    url: UNIQUE str
+    source: str
+    lastKnownEpisode: int
+    autoDownload: bool
+    autoDownloadVersion: str
+    autoDownloadSubtitles: bool
+    autoDownloadServer / autoDownloadQuality
+    autoDownloadInitialized: bool
+    autoDownloadError: Optional[str]
+    +to_dict(): dict
+  }
+  class AutoDownloadEpisode <<table auto_download_episodes>> {
+    id: PK int
+    source / animeUrl / episodeNumber / version: UNIQUE
+    episodeUrl: str
+    state: str
+    taskId: Optional[str]
+    discoveredAt: datetime
+  }
+  FavoriteAnime .. AutoDownloadEpisode : source + URL
+  AutoDownloadEpisode .. DownloadTaskEntity : taskId (lien logique)
+  class WatchProgress <<table watch_progress>> {
+    id: PK int
+    animeUrl: str
+    episodeNumber: int
+    version: str
+    downloaded: bool
+    watched: bool
+    +to_dict(): dict
+  }
+  DownloadTaskEntity ..> DownloadTask : conversion par to_task()
+  FavoriteAnime .. WatchProgress : rapprochement logique par URL
+  DownloadTaskEntity .. WatchProgress : URL + épisode + version
+}
+Episode ..> DownloadTask : crée une tâche pour\nla version sélectionnée
+note bottom of WatchProgress
+UNIQUE(animeUrl, episodeNumber, version).
+Les pointillés entre tables représentent des
+rapprochements applicatifs, sans clé étrangère.
+end note
+note bottom of DownloadTaskEntity
+Ne pas confondre le DTO mutable DownloadTask
+et son instantané persistant DownloadTaskEntity.
+Les attributs sont une sélection, pas l'inventaire complet.
+end note
+@enduml

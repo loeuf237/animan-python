@@ -1,3 +1,4 @@
+from animan.api_contracts import ContractRoute
 from animan.services.source_http import VerificationRequired
 import asyncio
 from animan.services.i18n_service import current_lang
@@ -17,7 +18,7 @@ from animan.services.tmdb_service import tmdb_service
 from animan.templates_config import templates
 
 logger = logging.getLogger("animan.router.anime")
-router = APIRouter()
+router = APIRouter(route_class=ContractRoute)
 
 def detect_source_from_url(url: str, fallback: str = "french-manga") -> str:
     """Détecte automatiquement la source légitime d'un anime d'après son URL."""
@@ -202,7 +203,7 @@ async def search_api(
             raise HTTPException(404, "Source introuvable ou désactivée")
 
     async def run(service):
-        return await asyncio.wait_for(service.search_anime(q.strip()), timeout=12)
+        return await asyncio.wait_for(service.search_anime(q.strip()), timeout=45 if getattr(service, "pkg", "").endswith(".franime") else 12)
 
     responses = await asyncio.gather(*(run(service) for _, service in providers), return_exceptions=True)
     results, challenges, errors, seen = [], [], [], set()
@@ -394,7 +395,7 @@ async def api_home_feed():
     enabled_extensions = extension_service.get_enabled_container_sources()
 
     async def fetch(service):
-        return await asyncio.wait_for(service.get_latest_releases(), timeout=12)
+        return await asyncio.wait_for(service.get_latest_releases(), timeout=45 if getattr(service, "pkg", "").endswith(".franime") else 12)
 
     # Every enabled source receives a result or a visible error; no first-four cutoff.
     providers = [("french-manga", scraping_service), ("voir-anime", voiranime_service),

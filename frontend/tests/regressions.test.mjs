@@ -13,6 +13,7 @@ async function moduleUrl(path, replacements = {}, transform = s => s) {
   }).outputText;
   for (const [name, url] of Object.entries(replacements)) {
     code = code.replaceAll(`'${name}'`, JSON.stringify(url));
+    code = code.replaceAll(`"${name}"`, JSON.stringify(url));
   }
   code = code.replaceAll("'@/utils/locale'", JSON.stringify(localeUrl)).replaceAll("'@/stores/sourcePreferences'", JSON.stringify(sourcePreferencesUrl));
   return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
@@ -228,7 +229,7 @@ test('download display distinguishes finalization and unknown sizes without inve
     vue: inline(`export {ref,computed} from '${import.meta.resolve('vue')}'; export const onMounted=()=>{}; export const onActivated=()=>{};`),
   }, s => s.split('<script setup lang="ts">')[1].split('</script>')[0]
     .replace("defineOptions({name: 'DownloadsView'});", '')
-    + '\nexport {getStatusLabel,progressText,getVisualProgress};'));
+    + '\nexport {getStatusLabel,progressText,getVisualProgress,filteredTasks,tab,errorTasksCount};'));
   assert.equal(view.getStatusLabel(store.tasks[0]), 'Fusion des sous-titres');
   assert.equal(view.getStatusLabel(store.tasks[1]), 'Sous-titres');
   assert.match(view.progressText(store.tasks[0]), /taille totale inconnue/);
@@ -236,6 +237,15 @@ test('download display distinguishes finalization and unknown sizes without inve
   assert.equal(view.getVisualProgress({status:'failed',progress:0}), 0);
   assert.equal(view.getVisualProgress({status:'downloading',progress:100}), 99);
   assert.equal(view.getVisualProgress({status:'completed',progress:100}), 100);
+  store.tasks=[{id:3,status:'completed',progress:100,exportStatus:'EXPORT_FAILED'},
+    {id:4,status:'completed',progress:100,exportStatus:'EXPORTED'}];
+  assert.equal(store.stats.completedCount,2);
+  assert.equal(store.stats.errorCount,1);
+  assert.equal(view.getStatusLabel(store.tasks[0]),'Vidéo vérifiée');
+  assert.deepEqual(view.filteredTasks.value.map(t=>t.id),[3], 'failed exports remain visible in the default queue');
+  view.tab.value='errors';
+  assert.deepEqual(view.filteredTasks.value.map(t=>t.id),[3]);
+  assert.equal(view.errorTasksCount.value,1);
 });
 
 const searchContextUrl = await moduleUrl('../src/stores/searchContext.ts', {vue: import.meta.resolve('vue'), pinia: import.meta.resolve('pinia')});
@@ -248,4 +258,58 @@ test('only the detail opened from search can request restoration of its results'
   assert.equal(context.restoreSequence, 0);
   assert.equal(context.restore('naruto'), true);
   assert.equal(context.restoreSequence, 1);
+});
+
+test('tracking options reach the API and server-confirmed preferences survive toggling', async t => {
+  setActivePinia(createPinia());
+  const original = {...api};
+  const saved = {url:'anime',title:'Anime',source:'animepahe',imageUrl:'',autoDownload:true,autoDownloadVersion:'VF',autoDownloadSubtitles:true};
+  const calls = [];
+  api.getFavorites = async () => [{...saved}];
+  api.toggleAutoDownload = async (url, enabled, options) => {
+    calls.push({url,enabled,options});
+    Object.assign(saved, options, {autoDownload:enabled});
+    return {success:true,favorite:{...saved}};
+  };
+  const notifications=useNotifications();
+  t.after(()=>{Object.assign(api,original);for(const item of [...notifications.items]) notifications.dismiss(item.id);});
+  const store=useLibraryStore();
+  await store.fetchFavorites();
+  await store.saveAutoDownload(store.favorites[0], {autoDownloadVersion:'VOSTFR',autoDownloadQuality:'720p',autoDownloadSubtitles:true});
+  assert.equal(calls[0].options.autoDownloadVersion,'VOSTFR');
+  await store.toggleAutoDownload(saved.url,true);
+  assert.equal(store.favorites[0].autoDownload,false);
+  assert.equal(store.favorites[0].autoDownloadVersion,'VOSTFR');
+  assert.equal(store.favorites[0].autoDownloadQuality,'720p');
+});
+
+test('verified media and failed exports retain independent display states', async t => {
+  const locale=await import(localeUrl);
+  const previousLanguage=locale.language.value;
+  locale.applyLanguage('fr');
+  t.after(()=>locale.applyLanguage(previousLanguage));
+  setActivePinia(createPinia());
+  const original={...api};
+  t.after(()=>Object.assign(api,original));
+  api.getDownloadTasks=async()=>[{id:7,status:'COMPLETED',progress:100,exportStatus:'EXPORT_FAILED',exportError:'Folder revoked',exportAttempts:2,exportUris:[]}];
+  const store=useDownloadStore();await store.fetchTasks();
+  assert.equal(store.tasks[0].status,'completed');
+  assert.equal(store.tasks[0].exportStatus,'EXPORT_FAILED');
+  assert.equal(store.tasks[0].exportAttempts,2);
+  const {parse,compileScript}=await import('@vue/compiler-sfc');
+  const component=await import(await moduleUrl('../src/components/ExportStatusNotice.vue', {vue:import.meta.resolve('vue')}, source=>{
+    const {descriptor}=parse(source);
+    return compileScript(descriptor,{id:'export-status-test',inlineTemplate:true}).content;
+  }));
+  const {createSSRApp}=await import('vue');
+  const {renderToString}=await import('vue/server-renderer');
+  const failed=await renderToString(createSSRApp(component.default,{task:store.tasks[0],native:true}));
+  assert.match(failed,/Export à reprendre/);
+  assert.match(failed,/vidéo vérifiée reste disponible/);
+  assert.doesNotMatch(failed,/Exporté vers le stockage/);
+  const unknown=await renderToString(createSSRApp(component.default,{task:{status:'completed',exportStatus:'NOT_REQUESTED'},native:true}));
+  assert.match(unknown,/Export non renseigné/);
+  const done=await renderToString(createSSRApp(component.default,{task:{status:'completed',exportStatus:'EXPORTED',exportDestination:'Downloads\/Animan'},native:true}));
+  assert.match(done,/Exporté vers le stockage/);
+  assert.match(done,/Downloads\/Animan/);
 });

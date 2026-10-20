@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" contentScriptType="application/ecmascript" contentStyleType="text/css" height="1491px" preserveAspectRatio="none" style="width:1598px;height:1491px;" version="1.1" viewBox="0 0 1598 1491" width="1598px" zoomAndPan="magnify"><defs/><g><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="249" x="678" y="12.0669">Animan — cas d'utilisation fonctionnels</text><!--MD5=[cec15785d52458613849d98273e0ce89]
+cluster Animan — moteur Python + interface--><rect fill="#F8FAFC" height="1046" rx="4" ry="4" style="stroke: #94A3B8; stroke-width: 1.5;" width="1250.03" x="243.56" y="256.5628"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" font-weight="bold" lengthAdjust="spacingAndGlyphs" textLength="274" x="731.575" y="270.6297">Animan — moteur Python + interface</text><ellipse cx="393.5031" cy="407.5614" fill="#F5F3FF" rx="133.9431" ry="29.1886" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="166" x="310.5031" y="398.9388">UC01 Explorer une source</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="242" x="272.5031" y="414.0716">(sorties, catalogue, filtres disponibles)</text><ellipse cx="393.4955" cy="497.5599" fill="#F5F3FF" rx="117.0355" ry="25.8071" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="175" x="305.9955" y="494.5669">UC02 Rechercher un animé</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="166" x="310.4955" y="509.6997">(source choisie ou toutes)</text><ellipse cx="393.4962" cy="928.5641" fill="#F5F3FF" rx="128.4562" ry="28.0912" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="162" x="312.4962" y="921.0362">UC03 Consulter une fiche</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="225" x="280.9962" y="936.169">et choisir épisode / version / qualité</text><ellipse cx="393.5038" cy="1014.5625" fill="#F5F3FF" rx="93.4538" ry="23.1297" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="136" x="325.5038" y="1012.9212">UC04 Lire un épisode</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="97" x="345.0038" y="1028.054">local ou distant</text><ellipse cx="966.309" cy="591.5586" fill="#F5F3FF" rx="80.379" ry="18.4758" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="135" x="898.809" y="595.625">Lire un média distant</text><ellipse cx="966.309" cy="842.5651" fill="#F5F3FF" rx="92.309" ry="23.7922" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="114" x="909.309" y="838.1911">UC05 Télécharger</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="130" x="901.309" y="853.3239">un épisode ou un lot</text><ellipse cx="393.4996" cy="586.5607" fill="#F5F3FF" rx="128.5396" ry="28.1079" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="116" x="335.4996" y="575.9259">UC06 Piloter la file</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="238" x="274.4996" y="591.0587">pause, reprise, ordre, limite, planning</text><ellipse cx="393.4979" cy="1263.5584" fill="#F5F3FF" rx="105.1779" ry="23.4356" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="166" x="310.4979" y="1263.2726">UC07 Obtenir et fusionner</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="90" x="348.4979" y="1278.4054">les sous-titres</text><ellipse cx="1384.1199" cy="842.5673" fill="#F5F3FF" rx="84.3799" ry="23.0245" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="84" x="1342.1199" y="837.0485">UC08 Vérifier</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="123" x="1322.6199" y="852.1814">l'intégrité du média</text><ellipse cx="393.5015" cy="673.5631" fill="#F5F3FF" rx="107.1015" ry="23.8203" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="121" x="333.0015" y="668.2526">UC09 Gérer favoris</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="160" x="313.5015" y="683.3855">et progression de lecture</text><ellipse cx="393.4954" cy="316.5639" fill="#F5F3FF" rx="120.4054" ry="26.4811" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="166" x="310.4954" y="311.5894">UC10 Surveiller les favoris</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="191" x="297.9954" y="326.7223">et télécharger les nouveautés</text><ellipse cx="393.5035" cy="1180.5635" fill="#F5F3FF" rx="110.0035" ry="24.4007" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="144" x="321.5035" y="1176.365">UC11 Installer, activer,</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="158" x="314.5035" y="1191.4978">configurer une extension</text><ellipse cx="393.5004" cy="758.5649" fill="#F5F3FF" rx="117.0604" ry="25.8121" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="176" x="305.5004" y="755.6846">UC16 Personnaliser langue,</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="165" x="311.0004" y="770.8174">apparence et préférences</text><ellipse cx="393.5027" cy="1096.5594" fill="#F5F3FF" rx="109.1827" ry="24.2365" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="166" x="310.5027" y="1094.9471">UC17 Consulter / nettoyer</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="127" x="330.0027" y="1110.08">historique et tâches</text><ellipse cx="393.5012" cy="842.5678" fill="#F5F3FF" rx="97.8912" ry="23.2249" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="105" x="341.0012" y="837.3531">UC18 Reprendre</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="142" x="322.5012" y="852.4859">après une interruption</text><ellipse cx="1384.1198" cy="365.5591" fill="#F5F3FF" rx="93.4698" ry="22.9863" style="stroke: #7C3AED; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="137" x="1315.6198" y="364.1363">Résoudre les lecteurs</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="92" x="1338.1198" y="379.2691">et l'URL média</text><!--MD5=[ee0fec323975fbe97ba28321ad4c4bf3]
+entity U--><ellipse cx="73.5" cy="813.5028" fill="#FEFECE" rx="8" ry="8" style="stroke: #A80036; stroke-width: 1.5;"/><path d="M73.5,821.5028 L73.5,848.5028 M60.5,829.5028 L86.5,829.5028 M73.5,848.5028 L60.5,863.5028 M73.5,848.5028 L86.5,863.5028 " fill="none" style="stroke: #A80036; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="65" x="41" y="878.0697">Utilisateur</text><!--MD5=[56f48e2e6feeeeb151c33ce58e1e5a86]
+entity Site--><ellipse cx="73.5" cy="378.5028" fill="#FEFECE" rx="8" ry="8" style="stroke: #A80036; stroke-width: 1.5;"/><path d="M73.5,386.5028 L73.5,413.5028 M60.5,394.5028 L86.5,394.5028 M73.5,413.5028 L60.5,428.5028 M73.5,413.5028 L86.5,428.5028 " fill="none" style="stroke: #A80036; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="128" x="9.5" y="443.0697">Site source / lecteur</text><!--MD5=[8deeff1cfa66d96b67ddb5a2a7f9c862]
+entity Clock--><ellipse cx="73.5" cy="61.5028" fill="#FEFECE" rx="8" ry="8" style="stroke: #A80036; stroke-width: 1.5;"/><path d="M73.5,69.5028 L73.5,96.5028 M60.5,77.5028 L86.5,77.5028 M73.5,96.5028 L60.5,111.5028 M73.5,96.5028 L86.5,111.5028 " fill="none" style="stroke: #A80036; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="135" x="6" y="126.0697">Événement temporel</text><!--MD5=[b9043c2a9c0284b5105a937d12c4195f]
+entity Repo--><ellipse cx="73.5" cy="1351.5028" fill="#FEFECE" rx="8" ry="8" style="stroke: #A80036; stroke-width: 1.5;"/><path d="M73.5,1359.5028 L73.5,1386.5028 M60.5,1367.5028 L86.5,1367.5028 M73.5,1386.5028 L60.5,1401.5028 M73.5,1386.5028 L86.5,1401.5028 " fill="none" style="stroke: #A80036; stroke-width: 1.5;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="123" x="12" y="1416.0697">Dépôt d'extensions</text><path d="M202,26.8628 L202,74.2613 A4,4 0 0 0 206,78.2613 L581,78.2613 A4,4 0 0 0 585,74.2613 L585,32.8628 L575,22.8628 L206,22.8628 A4,4 0 0 0 202,26.8628 " fill="#FFF7ED" style="stroke: #D97706; stroke-width: 1.0;"/><path d="M575,22.8628 L575,30.8628 A2,2 0 0 0 577,32.8628 L585,32.8628 L575,22.8628 " fill="#FFF7ED" style="stroke: #D97706; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="362" x="208" y="39.9297">UC10 utilise le registre des sources intégrées/importées.</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="325" x="208" y="55.0625">L'utilisateur règle version, pistes, qualité et lecteur.</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="340" x="208" y="70.1953">Les découvertes sont persistées par épisode/version.</text><path d="M206.5,188.8628 L206.5,236.2613 A4,4 0 0 0 210.5,240.2613 L576.5,240.2613 A4,4 0 0 0 580.5,236.2613 L580.5,194.8628 L570.5,184.8628 L210.5,184.8628 A4,4 0 0 0 206.5,188.8628 " fill="#FFF7ED" style="stroke: #D97706; stroke-width: 1.0;"/><path d="M570.5,184.8628 L570.5,192.8628 A2,2 0 0 0 572.5,194.8628 L580.5,194.8628 L570.5,184.8628 " fill="#FFF7ED" style="stroke: #D97706; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="327" x="212.5" y="201.9297">Genres, popularité, tri et pagination dépendent des</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="331" x="212.5" y="217.0625">capacités de chaque source. Pas de compte distant</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="353" x="212.5" y="232.1953">Animan ni de synchronisation multiappareil aujourd'hui.</text><path d="M1181.62,188.8628 L1181.62,236.2613 A4,4 0 0 0 1185.62,240.2613 L1380.12,240.2613 L1384.12,342.2628 L1388.12,240.2613 L1582.62,240.2613 A4,4 0 0 0 1586.62,236.2613 L1586.62,194.8628 L1576.62,184.8628 L1185.62,184.8628 A4,4 0 0 0 1181.62,188.8628 " fill="#FFF7ED" style="stroke: #D97706; stroke-width: 1.0;"/><path d="M1576.62,184.8628 L1576.62,192.8628 A2,2 0 0 0 1578.62,194.8628 L1586.62,194.8628 L1576.62,184.8628 " fill="#FFF7ED" style="stroke: #D97706; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="332" x="1187.62" y="201.9297">« include » = sous-parcours requis dans le contexte</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="326" x="1187.62" y="217.0625">indiqué ; « extend » = comportement conditionnel.</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="384" x="1187.62" y="232.1953">Les erreurs/protections sont détaillées dans la vue suivante.</text><!--MD5=[88a0223c7c78eca9082bf39708f75095]
+link U to Browse--><path d="M75.36,803.7928 C79.3,725.5828 99.71,548.3828 202,454.5628 C220.83,437.3028 244.98,426.1128 269.71,418.9328 " fill="none" id="U-Browse" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[e42dae4b0c85fbcf863faee1f808c552]
+link U to Search--><path d="M79.46,803.7128 C89.88,738.8628 120.26,608.9428 202,540.5628 C224.1,522.0728 252.53,511.1228 280.65,504.7428 " fill="none" id="U-Search" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[2e266a9a301778858b5e085cb4581a02]
+link U to Detail--><path d="M106.25,853.5528 C131.92,862.2428 169.07,874.4028 202,883.5628 C234.25,892.5428 269.88,901.2728 301.52,908.6228 " fill="none" id="U-Detail" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[f77b35c963ac9f04c64308dcb574f934]
+link U to Play--><path d="M101.63,881.3528 C124.81,911.4828 160.87,951.8328 202,974.5628 C233.2,991.8128 271.04,1001.6328 304.75,1007.2228 " fill="none" id="U-Play" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[67776c74ac00082cf61e5f28e66a70d8]
+link U to Download--><path d="M79.24,881.5028 C92.51,983.1828 133.56,1252.4628 202,1304.5628 C431.54,1479.3428 643.59,1416.1028 844,1208.5628 C940.26,1108.8928 960.16,931.1128 964.26,866.7028 " fill="none" id="U-Download" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[5bbf4fa8816d8f5b41b374f5eab793d7]
+link U to Queue--><path d="M87.54,803.5528 C105.57,755.7628 142.77,675.8528 202,632.5628 C224.11,616.4028 251.16,605.8628 277.84,599.0028 " fill="none" id="U-Queue" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[f5b1722e812a44c77703b2ced7344af0]
+link U to Library--><path d="M103.45,803.6028 C126.87,774.8928 162.39,737.2228 202,715.5628 C230.68,699.8928 264.8,690.0628 296.2,683.9028 " fill="none" id="U-Library" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[e1ddeb11faa16d669be84853b4ee4943]
+link U to Ext--><path d="M79.8,881.4728 C90.65,945.3828 121.55,1072.1028 202,1138.5628 C225.63,1158.0928 256.36,1169.0528 286.22,1175.0828 " fill="none" id="U-Ext" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[575d222db96105f1dd7eae34df0ae5b3]
+link U to Prefs--><path d="M106.49,831.4028 C132.13,822.6728 169.14,810.5428 202,801.5628 C236.02,792.2828 273.83,783.4428 306.75,776.2228 " fill="none" id="U-Prefs" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[e7e7eaf0ac3bfef5c9dcbd108a1f7130]
+link U to History--><path d="M86.9,881.5228 C104.47,930.1328 141.39,1012.1428 202,1055.5628 C227.03,1073.4928 258.33,1083.8628 288.29,1089.7728 " fill="none" id="U-History" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[5fcb5c2b5da8db56cb1d164783ce35ef]
+link U to Resume--><path d="M106.45,842.5628 C150.23,842.5628 230.8,842.5628 295.3,842.5628 " fill="none" id="U-Resume" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[5b3c2c5beb3a00d526b0fd51ec6fa8e9]
+link Clock to Auto--><path d="M94.65,129.3128 C116.31,167.2728 154.15,224.1528 202,257.5628 C230.67,277.5828 266.37,290.9928 299.09,299.8828 " fill="none" id="Clock-Auto" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[65dc8eec4a1cc74b7a1dc632d95e20db]
+link Site to Browse--><path d="M137.71,407.5628 C172.48,407.5628 217.01,407.5628 259.08,407.5628 " fill="none" id="Site-Browse" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[0cd385200a1d96743b9384c47070efa9]
+link Site to Search--><path d="M137.83,432.7728 C158.14,440.3528 180.85,448.3128 202,454.5628 C235.33,464.4228 272.5,473.2828 305.11,480.3628 " fill="none" id="Site-Search" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[8a0a4c40cad94e452bab0ded7ecd32a7]
+link Site to Resolve--><path d="M82.18,368.7028 C95.56,312.7628 129.01,211.4428 202,167.5628 C397.02,50.3428 1121.95,278.3028 1328.11,346.8828 " fill="none" id="Site-Resolve" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[0848a32e9c85459661fe48d108565c6f]
+link Repo to Ext--><path d="M95.43,1341.7228 C117.18,1305.2028 154.65,1251.8828 202,1222.5628 C228.63,1206.0728 260.89,1196.0128 291.23,1189.8928 " fill="none" id="Repo-Ext" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[4c3480ffe7f8e60480b603ccd1c120dd]
+link Download to Resolve--><path d="M987.65,819.2328 C1057.1,739.5628 1284.7,478.4728 1359.24,392.9528 " fill="none" id="Download-&gt;Resolve" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#475569" points="1362.31,389.4328,1353.3821,393.5912,1359.0256,393.2028,1359.414,398.8463,1362.31,389.4328" style="stroke: #475569; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="61" x="1089.62" y="628.6897">«include»</text><!--MD5=[35df30b7fd0d69fd485b9f23f66b5894]
+reverse link Play to RemotePlay--><path d="M508.15,1012.7428 C536.62,1006.8628 564.78,995.4828 585,974.5628 C638.92,918.7628 571.14,866.5828 615,802.5628 C689.14,694.3628 838.72,632.4428 916.23,606.3528 " fill="none" id="Play&lt;-RemotePlay" style="stroke: #475569; stroke-width: 1.0;"/><polygon fill="none" points="509.31,1019.6428,488.45,1015.9328,507.07,1005.8228,509.31,1019.6428" style="stroke: #475569; stroke-width: 1.0;"/><!--MD5=[18ac64e9ecf811da2dbcbfce07091efa]
+link RemotePlay to Resolve--><path d="M998.9,574.3928 C1072.18,534.5728 1253.87,435.8128 1338.46,389.8428 " fill="none" id="RemotePlay-&gt;Resolve" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#475569" points="1342.81,387.4728,1332.9916,388.2463,1338.4145,389.8561,1336.8048,395.279,1342.81,387.4728" style="stroke: #475569; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="61" x="1089.62" y="488.1597">«include»</text><!--MD5=[d8f009852a000c7b4811ea8f887a16e9]
+link Download to Verify--><path d="M1059.07,842.5628 C1128.72,842.5628 1223.97,842.5628 1293.17,842.5628 " fill="none" id="Download-&gt;Verify" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#475569" points="1297.85,842.5628,1288.85,838.5628,1292.85,842.5628,1288.85,846.5628,1297.85,842.5628" style="stroke: #475569; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="61" x="1089.62" y="838.6297">«include»</text><!--MD5=[e175a49fcdae33108982dca0d9ede818]
+link Subs to Download--><path d="M489.83,1254.0128 C521.49,1248.0428 556.03,1238.3328 585,1222.5628 C752.72,1131.2728 895.26,943.1928 945.75,871.3428 " fill="none" id="Subs-&gt;Download" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#475569" points="948.36,867.6128,939.9207,872.6901,945.4917,871.7083,946.4735,877.2793,948.36,867.6128" style="stroke: #475569; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="60" x="699.5" y="990.4097">«extend»</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="227" x="616" y="1005.5425">[sous-titres demandés et présents]</text><!--MD5=[b2d541d305a073e1384757a4c38582c9]
+link Auto to Download--><path d="M501.83,328.2228 C530.41,334.7328 560.2,344.8528 585,360.5628 C774,480.3528 908.77,727.8028 951.15,812.9928 " fill="none" id="Auto-&gt;Download" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#475569" points="953.26,817.2428,952.8631,807.402,951.0468,812.7593,945.6895,810.9431,953.26,817.2428" style="stroke: #475569; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="182" x="638.5" y="384.8597">crée une tâche si nouveauté</text><!--MD5=[22ed5a7ae7548ee64aab8937a69b05a9]
+link Resume to Download--><path d="M491.65,842.5628 C596.5,842.5628 762.52,842.5628 867.58,842.5628 " fill="none" id="Resume-&gt;Download" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><polygon fill="#475569" points="872.27,842.5628,863.27,838.5628,867.27,842.5628,863.27,846.5628,872.27,842.5628" style="stroke: #475569; stroke-width: 1.0;"/><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="60" x="699.5" y="823.6297">«extend»</text><text fill="#000000" font-family="DejaVu Sans" font-size="13" lengthAdjust="spacingAndGlyphs" textLength="129" x="665" y="838.7625">[tâche interrompue]</text><!--MD5=[7ddd43998a8da35e1f8d141ac71115d4]
+link Auto to GMN208--><path d="M279.41,307.7628 C236.92,297.9128 193.67,278.3428 171.5,240.0628 C145.44,195.0728 145.44,168.0628 171.5,123.0628 C182.73,103.6828 199.45,89.2828 218.77,78.6328 " fill="none" id="Auto-GMN208" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><!--MD5=[ac0190b808db869b956126ca2493e760]
+link Browse to GMN211--><path d="M261.74,401.9228 C225.18,392.9928 190.36,375.6228 171.5,343.0628 C160.14,323.4528 160.14,311.6828 171.5,292.0628 C184.89,268.9528 205.87,252.4528 229.71,240.7028 " fill="none" id="Browse-GMN211" style="stroke: #475569; stroke-width: 1.0; stroke-dasharray: 7.0,7.0;"/><!--MD5=[e5f1fc32f3a925f0bdaaeb57c12b4fa5]
+@startuml
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 13
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam ArrowColor #475569
+skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
+skinparam classBackgroundColor #F5F3FF
+skinparam classBorderColor #7C3AED
+skinparam packageBackgroundColor #F8FAFC
+skinparam packageBorderColor #94A3B8
+skinparam usecaseBackgroundColor #F5F3FF
+skinparam usecaseBorderColor #7C3AED
+skinparam participantBackgroundColor #F5F3FF
+skinparam participantBorderColor #7C3AED
+skinparam sequenceLifeLineBorderColor #94A3B8
+skinparam noteBackgroundColor #FFF7ED
+skinparam noteBorderColor #D97706
+skinparam componentStyle uml2
+skinparam componentBackgroundColor #F5F3FF
+skinparam componentBorderColor #7C3AED
+skinparam databaseBackgroundColor #F5F3FF
+skinparam databaseBorderColor #7C3AED
+hide empty members
+title Animan — cas d'utilisation fonctionnels
+left to right direction
+actor Utilisateur as U
+actor "Site source / lecteur" as Site
+actor "Événement temporel" as Clock
+actor "Dépôt d'extensions" as Repo
+rectangle "Animan — moteur Python + interface" {
+  usecase "UC01 Explorer une source\n(sorties, catalogue, filtres disponibles)" as Browse
+  usecase "UC02 Rechercher un animé\n(source choisie ou toutes)" as Search
+  usecase "UC03 Consulter une fiche\net choisir épisode / version / qualité" as Detail
+  usecase "UC04 Lire un épisode\nlocal ou distant" as Play
+  usecase "Lire un média distant" as RemotePlay
+  usecase "UC05 Télécharger\nun épisode ou un lot" as Download
+  usecase "UC06 Piloter la file\npause, reprise, ordre, limite, planning" as Queue
+  usecase "UC07 Obtenir et fusionner\nles sous-titres" as Subs
+  usecase "UC08 Vérifier\nl'intégrité du média" as Verify
+  usecase "UC09 Gérer favoris\net progression de lecture" as Library
+  usecase "UC10 Surveiller les favoris\net télécharger les nouveautés" as Auto
+  usecase "UC11 Installer, activer,\nconfigurer une extension" as Ext
+  usecase "UC16 Personnaliser langue,\napparence et préférences" as Prefs
+  usecase "UC17 Consulter / nettoyer\nhistorique et tâches" as History
+  usecase "UC18 Reprendre\naprès une interruption" as Resume
+  usecase "Résoudre les lecteurs\net l'URL média" as Resolve
+}
+U - - Browse
+U - - Search
+U - - Detail
+U - - Play
+U - - Download
+U - - Queue
+U - - Library
+U - - Ext
+U - - Prefs
+U - - History
+U - - Resume
+Clock - - Auto
+Site - - Browse
+Site - - Search
+Site - - Resolve
+Repo - - Ext
+Download ..> Resolve : <<include>>
+Play <|- - RemotePlay
+RemotePlay ..> Resolve : <<include>>
+Download ..> Verify : <<include>>
+Subs ..> Download : <<extend>>\n[sous-titres demandés et présents]
+Auto ..> Download : crée une tâche si nouveauté
+Resume ..> Download : <<extend>>\n[tâche interrompue]
+note bottom of Auto
+UC10 utilise le registre des sources intégrées/importées.
+L'utilisateur règle version, pistes, qualité et lecteur.
+Les découvertes sont persistées par épisode/version.
+end note
+note bottom of Browse
+Genres, popularité, tri et pagination dépendent des
+capacités de chaque source. Pas de compte distant
+Animan ni de synchronisation multiappareil aujourd'hui.
+end note
+note bottom of Resolve
+« include » = sous-parcours requis dans le contexte
+indiqué ; « extend » = comportement conditionnel.
+Les erreurs/protections sont détaillées dans la vue suivante.
+end note
+@enduml
+
+PlantUML version 1.2020.02(Sun Mar 01 11:22:07 WAT 2020)
+(GPL source distribution)
+Java Runtime: OpenJDK Runtime Environment
+JVM: OpenJDK 64-Bit Server VM
+Java Version: 25.0.4.1+1-1-26.04.4-Ubuntu
+Operating System: Linux
+Default Encoding: UTF-8
+Language: en
+Country: null
+--></g></svg>

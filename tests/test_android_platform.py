@@ -86,7 +86,7 @@ async def test_android_rejects_unauthenticated_websocket():
 
 
 @pytest.mark.asyncio
-async def test_native_export_does_not_complete_a_paused_transfer(monkeypatch, tmp_path):
+async def test_paused_native_export_keeps_the_private_video_completed(monkeypatch, tmp_path):
     from animan import platform_events
     from animan.models.download_task import DownloadTask, DownloadStatus
     from animan.services.download_manager import DownloadManagerService
@@ -96,13 +96,17 @@ async def test_native_export_does_not_complete_a_paused_transfer(monkeypatch, tm
     task = DownloadTask(status=DownloadStatus.DOWNLOADING, savePath=str(tmp_path / "episode.mp4"))
     monkeypatch.setattr(verification_service, "verify_file", lambda **kwargs: VerificationResult(valid=True, status="VALID"))
     monkeypatch.setattr(library_service, "save_task", lambda task: None)
+    monkeypatch.setattr(library_service, "mark_as_downloaded", lambda *args: None)
+    monkeypatch.setattr(platform_events, "storage_status_handler", None)
     def export(task):
-        assert task.status == DownloadStatus.DOWNLOADING
+        assert task.status == DownloadStatus.COMPLETED
         task.paused = True
     monkeypatch.setattr(platform_events, "completed_handler", export)
     await manager._finalize_task(task)
-    assert task.status == DownloadStatus.PAUSED
-    assert task.completedAt is None
+    assert task.status == DownloadStatus.COMPLETED
+    assert task.completedAt is not None
+    assert task.exportStatus.value == "PENDING"
+    assert task.error is None
 
 
 def test_interrupted_mux_is_restored_as_paused(monkeypatch, tmp_path):
@@ -114,6 +118,8 @@ def test_interrupted_mux_is_restored_as_paused(monkeypatch, tmp_path):
     class Entity:
         def to_task(self): return task
     monkeypatch.setattr(library_service, "get_unfinished_tasks", lambda: [Entity()])
+    monkeypatch.setattr(library_service, "get_completed_tasks", lambda: [])
+    monkeypatch.setattr(library_service, "recover_interrupted_exports", lambda: None)
     monkeypatch.setattr(library_service, "save_task", lambda task: None)
     manager.init_from_db()
     assert task.status == DownloadStatus.PAUSED
@@ -155,12 +161,13 @@ async def test_storage_controls_validate_actions_and_retry_export(monkeypatch, t
         assert calls == []
         assert (await client.post('/api/system/android/storage', json={'action': 'choose_directory'})).json()['authorized'] is True
         assert calls == ['choose_directory']
+        monkeypatch.setattr(platform_events, 'storage_status_handler', lambda: {'android': True, 'authorized': True})
         assert (await client.post('/api/system/android/export', json={'taskId': task.id})).status_code == 409
         assert task.status == DownloadStatus.COMPLETED and source.read_bytes() == b'private media'
-        assert 'Folder access was revoked' in task.error
+        assert task.error is None and 'Folder access was revoked' in task.exportError
         monkeypatch.setattr(platform_events, 'completed_handler', lambda task: {'uris': ['content://downloads/1'], 'destination': 'Downloads/Animan'})
         assert (await client.post('/api/system/android/export', json={'taskId': task.id})).json()['success']
-        assert task.error is None and source.exists()
+        assert task.error is None and task.exportError is None and task.exportStatus == 'EXPORTED' and source.exists()
         task.status = DownloadStatus.PAUSED
         assert (await client.post('/api/system/android/export', json={'taskId': task.id})).status_code == 409
 

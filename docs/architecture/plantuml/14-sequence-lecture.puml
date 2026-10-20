@@ -1,0 +1,58 @@
+@startuml
+!include theme.iuml
+' @source animan/routers/media.py:resolve_stream
+' @source animan/routers/media.py:stream_video
+' @source animan/routers/media.py:hls_proxy_playlist
+' @source animan/routers/library.py:mark_watched
+title Animan — lecture locale ou distante et progression
+autonumber
+actor Utilisateur as U
+boundary "Vue / store player\nVideoPlayerModal" as UI
+control "API media / library" as API
+control "Source / DownloadManagerService\nExtractorRegistry" as Resolver
+control SourceHTTPService as HTTP
+participant "Lecteur / CDN source" as CDN
+database "Fichier local vérifié" as Local
+control LibraryService as Library
+database SQLite as DB
+U -> UI : lire l'épisode et sa version
+alt une tâche locale correspond à cet épisode / version
+  UI -> API : GET /api/media/stream/{task_id}\nRange si demandé par le lecteur
+  API -> Local : accès contrôlé au fichier
+  Local --> UI : flux binaire + Content-Range approprié
+  opt sous-titres locaux disponibles
+    UI -> API : /api/media/subtitles/{task_id}\npuis /subtitle/{task_id}/{index}
+    API --> UI : pistes utilisables par le lecteur
+  end
+else lecture distante
+  UI -> API : GET /api/media/stream/resolve?...source...version...
+  API -> Resolver : résoudre lecteur, qualité et pistes
+  Resolver -> HTTP : récupérer les pages / informations média
+  HTTP -> CDN : requêtes avec session du domaine
+  Resolver --> API : URL directe / playlist + headers + pistes
+  API --> UI : paramètres de lecture / URL proxy locale
+  alt HLS
+    UI -> API : /api/media/hls-proxy/playlist.m3u8
+    API -> HTTP : récupérer et réécrire les références HLS
+    UI -> API : /api/media/hls-proxy/segment.ts
+    API -> HTTP : lire segments / clés selon URL autorisée
+  else média direct
+    UI -> API : /api/media/stream-proxy (Range)
+    API -> HTTP : relayer le flux avec les headers requis
+  end
+  HTTP -> CDN : requêtes média
+  CDN --> HTTP : octets ou challenge
+  HTTP --> UI : flux relayé ou erreur explicite
+end
+opt marquer l'épisode comme vu
+  U -> UI : action de progression de lecture
+  UI -> API : POST /api/progress/watched
+  API -> Library : mark_as_watched(animeUrl, épisode, version, ...)
+  Library -> DB : WatchProgress
+end
+note over UI,Library
+La progression persistée indique vu / téléchargé.
+Ce diagramme n'affirme pas la persistance d'une position
+de lecture en secondes : aucun champ de ce type dans WatchProgress.
+end note
+@enduml

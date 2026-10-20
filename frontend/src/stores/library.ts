@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/api/client';
 import { useNotifications } from '@/stores/notifications';
-import type { FavoriteItem, HistoryItem } from '@/types';
+import type { AutoDownloadOptions, FavoriteItem, HistoryItem } from '@/types';
 
 export const useLibraryStore = defineStore('library', () => {
   const favorites = ref<FavoriteItem[]>([]);
@@ -70,7 +70,7 @@ export const useLibraryStore = defineStore('library', () => {
     imageUrl: string;
     source: string;
     autoDownload?: boolean;
-  }) {
+  } & AutoDownloadOptions) {
     if (isLoading.value && favorites.value.length === 0) {
       await fetchFavorites();
     }
@@ -101,12 +101,13 @@ export const useLibraryStore = defineStore('library', () => {
     }
   }
 
-  async function toggleAutoDownload(url: string, current: boolean) {
+  async function toggleAutoDownload(url: string, current: boolean, options: AutoDownloadOptions = {}) {
     const item = favorites.value.find((f) => f.url === url);
     const targetState = !current;
     if (item) item.autoDownload = targetState;
     try {
-      const res = await api.toggleAutoDownload(url, targetState);
+      const res = await api.toggleAutoDownload(url, targetState, options);
+      if (item && res.favorite) Object.assign(item, res.favorite);
       notifications.notify(`Téléchargement automatique ${targetState ? 'activé' : 'désactivé'}.`);
       return res;
     } catch (e) {
@@ -115,6 +116,13 @@ export const useLibraryStore = defineStore('library', () => {
       console.error('[LibraryStore] toggleAutoDownload error:', e);
       throw e;
     }
+  }
+
+  async function saveAutoDownload(favorite: FavoriteItem, options: AutoDownloadOptions) {
+    const res = await api.toggleAutoDownload(favorite.url, favorite.autoDownload, options);
+    const item = favorites.value.find(f => f.url === favorite.url);
+    if (item && res.favorite) Object.assign(item, res.favorite);
+    return res;
   }
 
   async function clearAllFavorites() {
@@ -173,6 +181,7 @@ export const useLibraryStore = defineStore('library', () => {
     loadWatchedForAnime,
     toggleFavorite,
     toggleAutoDownload,
+    saveAutoDownload,
     clearAllFavorites,
     markWatched,
     isWatched,

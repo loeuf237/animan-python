@@ -1,0 +1,69 @@
+@startuml
+!include theme.iuml
+' @source animan/routers/anime.py:search_api
+' @source animan/services/browser_verification.py:BrowserVerificationService.complete
+' @source animan/routers/network.py:complete
+title Animan — recherche multisource et vérification assistée
+autonumber
+actor Utilisateur as U
+boundary "Vue / recherche globale" as UI
+control "API anime / network" as API
+control "Services de sources" as Sources
+control SourceHTTPService as HTTP
+participant "Sites sources" as Sites
+control BrowserVerificationService as Verify
+boundary "Fenêtre dédiée\nCDP ou WebView" as Browser
+U -> UI : Ctrl+K ; saisir un titre et une source
+UI -> API : GET /api/search?q=...&source=...\n&include_challenges=true
+API -> Sources : recherches concurrentes (timeout par source)
+Sources -> HTTP : async_client().get(...)
+HTTP -> Sites : session domaine, cookies, proxy stable
+Sites --> HTTP : réponses de plusieurs sources
+alt challenge Cloudflare / protection reconnue
+  HTTP --> Sources : VerificationRequired(url, domain)
+else réponse exploitable
+  HTTP --> Sources : HTML / JSON
+  Sources --> API : AnimeResult[]
+end
+Sources --> API : résultats ou erreurs par source
+API --> UI : {results, challenges, errors}
+UI --> U : résultats partiels + URL et actions de vérification
+alt capture dédiée disponible sur l'hôte
+  U -> UI : ouvrir la fenêtre dédiée
+  UI -> API : POST /api/network/verification
+  API -> Verify : start(domain, browser, mode)
+  Verify -> Browser : ouvrir l'URL bloquée avec UA / route compatibles
+  U -> Browser : compléter la vérification du site
+  U -> UI : j'ai terminé la vérification
+  UI -> API : POST /verification/{job_id}/complete
+  API -> Verify : complete(job_id)
+  Verify -> Browser : lire cookies du domaine
+  Browser --> Verify : cookies
+  Verify -> HTTP : import_cookies(url, cookies)
+  Verify -> HTTP : request(..., bypass_cache=True,\nverify_challenge=True)
+  HTTP -> Sites : contrôler réellement l'accès
+  Sites --> HTTP : réponse
+  alt accès rétabli
+    HTTP --> Verify : succès
+    Verify --> API : success + domain
+    API --> UI : succès ; tâches bloquées reprises si admissibles
+    UI -> API : rejouer la recherche encore active
+    API --> UI : résultats actualisés
+  else refus ou nouvelle protection
+    HTTP --> Verify : erreur / challenge
+    Verify --> API : vérification toujours nécessaire
+    API --> UI : conserver l'aide et l'URL
+  end
+else onglet externe normal
+  U -> UI : ouvrir le site dans un nouvel onglet
+  UI -> Sites : navigation du navigateur utilisateur
+  note over UI,HTTP
+  Pas de transfert automatique de cookies entre cet onglet
+  et le client Python ; l'action de retour effectue un contrôle.
+  end note
+end
+note over UI,API
+La réponse détaillée conserve les succès des autres sources.
+Une recherche fermée ou remplacée ne doit pas être relancée.
+end note
+@enduml

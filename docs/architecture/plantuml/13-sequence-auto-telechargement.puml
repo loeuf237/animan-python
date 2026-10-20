@@ -1,0 +1,66 @@
+@startuml
+!include theme.iuml
+' @source animan/services/watchdog_service.py:WatchdogService._run_loop
+' @source animan/services/watchdog_service.py:WatchdogService._check_anime
+' @source animan/services/library_service.py:LibraryService.discover_auto_episodes
+' @source animan/models/auto_download.py:AutoDownloadEpisode
+title Animan — suivi automatique persistant par source et version
+autonumber
+actor Utilisateur as U
+boundary "Bibliothèque / préférences de suivi" as UI
+control "API library" as API
+control LibraryService as Library
+control WatchdogService as Watch
+control "SourceCatalogueService\nprovider(source)" as Registry
+control "Source intégrée / extension activée" as Source
+control DownloadManagerService as DM
+database SQLite as DB
+U -> UI : activer le suivi ; version, sous-titres, qualité, lecteur
+UI -> API : PATCH /api/favorites/auto-download
+API -> Library : update_auto_download(..., options)
+Library -> DB : persister les préférences
+loop boucle toutes les 5 secondes
+  Watch -> DM : check_scheduled_tasks()
+  opt intervalle de surveillance atteint
+    Watch -> Library : get_all_favorites() ; filtre autoDownload
+    loop chaque favori (vérifications non concurrentes)
+      Watch -> Registry : provider(fav.source)
+      Registry --> Watch : fournisseur de la source exacte
+      Watch -> Source : get_anime_detail(fav.url)
+      Source --> Watch : épisodes et versions / erreur
+      Watch -> Library : relire le favori et ses préférences
+      alt version ambiguë sans choix / source inaccessible
+        Watch -> Library : set_auto_download_error(url, diagnostic)
+      else catalogue exploitable et suivi toujours activé
+        Watch -> Library : discover_auto_episodes(fav, variantes, versions choisies)
+        Library -> DB : instantané UNIQUE(source, animeUrl, numéro, version)
+        Library -> DB : ignorées = BASELINE ; nouvelles éligibles = DISCOVERED
+        Library --> Watch : épisodes DISCOVERED éligibles
+        loop chaque découverte
+          Watch -> Library : find_episode_task(source, URL, numéro, version)
+          alt tâche existante
+            Watch -> Library : attach_auto_download_task(...)
+          else aucune tâche
+            Watch -> DM : start_download(source, version, anime_url,\nsous-titres, serveur, qualité, URL épisode)
+            alt mise en file réussie
+              DM -> Library : save_task()
+              Watch -> Library : attach_auto_download_task(...)
+              Library -> DB : PLANNED + taskId
+            else mise en file échouée
+              Watch -> Library : diagnostic ; conserver DISCOVERED
+            end
+          end
+        end
+      end
+    end
+  end
+end
+DM -> Library : sauvegardes ultérieures de la tâche
+Library -> DB : suivi COMPLETED / FAILED / CANCELLED
+note over Library,DB
+lastKnownEpisode sert uniquement de référence initiale
+pour les anciens favoris, puis devient informatif.
+Une nouvelle version d'un ancien numéro reste détectable.
+Un transfert échoué garde sa tâche pour une reprise manuelle.
+end note
+@enduml

@@ -4,14 +4,17 @@ from typing import List, Optional, Set
 from animan.database import SessionLocal
 from animan.models.favorite import FavoriteAnime
 from animan.models.watch_progress import WatchProgress
-from animan.models.download_task import DownloadTask, DownloadTaskEntity, DownloadStatus
+from animan.models.auto_download import AutoDownloadEpisode, episode_version
+from animan.models.download_task import DownloadTask, DownloadTaskEntity, DownloadStatus, ExportStatus
+from sqlalchemy import or_, and_, func
 
 class LibraryService:
     # -------------------------------------------------------------------------
     # FAVORIS
     # -------------------------------------------------------------------------
 
-    def add_favorite(self, url: str, title: str, image_url: str = "", source: str = "french-manga") -> FavoriteAnime:
+    def add_favorite(self, url: str, title: str, image_url: str = "", source: str = "french-manga",
+                     auto_download_version: str = "") -> FavoriteAnime:
         with SessionLocal() as db:
             fav = db.query(FavoriteAnime).filter(FavoriteAnime.url == url).first()
             if fav:
@@ -21,6 +24,7 @@ class LibraryService:
                 title=title,
                 imageUrl=image_url,
                 source=source,
+                autoDownloadVersion=episode_version(auto_download_version),
                 addedAt=datetime.now(timezone.utc),
             )
             db.add(fav)
@@ -32,11 +36,13 @@ class LibraryService:
         with SessionLocal() as db:
             fav = db.query(FavoriteAnime).filter(FavoriteAnime.url == url).first()
             if fav:
+                db.query(AutoDownloadEpisode).filter_by(animeUrl=fav.url, source=fav.source).delete()
                 db.delete(fav)
                 db.commit()
 
     def remove_all_favorites(self):
         with SessionLocal() as db:
+            db.query(AutoDownloadEpisode).delete()
             db.query(FavoriteAnime).delete()
             db.commit()
 
@@ -52,15 +58,85 @@ class LibraryService:
         with SessionLocal() as db:
             return db.query(FavoriteAnime).order_by(FavoriteAnime.addedAt.desc()).all()
 
-    def update_auto_download(self, url: str, auto_download: bool) -> Optional[FavoriteAnime]:
+    def update_auto_download(self, url: str, auto_download: bool, **options) -> Optional[FavoriteAnime]:
         with SessionLocal() as db:
             fav = db.query(FavoriteAnime).filter(FavoriteAnime.url == url).first()
             if fav:
                 fav.autoDownload = auto_download
+                for key in ("autoDownloadVersion", "autoDownloadSubtitles", "autoDownloadServer", "autoDownloadQuality"):
+                    if key in options:
+                        setattr(fav, key, episode_version(options[key]) if key == "autoDownloadVersion" else options[key])
+                fav.autoDownloadError = None
                 db.commit()
                 db.refresh(fav)
                 return fav
             return None
+
+    def set_auto_download_error(self, url, error):
+        with SessionLocal() as db:
+            db.query(FavoriteAnime).filter_by(url=url).update({"autoDownloadError": error})
+            db.commit()
+
+    def discover_auto_episodes(self, favorite, episodes, selected_versions):
+        """Snapshot every variant, with separate discovery and task outcomes.
+
+        A legacy numeric cursor is used only for the initial baseline. Once the
+        snapshot exists, a new version of an old number is still a new identity.
+        Ignored variants are baselined so changing a preference doesn't silently
+        backfill an entire alternate-language catalogue.
+        """
+        with SessionLocal() as db:
+            fav = db.query(FavoriteAnime).filter_by(id=favorite.id).first()
+            if not fav or not fav.autoDownload:
+                return []
+            existing = {(e.episodeNumber, e.version): e for e in db.query(AutoDownloadEpisode).filter_by(
+                source=fav.source, animeUrl=fav.url).all()}
+            for episode, version, url in episodes:
+                key = (episode.number, version)
+                if key in existing:
+                    # Signed player URLs may renew without changing the episode identity.
+                    existing[key].episodeUrl = url
+                    continue
+                baseline = (version not in selected_versions or
+                            (not fav.autoDownloadInitialized and episode.number <= (fav.lastKnownEpisode or 0)))
+                entry = AutoDownloadEpisode(source=fav.source, animeUrl=fav.url,
+                    episodeNumber=episode.number, version=version, episodeUrl=url,
+                    state="BASELINE" if baseline else "DISCOVERED")
+                db.add(entry)
+                existing[key] = entry
+            fav.autoDownloadInitialized = True
+            fav.lastKnownEpisode = max([fav.lastKnownEpisode or 0] + [ep.number for ep, _, _ in episodes])
+            fav.lastCheckedAt = datetime.now(timezone.utc)
+            fav.autoDownloadError = None
+            db.commit()
+            return db.query(AutoDownloadEpisode).filter_by(source=fav.source, animeUrl=fav.url).filter(
+                AutoDownloadEpisode.state == "DISCOVERED",
+                AutoDownloadEpisode.version.in_(selected_versions)).all()
+
+    def attach_auto_download_task(self, entry_id, task):
+        with SessionLocal() as db:
+            entry = db.get(AutoDownloadEpisode, entry_id)
+            if entry:
+                entry.taskId = task.id
+                entry.state = task.status.value if task.status in (
+                    DownloadStatus.COMPLETED, DownloadStatus.CANCELLED, DownloadStatus.FAILED) else "PLANNED"
+                db.commit()
+
+    def find_episode_task(self, source, anime_url, number, version):
+        with SessionLocal() as db:
+            return db.query(DownloadTaskEntity).filter(
+                DownloadTaskEntity.source == source, DownloadTaskEntity.animeUrl == anime_url,
+                DownloadTaskEntity.episodeNumber == number,
+                func.upper(func.trim(DownloadTaskEntity.version)) == episode_version(version)
+            ).order_by(DownloadTaskEntity.createdAt.desc()).first()
+
+    def recover_interrupted_exports(self):
+        with SessionLocal() as db:
+            db.query(DownloadTaskEntity).filter_by(exportStatus=ExportStatus.EXPORTING.value).update({
+                "exportStatus": ExportStatus.PENDING.value,
+                "exportError": "Export interrupted; retry from the private library copy.",
+            })
+            db.commit()
 
     def update_last_known_episode(self, url: str, episode_count: int):
         with SessionLocal() as db:
@@ -168,6 +244,19 @@ class LibraryService:
         entity.videoDuration = task.videoDuration
         entity.verifiedAt = task.verifiedAt
         entity.verificationError = task.verificationError
+        entity.selectedServer = task.selectedServer
+        entity.selectedQuality = task.selectedQuality
+        entity.exportStatus = task.exportStatus.value
+        entity.exportUrisJson = task.exportUrisJson
+        entity.exportDestination = task.exportDestination
+        entity.exportError = task.exportError
+        entity.exportAttempts = task.exportAttempts
+        entity.exportedAt = task.exportedAt
+
+    def _update_auto_download_outcome(self, db, task):
+        state = task.status.value if task.status in (
+            DownloadStatus.COMPLETED, DownloadStatus.FAILED, DownloadStatus.CANCELLED) else "PLANNED"
+        db.query(AutoDownloadEpisode).filter_by(taskId=task.id).update({"state": state})
 
     def save_task(self, task: DownloadTask):
         with SessionLocal() as db:
@@ -176,6 +265,7 @@ class LibraryService:
                 self._populate_entity(entity, task)
             else:
                 db.add(task.to_entity())
+            self._update_auto_download_outcome(db, task)
             db.commit()
 
     def save_tasks_batch(self, tasks: List[DownloadTask]):
@@ -192,6 +282,7 @@ class LibraryService:
                     self._populate_entity(entity, task)
                 else:
                     db.add(task.to_entity())
+                self._update_auto_download_outcome(db, task)
             db.commit()
 
     def get_history(self, anime_name: Optional[str] = None) -> List[DownloadTaskEntity]:
@@ -216,19 +307,28 @@ class LibraryService:
 
     def clear_history(self, status: Optional[str] = None, anime_name: Optional[str] = None):
         with SessionLocal() as db:
-            q = db.query(DownloadTaskEntity)
+            q = db.query(DownloadTaskEntity).filter(
+                DownloadTaskEntity.exportStatus != ExportStatus.EXPORTING.value,
+                ~and_(DownloadTaskEntity.status == DownloadStatus.COMPLETED.value,
+                    DownloadTaskEntity.exportStatus.in_([ExportStatus.PENDING.value, ExportStatus.EXPORT_FAILED.value])))
             if anime_name:
                 q = q.filter(DownloadTaskEntity.animeName == anime_name)
             if status:
-                statuses = [s.strip() for s in status.split(",") if s.strip()]
+                statuses = [s.strip().upper() for s in status.split(",") if s.strip()]
                 q = q.filter(DownloadTaskEntity.status.in_(statuses))
             q.delete(synchronize_session=False)
             db.commit()
 
+    def get_completed_tasks(self) -> List[DownloadTaskEntity]:
+        with SessionLocal() as db:
+            return db.query(DownloadTaskEntity).filter(
+                DownloadTaskEntity.status == DownloadStatus.COMPLETED.value
+            ).order_by(DownloadTaskEntity.createdAt.desc()).all()
+
     def get_unfinished_tasks(self) -> List[DownloadTaskEntity]:
         with SessionLocal() as db:
             return db.query(DownloadTaskEntity).filter(
-                DownloadTaskEntity.status.in_([
+                or_(DownloadTaskEntity.status.in_([
                     DownloadStatus.PENDING.value,
                     DownloadStatus.SCHEDULED.value,
                     DownloadStatus.DOWNLOADING.value,
@@ -236,7 +336,10 @@ class LibraryService:
                     DownloadStatus.PAUSED.value,
                     DownloadStatus.VERIFICATION_REQUIRED.value,
                     DownloadStatus.FAILED.value,
-                ])
+                    DownloadStatus.MUXING.value,
+                ]), and_(DownloadTaskEntity.status == DownloadStatus.COMPLETED.value,
+                    DownloadTaskEntity.exportStatus.in_([ExportStatus.PENDING.value,
+                        ExportStatus.EXPORTING.value, ExportStatus.EXPORT_FAILED.value])))
             ).all()
 
     def find_downloaded_episode(
@@ -282,4 +385,3 @@ class LibraryService:
             return None
 
 library_service = LibraryService()
-

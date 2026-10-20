@@ -82,6 +82,7 @@
             ✕
           </button>
         </div>
+        <AutoDownloadPreferences v-if="fav.autoDownload" :favorite="fav" />
       </article>
     </div>
     <ConfirmDialog :open="clearDialogOpen" :title="tx('Vider la bibliothèque ?')" :confirm-label="tx('Vider')" :busy="clearing" danger @cancel="clearDialogOpen = false" @confirm="clearAll"><p>{{ tx("Les séries seront retirées de votre bibliothèque. Les fichiers téléchargés seront conservés.") }}</p></ConfirmDialog>
@@ -93,6 +94,7 @@ import { tx } from '@/utils/locale';
 import { ref, computed, onMounted, onActivated } from 'vue';
 import { useLibraryStore } from '@/stores/library';
 import ConfirmDialog from '@/components/ConfirmDialog.vue';
+import AutoDownloadPreferences from '@/components/AutoDownloadPreferences.vue';
 import { useNotifications } from '@/stores/notifications';
 import type { FavoriteItem } from '@/types';
 

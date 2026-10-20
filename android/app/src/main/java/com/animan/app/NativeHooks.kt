@@ -18,7 +18,7 @@ object NativeHooks {
     }
 
     @JvmStatic @Synchronized fun progress(count: Int, percent: Int, label: String, taskId: String, status: String): Boolean {
-        taskStates[taskId] = status
+        taskStates[taskId] = status.uppercase()
         val changed = count != EngineHost.activeCount
         EngineHost.activeCount = count
         EngineHost.progress = percent.coerceIn(0, 100)
@@ -54,7 +54,9 @@ object NativeHooks {
         val key = if (tree == null) sourceKey else tree.toString() + ":" + sourceKey
         val previous = preferences.getString(key, null)
         if (previous != null) {
-            try { context.contentResolver.openFileDescriptor(android.net.Uri.parse(previous), "r")?.use { return previous } }
+            try { context.contentResolver.openFileDescriptor(android.net.Uri.parse(previous), "r")?.use {
+                if (it.statSize == source.length()) return previous
+            } }
             catch (_: Exception) { /* User removed the shared copy; export it again. */ }
         }
         val pendingKey = "pending:" + key
@@ -66,13 +68,23 @@ object NativeHooks {
                     published = it.moveToFirst() && it.getInt(0) == 0
                 }
                 if (published) {
-                    preferences.edit().putString(key, pending).remove(pendingKey).commit()
-                    return pending
+                    val complete = context.contentResolver.openFileDescriptor(pendingUri, "r")?.use {
+                        it.statSize == source.length()
+                    } == true
+                    if (complete) {
+                        check(preferences.edit().putString(key, pending).remove(pendingKey).commit())
+                        return pending
+                    }
                 }
-                if (tree == null) context.contentResolver.delete(pendingUri, null, null)
-                else DocumentsContract.deleteDocument(context.contentResolver, pendingUri)
-            } catch (_: Exception) { /* The previous incomplete copy was removed. */ }
-            preferences.edit().remove(pendingKey).commit()
+                val removed = if (tree == null) context.contentResolver.delete(pendingUri, null, null) > 0
+                    else DocumentsContract.deleteDocument(context.contentResolver, pendingUri)
+                // Never forget a pending URI when deletion failed. Otherwise a
+                // retry can publish a second copy while the first is still there.
+                check(removed) { "The previous incomplete export could not be removed; restore folder access and retry" }
+            } catch (_: java.io.FileNotFoundException) {
+                // The user/provider already removed our incomplete document.
+            }
+            check(preferences.edit().remove(pendingKey).commit())
         }
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(source.extension.lowercase()) ?: "application/octet-stream"
         val values = ContentValues().apply {
@@ -100,7 +112,7 @@ object NativeHooks {
             requireNotNull(resolver.openOutputStream(uri)).use { output -> source.inputStream().use { input ->
                 val buffer = ByteArray(256 * 1024)
                 while (true) {
-                    check(taskStates[taskId] !in listOf("paused", "cancelled")) { "Export was paused or cancelled" }
+                    check(taskStates[taskId] !in listOf("PAUSED", "CANCELLED")) { "Export was paused or cancelled" }
                     val count = input.read(buffer)
                     if (count < 0) break
                     output.write(buffer, 0, count)

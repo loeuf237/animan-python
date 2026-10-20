@@ -23,7 +23,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from animan.config import settings
-from animan.models.download_task import DownloadTask, DownloadStatus, format_bytes, ensure_utc
+from animan.models.download_task import DownloadTask, DownloadStatus, ExportStatus, format_bytes, ensure_utc
 from animan.services.library_service import library_service
 from animan.services.proxy_service import proxy_service
 from animan.services.scraping_service import scraping_service
@@ -32,6 +32,7 @@ from animan.services.verification_service import verification_service, Verificat
 from animan.services.extractors import extractor_registry
 from animan.services.subtitle_service import normalize_subtitles, subtitle_extension, subtitle_language
 from animan.services.download_resume import (RESUME_OVERLAP, ResumeMismatch, read_metadata,
+    valid_cached_segment, commit_segment, publish_file, media_resource,
                                             write_metadata, representation, response_range, prepare_hls_cache)
 from animan.security import is_safe_path, is_safe_url
 
@@ -68,6 +69,10 @@ class DownloadManagerService:
 
         self.tasks: Dict[str, DownloadTask] = {}
         self.task_order: List[str] = []
+        self._finalization_locks: Dict[str, asyncio.Lock] = {}
+        self._media_jobs: Dict[str, asyncio.Task] = {}
+        self._export_locks: Dict[str, asyncio.Lock] = {}
+        self._native_exports: Dict[str, asyncio.Task] = {}
         self.sse_subscribers: List[asyncio.Queue] = []
         self.resolved_info_cache: Dict[str, ResolvedVideoInfo] = {}
 
@@ -128,6 +133,7 @@ class DownloadManagerService:
 
     def init_from_db(self):
         try:
+            library_service.recover_interrupted_exports()
             unfinished = library_service.get_unfinished_tasks()
             restored = [entity.to_task() for entity in unfinished]
             for task in restored:
@@ -139,6 +145,12 @@ class DownloadManagerService:
                     destinations.setdefault(task.savePath, set()).add(task.downloadPageUrl or task.fileUrl)
             conflicts = {path for path, urls in destinations.items() if len(urls) > 1}
             for task in restored:
+                if task.status == DownloadStatus.COMPLETED:
+                    # A pending export does not invalidate verified media or
+                    # require another full video scan during startup.
+                    self.tasks[task.id] = task
+                    self.task_order.append(task.id)
+                    continue
                 if task.savePath in conflicts:
                     self._pause_destination_conflict(task)
                     self.tasks[task.id] = task
@@ -158,6 +170,8 @@ class DownloadManagerService:
                             task.verificationStatus = verif.status
                             task.videoDuration = verif.duration
                             task.error = None
+                            if platform_events.completed_handler is not None and task.exportStatus == ExportStatus.NOT_REQUESTED:
+                                task.exportStatus = ExportStatus.PENDING
                             library_service.save_task(task)
                             library_service.mark_as_downloaded(task.animeUrl or task.downloadPageUrl or "", task.animeName, task.episodeNumber, task.version)
                             self.tasks[task.id] = task
@@ -174,7 +188,13 @@ class DownloadManagerService:
                     library_service.save_task(task)
                 self.tasks[task.id] = task
                 self.task_order.append(task.id)
-            logger.info("Loaded %d unfinished task(s) from database at startup", len(self.tasks))
+            # Completed downloads must remain available in the local player
+            # after restarting, including media with no Android export work.
+            for entity in library_service.get_completed_tasks():
+                if entity.id not in self.tasks:
+                    self.tasks[entity.id] = entity.to_task()
+                    self.task_order.append(entity.id)
+            logger.info("Loaded %d task(s) from database at startup", len(self.tasks))
         except Exception as e:
             logger.error("Error loading unfinished tasks: %s", e)
 
@@ -247,7 +267,8 @@ class DownloadManagerService:
 
     def _active_episode_task(self, url: str, source: str, version: str):
         active = {DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.SCHEDULED,
-                  DownloadStatus.PAUSED, DownloadStatus.RETRYING, DownloadStatus.MUXING}
+                  DownloadStatus.PAUSED, DownloadStatus.RETRYING, DownloadStatus.MUXING,
+                  DownloadStatus.VERIFICATION_REQUIRED}
         return next((task for task in self.tasks.values()
                      if task.status in active and task.downloadPageUrl == url
                      and task.source == source and task.version == version), None)
@@ -817,11 +838,12 @@ class DownloadManagerService:
             source=source,
             version=version,
             animeUrl=anime_url,
+            exportStatus=ExportStatus.PENDING if platform_events.completed_handler is not None else ExportStatus.NOT_REQUESTED,
         )
 
+        library_service.save_task(task)
         self.tasks[task.id] = task
         self.task_order.append(task.id)
-        library_service.save_task(task)
 
         if task.status == DownloadStatus.PENDING:
             self._trigger_process_queue()
@@ -927,6 +949,7 @@ class DownloadManagerService:
                 source=ep_source,
                 version=version,
                 animeUrl=ep.get("animeUrl") or "",
+                exportStatus=ExportStatus.PENDING if platform_events.completed_handler is not None else ExportStatus.NOT_REQUESTED,
             )
 
             self.tasks[task.id] = task
@@ -1123,7 +1146,18 @@ class DownloadManagerService:
         logger.info("Global cancellation: %d download(s) cancelled", count)
         return count
 
+    def _export_in_progress(self, task_id: str) -> bool:
+        task = self.tasks.get(task_id)
+        media = self._media_jobs.get(task_id)
+        if media is not None and not media.done():
+            return True
+        native = self._native_exports.get(task_id)
+        return bool((task and task.exportStatus == ExportStatus.EXPORTING)
+                    or (native is not None and not native.done()))
+
     def remove_task(self, task_id: str) -> bool:
+        if self._export_in_progress(task_id):
+            raise ValueError("Wait for the current export before removing this download")
         t = self.tasks.pop(task_id, None)
         if task_id in self.task_order:
             self.task_order.remove(task_id)
@@ -1148,6 +1182,10 @@ class DownloadManagerService:
         return (t is not None) or deleted_from_db
 
     def pause_all_downloads(self):
+        for exporting in list(self.tasks.values()):
+            if exporting.exportStatus == ExportStatus.EXPORTING:
+                exporting.paused = True
+                self.broadcast_update(exporting)
         for t in self.tasks.values():
             if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED, DownloadStatus.MUXING]:
                 t.paused = True
@@ -1212,7 +1250,10 @@ class DownloadManagerService:
     def clear_inactive_tasks(self):
         inactive = [DownloadStatus.COMPLETED, DownloadStatus.FAILED, DownloadStatus.CANCELLED]
         for tid in list(self.tasks.keys()):
-            if self.tasks[tid].status in inactive:
+            task = self.tasks[tid]
+            protected = self._export_in_progress(tid) or (task.status == DownloadStatus.COMPLETED
+                and task.exportStatus in (ExportStatus.PENDING, ExportStatus.EXPORT_FAILED))
+            if task.status in inactive and not protected:
                 self.remove_task(tid)
 
     def clear_history_tasks(self, status: Optional[str] = None, anime_name: Optional[str] = None):
@@ -1222,6 +1263,9 @@ class DownloadManagerService:
         for tid in list(self.tasks.keys()):
             t = self.tasks.get(tid)
             if not t:
+                continue
+            if self._export_in_progress(tid) or (t.status == DownloadStatus.COMPLETED
+                    and t.exportStatus in (ExportStatus.PENDING, ExportStatus.EXPORT_FAILED)):
                 continue
             if anime_name and t.animeName.lower() != anime_name.lower():
                 continue
@@ -1404,6 +1448,8 @@ class DownloadManagerService:
         task = self.get_task(task_id)
         if not task:
             return None
+        if self._export_in_progress(task_id):
+            raise ValueError("Wait for the current export before downloading the file again")
 
         # Vérifier si un fichier partiel sain existe sur le disque
         has_healthy_part = False
@@ -1463,6 +1509,9 @@ class DownloadManagerService:
         task.verificationStatus = "UNVERIFIED"
         task.verificationError = None
         task.completedAt = None
+        task.exportStatus = ExportStatus.PENDING if platform_events.completed_handler is not None else ExportStatus.NOT_REQUESTED
+        task.exportError = task.exportDestination = task.exportedAt = None
+        task.exportUrisJson = "[]"
 
         self.tasks[task.id] = task
         if task.id not in self.task_order:
@@ -1933,22 +1982,10 @@ class DownloadManagerService:
                         await self._download_subtitles(task)
                         await self._finalize_task(task)
                         return
-                    task.status = DownloadStatus.COMPLETED
-                    task.progress = 100.0
-                    task.verificationStatus = verif.status
-                    task.videoDuration = verif.duration
                     task.downloadedBytes = output_path.stat().st_size
                     if not task.totalBytes or task.totalBytes <= 0:
                         task.totalBytes = output_path.stat().st_size
-                    task.completedAt = datetime.now(timezone.utc)
-                    self.broadcast_update(task)
-                    library_service.save_task(task)
-                    library_service.mark_as_downloaded(
-                        task.animeUrl or task.downloadPageUrl or "",
-                        task.animeName,
-                        task.episodeNumber,
-                        task.version
-                    )
+                    await self._finalize_task(task, verification=verif)
                     return
                 else:
                     logger.warning("Existing final file invalid/corrupted for %s (%s), deleting: %s",
@@ -1988,6 +2025,12 @@ class DownloadManagerService:
             req_headers["Accept-Encoding"] = "identity"
             is_resume = existing_len > 0
             previous = read_metadata(metadata_path) if is_resume else {}
+            resource = media_resource(direct_url)
+            if previous.get("resource") and previous["resource"] != resource:
+                # ETags are scoped to a resource, not globally comparable across
+                # renewed CDN hosts/paths. Preserve the partial until GET succeeds.
+                existing_len = 0
+                is_resume = False
             request_start = max(0, existing_len - RESUME_OVERLAP) if is_resume else 0
             if is_resume:
                 req_headers["Range"] = f"bytes={request_start}-"
@@ -2013,9 +2056,7 @@ class DownloadManagerService:
                             )
                             if verif_part.valid:
                                 logger.info(".part file is actually complete and valid for %s, finalizing", task.fileName)
-                                if output_path.exists():
-                                    output_path.unlink(missing_ok=True)
-                                shutil.move(str(part_path), str(output_path))
+                                publish_file(part_path, output_path)
                                 metadata_path.unlink(missing_ok=True)
                                 await self._finalize_task(task)
                                 return
@@ -2060,7 +2101,9 @@ class DownloadManagerService:
                         if cl and cl.isdigit():
                             total_bytes = response_length = int(cl)
 
-                    current = representation(stream_resp.headers, total_bytes)
+                    if stream_resp.status_code == 206 and not total_bytes:
+                        raise ConnectionError("Cannot confirm complete media from an unknown Content-Range total")
+                    current = {**representation(stream_resp.headers, total_bytes), "resource": resource}
                     if is_resume and ((previous.get("validator") and current["validator"]
                                        and previous["validator"] != current["validator"])
                                       or (previous.get("total") and total_bytes
@@ -2102,9 +2145,7 @@ class DownloadManagerService:
                                 file_name=task.fileName
                             )
                             if verif_part.valid:
-                                if output_path.exists():
-                                    output_path.unlink(missing_ok=True)
-                                shutil.move(str(part_path), str(output_path))
+                                publish_file(part_path, output_path)
                                 metadata_path.unlink(missing_ok=True)
                                 await self._finalize_task(task)
                                 return
@@ -2223,10 +2264,7 @@ class DownloadManagerService:
 
         # Téléchargement complet : renommer .part → fichier final
         if part_path.exists():
-            # Supprimer le fichier final existant s'il existe (il est incomplet/invalide)
-            if output_path.exists():
-                output_path.unlink(missing_ok=True)
-            shutil.move(str(part_path), str(output_path))
+            publish_file(part_path, output_path)
             logger.info(".part file renamed to final file: %s (%s)", output_path.name, format_bytes(downloaded))
         metadata_path.unlink(missing_ok=True)
 
@@ -2395,6 +2433,8 @@ class DownloadManagerService:
                         current_key = (key_url, iv)
                     else:
                         raise ValueError("Méthode de chiffrement HLS non prise en charge")
+                elif line.startswith(("#EXT-X-BYTERANGE:", "#EXT-X-MAP:")):
+                    raise ValueError("HLS byte ranges and initialization maps require a dedicated assembler")
                 elif line and not line.startswith("#"):
                     segments.append(urljoin(sub_url, line))
                     encryption.append((current_key[0], current_key[1] or sequence.to_bytes(16, "big")) if current_key else None)
@@ -2413,7 +2453,7 @@ class DownloadManagerService:
             completed_indices = set()
             for idx in range(total_segments):
                 sf = segments_dir / f"seg_{idx:05d}.ts"
-                if sf.exists() and sf.stat().st_size > 0:
+                if valid_cached_segment(sf):
                     existing_bytes += sf.stat().st_size
                     completed_indices.add(idx)
 
@@ -2528,7 +2568,7 @@ class DownloadManagerService:
                                 plaintext = media_tools.decrypt_aes_cbc(
                                     seg_tmp.read_bytes(), keys[key_url], iv, unpad=True)
                                 seg_tmp.write_bytes(plaintext)
-                            seg_tmp.replace(seg_file)
+                            commit_segment(seg_tmp, seg_file)
                             completed_indices.add(idx)
                             seg_success = True
                             break
@@ -2606,17 +2646,27 @@ class DownloadManagerService:
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
                 r_rc = await r_proc.wait()
             if r_rc == 0 and temp_output.exists() and temp_output.stat().st_size > 0:
-                shutil.move(str(temp_output), str(output_path))
                 merged = True
 
         if not merged:
             # Fallback concaténation binaire directe
-            with open(output_path, "wb") as outfile:
+            with open(temp_output, "wb") as outfile:
                 for idx in range(total_segments):
                     sf = segments_dir / f"seg_{idx:05d}.ts"
-                    if sf.exists():
-                        with open(sf, "rb") as infile:
-                            shutil.copyfileobj(infile, outfile, length=65536)
+                    if not valid_cached_segment(sf):
+                        raise ConnectionError(f"HLS segment {idx} is missing or corrupted during assembly")
+                    with open(sf, "rb") as infile:
+                        shutil.copyfileobj(infile, outfile, length=65536)
+                outfile.flush()
+                os.fsync(outfile.fileno())
+        if task.cancelled or task.paused:
+            temp_output.unlink(missing_ok=True)
+            return
+        # Publish only after the full assembly succeeded. On failure the cache
+        # remains available and an existing final file is left untouched.
+        if output_path.exists():
+            raise FileExistsError("A final media file appeared during HLS assembly")
+        publish_file(temp_output, output_path)
 
         # Nettoyage sécurisé du dossier temporaire de segments une fois l'assemblage validé
         shutil.rmtree(segments_dir, ignore_errors=True)
@@ -2655,7 +2705,95 @@ class DownloadManagerService:
             task.throttleStartTimeMs = time.time() * 1000
             task.throttleBytesWritten = 0
 
-    async def _finalize_task(self, task: DownloadTask):
+    async def export_task(self, task: DownloadTask, *, manual=False):
+        """Persist an independent, retryable native export. Never fetch media."""
+        if platform_events.completed_handler is None:
+            raise ValueError("Android export is unavailable")
+        native_job = self._native_exports.get(task.id)
+        if native_job is not None and not native_job.done():
+            raise ValueError("An export is already in progress for this download")
+        lock = self._export_locks.setdefault(task.id, asyncio.Lock())
+        if lock.locked():
+            raise ValueError("An export is already in progress for this download")
+        async with lock:
+            previous_phase = task.phase
+            try:
+                if manual:
+                    task.paused = task.cancelled = False
+                if task.paused or task.cancelled:
+                    raise ValueError("Export was paused or cancelled")
+                self.tasks[task.id] = task
+                if task.id not in self.task_order:
+                    self.task_order.append(task.id)
+                task.exportStatus = ExportStatus.EXPORTING
+                task.exportError = None
+                task.exportUrisJson = "[]"
+                task.exportedAt = None
+                task.exportAttempts += 1
+                task.phase = "exporting"
+                library_service.save_task(task)
+                self.broadcast_update(task)
+                storage = await asyncio.to_thread(platform_events.storage_status)
+                task.exportDestination = storage.get("destination") if storage else None
+                if storage is not None and not storage.get("authorized"):
+                    raise PermissionError("Storage access unavailable; authorize a folder in Settings > Storage")
+                native_job = asyncio.create_task(asyncio.to_thread(platform_events.completed, task))
+                self._native_exports[task.id] = native_job
+                def finished(job):
+                    if self._native_exports.get(task.id) is job:
+                        self._native_exports.pop(task.id, None)
+                    # Retrieve an exception even if the caller was cancelled.
+                    if not job.cancelled():
+                        job.exception()
+                native_job.add_done_callback(finished)
+                result = await asyncio.shield(native_job)
+                if task.paused or task.cancelled:
+                    raise ValueError("Export was paused or cancelled")
+                uris = result.get("uris") if isinstance(result, dict) else None
+                if not isinstance(uris, list) or not uris or not all(isinstance(uri, str) and uri for uri in uris):
+                    raise ValueError("The storage provider did not confirm the exported files")
+                task.exportStatus = ExportStatus.EXPORTED
+                task.exportUrisJson = json.dumps(uris)
+                task.exportDestination = result.get("destination") or task.exportDestination
+                task.exportedAt = datetime.now(timezone.utc)
+                return result
+            except (Exception, asyncio.CancelledError) as exc:
+                if isinstance(exc, asyncio.CancelledError):
+                    task.paused = True  # Stop the still-running native copy at its next chunk.
+                task.exportStatus = ExportStatus.PENDING if task.paused or task.cancelled or isinstance(exc, asyncio.CancelledError) else ExportStatus.EXPORT_FAILED
+                task.exportError = str(exc) or "Export interrupted; retry from the private library copy."
+                raise
+            finally:
+                if task.error and task.error.startswith("Android export failed;"):
+                    task.error = None
+                task.phase = previous_phase
+                try:
+                    library_service.save_task(task)
+                    self.broadcast_update(task)
+                finally:
+                    self._export_locks.pop(task.id, None)
+
+    async def _finalize_task(self, task: DownloadTask, verification=None):
+        native = self._media_jobs.get(task.id)
+        if native is not None and not native.done():
+            raise ValueError("Media finalization is still in progress")
+        lock = self._finalization_locks.setdefault(task.id, asyncio.Lock())
+        if lock.locked():
+            raise ValueError("Media finalization is already in progress")
+        try:
+            async with lock:
+                await self._finalize_task_locked(task, verification)
+        except asyncio.CancelledError:
+            task.paused = True
+            if task.status != DownloadStatus.COMPLETED:
+                task.status = DownloadStatus.PAUSED
+            library_service.save_task(task)
+            self.broadcast_update(task)
+            raise
+        finally:
+            self._finalization_locks.pop(task.id, None)
+
+    async def _finalize_task_locked(self, task: DownloadTask, verification=None):
         if task.cancelled or task.paused:
             task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
             library_service.save_task(task)
@@ -2666,12 +2804,21 @@ class DownloadManagerService:
 
         # Muxing FFmpeg si sous-titres présents
         if task.savePathSubtitle and self.is_ffmpeg_available():
+            verification = None  # A newly muxed output needs its own integrity check.
             task.status = DownloadStatus.MUXING
             task.phase = "muxing"
             self.broadcast_update(task)
             library_service.save_task(task)
             try:
-                await asyncio.to_thread(self._mux_subtitles_with_ffmpeg, task)
+                job = asyncio.create_task(asyncio.to_thread(self._mux_subtitles_with_ffmpeg, task))
+                self._media_jobs[task.id] = job
+                def media_finished(finished):
+                    if self._media_jobs.get(task.id) is finished:
+                        self._media_jobs.pop(task.id, None)
+                    if not finished.cancelled():
+                        finished.exception()
+                job.add_done_callback(media_finished)
+                await asyncio.shield(job)
             except Exception as exc:
                 task.status = DownloadStatus.FAILED
                 task.error = f"Échec de fusion des sous-titres : {exc}"
@@ -2689,7 +2836,7 @@ class DownloadManagerService:
         self.broadcast_update(task)
 
         # Vérification d'intégrité automatique du fichier téléchargé
-        verif = await asyncio.to_thread(
+        verif = verification or await asyncio.to_thread(
             verification_service.verify_file,
             file_path_str=task.savePath,
             anime_name=task.animeName,
@@ -2706,20 +2853,24 @@ class DownloadManagerService:
         task.verificationError = verif.error
 
         if verif.valid:
-            # Keep the foreground transfer alive until its shared-storage copy
-            # has been published. Android may kill an idle background process.
-            if platform_events.completed_handler is not None:
+            task.error = None
+            # A verified private file is complete even if publication is paused,
+            # denied or interrupted. EXPORTING keeps Android's service alive.
+            task.status = DownloadStatus.COMPLETED
+            task.progress = 100.0
+            task.completedAt = datetime.now(timezone.utc)
+            library_service.save_task(task)
+            library_service.mark_as_downloaded(
+                task.animeUrl or task.downloadPageUrl or "", task.animeName,
+                task.episodeNumber, task.version)
+            if platform_events.completed_handler is not None and task.exportStatus != ExportStatus.EXPORTED:
                 try:
-                    await asyncio.to_thread(platform_events.completed, task)
+                    await self.export_task(task)
                 except Exception as exc:
                     logger.exception("Completed media could not be exported by the native platform")
-                    task.error = f"Android export failed; media is available in the library: {exc}"
-            if task.paused or task.cancelled:
-                task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
-                library_service.save_task(task)
-                self.broadcast_update(task)
-                return
             task.status = DownloadStatus.COMPLETED
+            task.phase = None
+            task.progress = 100.0
             task.completedAt = datetime.now(timezone.utc)
             part_path = Path(task.savePath + ".part")
             if part_path.exists():
@@ -2727,13 +2878,6 @@ class DownloadManagerService:
             self.broadcast_update(task)
             library_service.save_task(task)
 
-            # Progression
-            library_service.mark_as_downloaded(
-                task.animeUrl or task.downloadPageUrl or "",
-                task.animeName,
-                task.episodeNumber,
-                task.version
-            )
             logger.info("Download completed and verified: %s (%s, duration: %s)", task.fileName, task.formattedTotalSize, verif.formattedDuration)
 
             if self.plex_organization:

@@ -1,0 +1,58 @@
+@startuml
+!include theme.iuml
+' @source animan/routers/network.py:rotate_proxy
+' @source animan/routers/network.py:complete
+' @source animan/routers/library.py:android_storage_action
+title Animan — cas d'utilisation réseau et stockage Android
+left to right direction
+actor Utilisateur as U
+actor "Navigateur installé /\nWebView dédiée" as Browser
+actor "Site protégé" as Site
+actor "Fournisseur de proxies" as Provider
+actor "Système Android\nDocumentsUI / MediaStore" as Android
+rectangle "Animan — assistance et intégrations système" {
+  usecase "Rechercher, consulter\nou télécharger" as Work
+  usecase "UC12 Vérifier manuellement\nl'accès à un site" as Challenge
+  usecase "Ouvrir un onglet externe\npuis réessayer" as External
+  usecase "Ouvrir une fenêtre dédiée,\nvalider, importer les cookies" as Capture
+  usecase "Contrôler réellement\nl'accès à l'URL bloquée" as Recheck
+  usecase "UC13 Configurer / importer / tester\nles proxies ; demander une rotation" as Proxy
+  usecase "Rotation automatique bornée\nsi activée et route inactive" as Rotate
+  usecase "UC14 Choisir et autoriser\nun dossier Android" as Permission
+  usecase "UC15 Exporter / réexporter\nun téléchargement vérifié" as Export
+  usecase "Copier vers MediaStore\nou un dossier SAF autorisé" as Copy
+}
+U -- Challenge
+U -- Proxy
+U -- Permission
+U -- Export
+Browser -- Capture
+Site -- Recheck
+Provider -- Proxy
+Android -- Permission
+Android -- Copy
+Challenge ..> Work : <<extend>>\n[challenge détecté]
+Challenge <|-- External
+Challenge <|-- Capture
+Challenge ..> Recheck : <<include>>
+Rotate ..> Work : <<extend>>\n[échec admissible + option active]
+Proxy ..> Rotate : configure / déclenche
+Export ..> Copy : <<include>>
+Permission ..> Export : <<extend>>\n[destination personnalisée absente / révoquée]
+note bottom of External
+Un onglet normal ne transmet pas ses cookies au moteur.
+« Je suis de retour » ne fait que vérifier l'accès.
+La capture nécessite une fenêtre dédiée compatible.
+end note
+note bottom of Capture
+Les actions de vérification et rotation du serveur
+exigent un client loopback. La WebView de capture
+n'est pas proposée avec une session utilisant un proxy.
+end note
+note bottom of Copy
+Sur Android 10+, le mode Downloads/Animan ne nécessite
+pas d'autorisation globale de stockage. Un dossier choisi
+utilise une permission URI persistante (SAF).
+Sous-titres : repli Movies/Animan si MediaProvider l'exige.
+end note
+@enduml

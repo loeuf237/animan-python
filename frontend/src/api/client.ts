@@ -1,4 +1,5 @@
-import { language } from '@/utils/locale';
+import type { ErrorResponse, DownloadPreferences, ProxySettings, WatchProgress, ExtensionRepository, SourceSettingsResponse, SourcePreferences, NetworkOptions, VerificationMode, VerificationJob, VerificationResult } from '@/types/api';
+import { language, tx } from '@/utils/locale';
 
 export interface AndroidStorageState {
   android: boolean; apiLevel: number; mode: 'downloads' | 'directory'; destination: string;
@@ -23,13 +24,15 @@ import type {
   HomeFeedResponse,
   VideoStreamInfo,
   SearchResponse, CatalogueSource, CatalogueFilters, CataloguePage,
+  AutoDownloadOptions,
+  SubtitleTrack,
 } from '@/types';
 
 class ApiError extends Error {
   status: number;
-  data: any;
+  data: ErrorResponse | null;
 
-  constructor(message: string, status: number, data: any) {
+  constructor(message: string, status: number, data: ErrorResponse | null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -50,14 +53,23 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
   };
 
-  const response = await fetch(endpoint, config);
+  let response: Response;
+  try { response = await fetch(endpoint, config); }
+  catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    throw new ApiError(tx('La connexion au site a échoué. Réessayez.'), 0, {problem: {
+      code: 'client_network_error', category: 'network', messageKey: 'La connexion au site a échoué. Réessayez.', action: 'retry',
+    }});
+  }
 
   if (!response.ok) {
     let errorDetail = response.statusText;
-    let data = null;
+    let data: ErrorResponse | null = null;
     try {
-      data = await response.json();
-      if (data && data.detail) {
+      const raw: unknown = await response.json();
+      data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as ErrorResponse : null;
+      if (data?.problem) errorDetail = tx(data.problem.messageKey);
+      else if (data && data.detail) {
         errorDetail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
       } else if (data && data.error) {
         errorDetail = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
@@ -80,21 +92,21 @@ export const api = {
   clearImportedProxies() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/import', {method: 'DELETE'}); },
   rotateSourceProxy(domain: string) { return request<{success: boolean; domain: string; resumed: number}>('/api/network/proxy-pool/rotate', {method: 'POST', body: JSON.stringify({domain})}); },
   getNetworkSessions() {
-    return request<{browsers: {name: string}[]; webviewAvailable: boolean; sessions: {domain: string; verificationRequired: boolean; usesProxy: boolean}[]}>('/api/network/sessions');
+    return request<NetworkOptions>('/api/network/sessions');
   },
   recheckNetworkSource(domain: string) {
     return request<{success: boolean; domain: string}>('/api/network/recheck', {method: 'POST', body: JSON.stringify({domain})});
   },
-  startNetworkVerification(domain: string, browser: string, mode: string) {
-    return request<{id: string; domain: string}>('/api/network/verification', {
+  startNetworkVerification(domain: string, browser: string, mode: VerificationMode) {
+    return request<VerificationJob>('/api/network/verification', {
       method: 'POST', body: JSON.stringify({domain, browser, mode}),
     });
   },
   completeNetworkVerification(id: string) {
-    return request<{success: boolean; resumed: number; domain: string}>(`/api/network/verification/${encodeURIComponent(id)}/complete`, {method: 'POST'});
+    return request<VerificationResult>(`/api/network/verification/${encodeURIComponent(id)}/complete`, {method: 'POST'});
   },
   cancelNetworkVerification(id: string) {
-    return request(`/api/network/verification/${encodeURIComponent(id)}`, {method: 'DELETE'});
+    return request<{success: boolean}>(`/api/network/verification/${encodeURIComponent(id)}`, {method: 'DELETE'});
   },
   // --- Feed & Home ---
   async getHomeFeed(): Promise<HomeFeedResponse> {
@@ -148,7 +160,7 @@ export const api = {
     imageUrl: string;
     source: string;
     autoDownload?: boolean;
-  }): Promise<{ success: boolean; id: number }> {
+  } & AutoDownloadOptions): Promise<{ success: boolean; id: number; favorite: FavoriteItem }> {
     return request('/api/favorites', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -162,10 +174,10 @@ export const api = {
     });
   },
 
-  async toggleAutoDownload(url: string, autoDownload: boolean): Promise<{ success: boolean }> {
+  async toggleAutoDownload(url: string, autoDownload: boolean, options: AutoDownloadOptions = {}): Promise<{ success: boolean; favorite: FavoriteItem }> {
     return request('/api/favorites/auto-download', {
       method: 'PATCH',
-      body: JSON.stringify({ url, autoDownload }),
+      body: JSON.stringify({ url, autoDownload, ...options }),
     });
   },
 
@@ -193,7 +205,7 @@ export const api = {
     });
   },
 
-  async getProgress(animeUrl: string): Promise<any[]> {
+  async getProgress(animeUrl: string): Promise<WatchProgress[]> {
     return request(`/api/progress?animeUrl=${encodeURIComponent(animeUrl)}`);
   },
 
@@ -217,10 +229,7 @@ export const api = {
 
   // --- Downloads ---
   async getDownloadTasks(): Promise<DownloadTask[]> {
-    const res = await request<any>('/api/download/status');
-    if (Array.isArray(res)) return res;
-    if (res && Array.isArray(res.tasks)) return res.tasks;
-    return [];
+    return request<DownloadTask[]>('/api/download/status');
   },
 
   async startEpisodeDownload(payload: {
@@ -296,7 +305,7 @@ export const api = {
     return request(`/api/download/${taskId}/remove`, { method: 'DELETE' });
   },
 
-  async redownloadTask(taskId: number | string): Promise<{ success: boolean; message?: string; task?: any }> {
+  async redownloadTask(taskId: number | string): Promise<{ success: boolean; message?: string; task?: DownloadTask }> {
     return request(`/api/download/${taskId}/redownload`, { method: 'POST' });
   },
 
@@ -358,51 +367,51 @@ export const api = {
   },
 
   // --- Settings ---
-  async getDownloadSettings(): Promise<any> {
+  async getDownloadSettings(): Promise<DownloadPreferences> {
     return request('/api/download/settings');
   },
 
-  async saveDownloadSettings(settings: any): Promise<any> {
+  async saveDownloadSettings(settings: Partial<DownloadPreferences>): Promise<{success: boolean; message: string}> {
     return request('/api/download/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
     });
   },
 
-  async getProxySettings(): Promise<any> {
+  async getProxySettings(): Promise<ProxySettings> {
     return request('/api/proxy/settings');
   },
 
-  async saveProxySettings(settings: any): Promise<any> {
+  async saveProxySettings(settings: ProxySettings): Promise<{success: boolean; settings: ProxySettings}> {
     return request('/api/proxy/settings', {
       method: 'POST',
       body: JSON.stringify(settings),
     });
   },
 
-  async testProxy(proxyUrl?: string, settings?: Record<string, unknown>): Promise<{ success: boolean; latencyMs?: number; ip?: string; error?: string }> {
+  async testProxy(proxyUrl?: string, settings?: ProxySettings): Promise<{ success: boolean; latencyMs?: number; ip?: string; error?: string }> {
     return request('/api/proxy/test', {
       method: 'POST',
       body: JSON.stringify({ proxyUrl: proxyUrl || '', settings }),
     });
   },
 
-  async getSourcesSettings(): Promise<any> {
+  async getSourcesSettings(): Promise<SourceSettingsResponse> {
     return request('/api/sources/settings');
   },
 
-  async saveSourcesSettings(settings: any): Promise<any> {
-    return request('/api/sources/settings', {
+  async saveSourcesSettings(sourceId: string, settings: SourcePreferences): Promise<{success: boolean; sourceId: string; settings: SourcePreferences}> {
+    return request(`/api/sources/settings/${encodeURIComponent(sourceId)}`, {
       method: 'POST',
       body: JSON.stringify(settings),
     });
   },
 
   async getStorageInfo(): Promise<{
-    totalBytes: number;
-    usedBytes: number;
-    freeBytes: number;
-    usedPercent: number;
+    totalBytes: number | null;
+    usedBytes: number | null;
+    freeBytes: number | null;
+    usedPercent: number | null;
     downloadDir: string;
     native?: AndroidStorageState | null;
   }> {
@@ -410,7 +419,7 @@ export const api = {
   },
   getAndroidStorage() { return request<AndroidStorageState | null>('/api/system/android/storage'); },
   androidStorageAction(action: string) { return request<AndroidStorageState>('/api/system/android/storage', {method: 'POST', body: JSON.stringify({action})}); },
-  exportAndroidDownload(taskId: string) { return request<{success: boolean; destination: string}>('/api/system/android/export', {method: 'POST', body: JSON.stringify({taskId})}); },
+  exportAndroidDownload(taskId: string) { return request<{success: boolean; destination: string; task: DownloadTask}>('/api/system/android/export', {method: 'POST', body: JSON.stringify({taskId})}); },
 
   // --- i18n ---
   async getTranslations(lang?: string): Promise<{
@@ -431,6 +440,10 @@ export const api = {
   },
 
   // --- Streaming & Media Resolution ---
+  async getLocalSubtitles(taskId: string | number): Promise<SubtitleTrack[]> {
+    return request(`/api/media/subtitles/${encodeURIComponent(taskId)}`);
+  },
+
   async resolveVideoStream(params: {
     animeName: string;
     episodeNumber: number | string;
@@ -455,14 +468,14 @@ export const api = {
 
   async getEpisodeServers(episodeUrl: string, source: string): Promise<{ servers: string[]; qualities?: string[] }> {
     const search = new URLSearchParams();
-    search.set('episode_url', episodeUrl);
+    search.set('url', episodeUrl);
     search.set('source', source);
     return request(`/api/episode/servers?${search.toString()}`);
   },
 
   async getEpisodeSize(episodeUrl: string, source: string, server?: string): Promise<{ size: number; formattedSize: string }> {
     const search = new URLSearchParams();
-    search.set('episode_url', episodeUrl);
+    search.set('url', episodeUrl);
     search.set('source', source);
     if (server) search.set('server', server);
     return request(`/api/episode/size?${search.toString()}`);
@@ -470,7 +483,7 @@ export const api = {
 
   // --- Extensions ---
   async getExtensions(q?: string, lang?: string): Promise<{
-    active_repo?: any;
+    active_repo?: ExtensionRepository | null;
     count?: number;
     extensions?: ExtensionSource[];
     installed?: ExtensionSource[];

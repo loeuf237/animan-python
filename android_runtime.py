@@ -58,15 +58,18 @@ def start(data_dir, cache_dir, port, token, test_mode=False):
     platform_events.storage_action_handler = lambda action: json.loads(str(storage.request(action)))
     import run
     from animan.android_security import AndroidSessionMiddleware
-    from animan.models.download_task import DownloadStatus
+    from animan.models.download_task import DownloadStatus, ExportStatus
     from animan.services.download_manager import download_manager
     run.app.add_middleware(AndroidSessionMiddleware, token=token)
+    run.browser_verification.platform = "android"
     run.browser_verification.webview_opener = lambda url: VerificationWindow(url, verification)
 
     def notify(task):
         active = [t for t in download_manager.get_all_tasks() if t.status in (
-            DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING, DownloadStatus.MUXING)]
-        if not hooks.progress(len(active), int(task.progress), task.fileName, task.id, task.status.value) and active and _loop:
+            DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING, DownloadStatus.MUXING)
+            or (t.exportStatus == ExportStatus.EXPORTING and not t.paused and not t.cancelled)]
+        native_status = "CANCELLED" if task.cancelled else "PAUSED" if task.paused else "EXPORTING" if task.exportStatus == ExportStatus.EXPORTING else task.status.value
+        if not hooks.progress(len(active), int(task.progress), task.fileName, task.id, native_status) and active and _loop:
             _loop.call_soon_threadsafe(download_manager.pause_all_downloads)
 
     platform_events.progress_handler = notify

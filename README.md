@@ -9,6 +9,11 @@
 
 **Animan** is an anime streaming and download application built with **FastAPI**, **Python 3**, and a **Vue 3 / TypeScript** interface. It supports dubbed and subtitled episodes, a personal library, imported sources, and local video playback.
 
+The [architecture and UML dossier](docs/architecture/README.md) includes class,
+use-case, sequence and deployment diagrams, detailed scenarios and a prioritized
+improvement plan. An [offline diagram gallery](docs/architecture/index.html)
+provides the SVG views and editable PlantUML sources.
+
 Use the packaged **Python + Vue desktop application** on Windows, Linux or macOS, or the cross-platform **Progressive Web App (PWA)**. The desktop release series starts at **0.1.0**; macOS builds are explicitly **UNTESTED on real Mac hardware**.
 
 ## Downloads and applications
@@ -71,6 +76,8 @@ Selecting a source saves the user's preference. A later language change preserve
 - Test a source to inspect catalog connectivity; configure its address and JSON selectors when required.
 - Adapters handle AniSama AJAX players, FRAnime's catalog/seasons/languages/players, JetAnime Dooplay players and Vostfree/AnimeVostFr links.
 
+FRAnime uses its JSON catalogue (including its original French field names), with a shared five-minute cache. Anime-Sama supports its current release cards and keeps VF/VOSTFR distinct. AniWorld uses a dedicated JSON search and season/player adapter. Known incomplete paths from older JetAnime and Vostfree imports are repaired when loaded; reinstalling these extensions is not required.
+
 Animan does not run Aniyomi APKs as Android does. It extracts a recipe and uses Python adapters. Sources with custom logic may need an additional adapter. Closed domains, certificate errors and Cloudflare challenges can prevent access even with a correct recipe.
 
 ### Network sessions and site verification
@@ -83,6 +90,8 @@ Animan does not run Aniyomi APKs as Android does. It extracts a recipe and uses 
 Verification controls appear with a failed search or catalog request, or a blocked download. Background feed checks do not display a global verification panel on Home. **Open in a new tab** uses the browser currently displaying Animan, including on a remote device. Browser detection supplies a hint for the label and the default installed browser.
 
 The optional **Capture cookies using a verification window** section opens an installed Chrome, Chromium, Edge or Brave browser on the **server machine**. Animan does not download a browser. Complete the CAPTCHA manually, then choose **I have completed verification**. Animan imports cookies for the relevant domain, checks access and resumes pending requests or downloads. A system WebView option is experimental. A normal tab cannot automatically transfer its cookies to the Python application; use the dedicated window for cookie capture. **I’m back, retry** checks access before clearing a blocked session.
+
+Verification modes now report their availability for the current platform, client and source proxy. Remote clients use the manual link; Android uses its native WebView without a proxy. WebView capture is disabled for proxied sources, and managed Chromium capture is disabled for authenticated proxies. Changing a session's route while verification is open requires reopening verification before importing cookies.
 
 The home feed fetches every enabled extension and reports failures per source instead of displaying them as an empty catalog.
 
@@ -113,6 +122,8 @@ An automatic domain rotation also requeues existing downloads waiting for verifi
 - **Ctrl+K / Cmd+K** opens global search. Source selectors group pinned and other sources.
 - Search retains its query, source and results when returning from an anime detail page. Catalogs keep loaded results and scroll position during navigation.
 - Favorites, episode watch progress and viewing history persist in SQLite. VF/VOSTFR versions have separate watch states.
+- Automatic favorite tracking uses the same provider registry for built-in and enabled imported sources. Each favorite can retain its version, subtitle, player and quality preferences in Library. Ambiguous mixed-language lists require an explicit version choice.
+- Discovery is persisted per source, anime URL, episode and version. A queue failure leaves the episode eligible for the next check; an existing or failed transfer is kept as one task for manual recovery. Previously observed, unselected variants are not silently backfilled after changing a preference.
 - Removing a library item offers an undo notification. Clearing the library preserves downloaded files.
 - Responsive layouts, dark/light themes, keyboard focus indicators, touch targets and reduced-motion support.
 - Server-Sent Events provide live download updates, with periodic refresh as a fallback.
@@ -125,12 +136,23 @@ An automatic domain rotation also requeues existing downloads waiting for verifi
 - Concurrent queue management, pause, cancellation, scheduling, series priority and global/per-task bandwidth limits.
 - Interrupted downloads resume using HTTP `Range` and strictly validated `Content-Range` bounds. Persisted strong ETags (or Last-Modified) are sent with `If-Range`; a 64 KB overlap also checks that the new route serves the same bytes. Changed media or servers ignoring Range restart safely instead of mixing representations.
 - Segmented HLS downloads preserve completed segments, retry interrupted segments and validate response lengths before saving them. A playlist fingerprint prevents reusing segments from a different playlist/variant; renewed signed playlist URLs can conservatively require a fresh download.
+- Cached HLS segments also carry a size and SHA-256 commit record. Corrupted or legacy uncommitted segments are fetched again. Assembly uses a temporary file and publishes only the complete output; an existing destination is preserved. Byte-range and initialization-map HLS playlists are explicitly rejected by the native segment path until supported.
+- HTTP resume records the resource origin and path, validates renewed signed URLs against existing bytes, and rejects partial responses whose total size is unknown. Finalization tracks a still-running mux worker after cancellation, preventing concurrent retry or deletion. Repeated finalization does not republish a confirmed Android export.
 - Optional Plex/Jellyfin organization: `Title/Season 01/Title - S01E01 [VF].mp4`.
 - Explicit preparation, video download, subtitle download, assembly, muxing and verification phases. Unknown total sizes show bytes received instead of a misleading percentage.
+- Android export has a separate persistent state: `NOT_REQUESTED`, `PENDING`, `EXPORTING`, `EXPORTED` or `EXPORT_FAILED`, with destination, confirmed URIs, attempts, timestamp and diagnostic. A verified private video stays completed if shared-storage publication fails or is interrupted. **Retry export** copies the local files without downloading them again; interrupted exports remain visible after restart and survive bulk cleanup.
+
+These tracking/export changes (A01/A02) are included in the current source checkout; they require a rebuilt application and are not part of the previously published beta APK. Database upgrades preserve existing favorites, cursors and tasks. Legacy Android export failures move to the export diagnostic; old tasks without confirmed URI evidence show an unknown export state.
 
 Retries reuse valid local video and subtitle files before contacting the host. Subtitle requests have bounded retries and explicit errors; expired URLs can be re-extracted once. Partial subtitle success is persisted. Muxing validates a temporary file before publication; existing MKVs are preserved and a conflicting new export receives a distinct filename. Legacy tasks referencing a removed MP4 can recover the corresponding MKV after video and requested-track checks. Verification distinguishes actual decoder failures from timestamp diagnostics produced by FFmpeg's null output.
 
 An active media connection keeps its proxy. If reading fails, the connection is closed before an optional automatic rotation, and the download manager resumes the partial file or retries the incomplete HLS segment. A manual rotation is refused while requests for that domain are active; pause the download first and wait for the connection to close. This is recovery after an interruption, not a seamless change of an established connection. Hosts may bind signed links to an IP or require fresh verification; those cases can need URL re-resolution or user verification. Servers without Range support restart file downloads from zero.
+
+### API contracts and validation
+
+API JSON responses expose `X-Animan-API-Version: 1`. Typed request/response contracts are documented in `/openapi.json`; binary video and event streams keep their streaming behavior. JSON failures retain legacy `error`, `detail` and `code` fields and add a `problem` object with a category, translatable message and recovery action. Categories distinguish site protection, network failure, rate limits, media processing, storage permission and export failure. Provider-specific recipes and settings remain typed JSON because their keys vary by extension.
+
+The A06/A07/A08 changes are available in the source checkout. They require a rebuilt Android application; Python tests and Kotlin compilation do not replace device tests. See the [implementation and manual validation guide](docs/architecture/a06-a08-validation.md) for coverage and remaining limits.
 
 ### Subtitles and muxing
 

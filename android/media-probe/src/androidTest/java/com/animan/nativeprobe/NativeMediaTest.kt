@@ -67,13 +67,22 @@ class NativeMediaTest {
                 context.getSharedPreferences("animan_exports", android.content.Context.MODE_PRIVATE).edit()
                     .clear().putString(legacyKey, uri.toString()).commit()
                 assertEquals(uri.toString(), NativeHooks.exportFile(privateFile.path, "storage-probe"))
+                // A readable URI can still contain an incomplete copy. It must
+                // not be accepted merely because the registry entry exists.
+                context.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(byteArrayOf(0)) }
+                val repaired = Uri.parse(NativeHooks.exportFile(privateFile.path, "storage-probe"))
+                published.add(repaired)
+                assertNotEquals(uri, repaired)
+                assertArrayEquals(privateFile.readBytes(), context.contentResolver.openInputStream(repaired)!!.use { it.readBytes() })
             }
             val blocked = File(privateRoot, "paused.mp4").apply { writeBytes(ByteArray(300000)) }
-            NativeHooks.progress(0, 0, "Paused", "paused-storage-probe", "paused")
-            try {
-                NativeHooks.exportFile(blocked.path, "paused-storage-probe")
-                fail("A paused export must not become a shared file")
-            } catch (_: IllegalStateException) { assertTrue(blocked.exists()) }
+            for (state in listOf("paused", "PAUSED", "CANCELLED")) {
+                NativeHooks.progress(0, 0, "Paused", "paused-storage-probe", state)
+                try {
+                    NativeHooks.exportFile(blocked.path, "paused-storage-probe")
+                    fail("An interrupted export must not become a shared file")
+                } catch (_: IllegalStateException) { assertTrue(blocked.exists()) }
+            }
             try {
                 NativeHooks.exportFile(source.path, "outside-private-root")
                 fail("Export must reject media outside the private downloads directory")

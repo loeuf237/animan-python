@@ -1,4 +1,5 @@
 """FRAnime's catalogue and players are API data, absent from its SPA HTML."""
+import asyncio
 import json
 import re
 import time
@@ -14,23 +15,45 @@ class FrAnimeAdapter(BaseSourceAdapter):
 
     def __init__(self):
         self._catalogues = {}
+        self._locks = {}
 
     def _api(self, container):
         parsed = urlparse(container.base_url)
         return f"{parsed.scheme}://api.{parsed.hostname.removeprefix('www.')}/api"
 
     async def _catalogue(self, container):
-        cached = self._catalogues.get(container.base_url)
-        if cached and time.monotonic() - cached[0] < 300:
-            return cached[1]
-        try:
-            data = json.loads(await container._fetch_html(self._api(container) + "/animes/"))
-        except ValueError:
-            return []
-        if not isinstance(data, list):
-            return []
-        self._catalogues[container.base_url] = (time.monotonic(), data)
-        return data
+        # The upstream catalogue is ~11 MB. Share one download between the
+        # home feed, search and detail requests, and cache only validated data.
+        lock = self._locks.setdefault(container.base_url, asyncio.Lock())
+        async with lock:
+            cached = self._catalogues.get(container.base_url)
+            if cached and time.monotonic() - cached[0] < 300:
+                return cached[1]
+            data = json.loads(await container._fetch_html(self._api(container) + "/animes/", timeout=40))
+            if not isinstance(data, list):
+                raise ValueError("FRAnime: format de catalogue inattendu")
+            rows = [self._normalize(row) for row in data if isinstance(row, dict) and row.get("title")]
+            self._catalogues[container.base_url] = (time.monotonic(), rows)
+            return rows
+
+    @staticmethod
+    def _normalize(row):
+        # Kotlin property names are not JSON field names (@SerialName).
+        anime = dict(row)
+        for target, wire in (("originalTitle", "titleO"), ("titlesAlt", "titles"),
+                             ("poster", "affiche"), ("genres", "themes")):
+            anime[target] = row.get(wire, row.get(target))
+        anime["seasons"] = []
+        for season in row.get("saisons", row.get("seasons", [])) or []:
+            episodes = []
+            for ep in season.get("episodes", []) or []:
+                languages = {}
+                for lang, value in (ep.get("lang", ep.get("languages", {})) or {}).items():
+                    value = value or {}
+                    languages[lang] = {**value, "players": value.get("lecteurs", value.get("players", [])) or []}
+                episodes.append({**ep, "languages": languages})
+            anime["seasons"].append({**season, "episodes": episodes})
+        return anime
 
     def _slug(self, anime):
         return re.sub(r"[^A-Za-z0-9 ]", "", anime.get("originalTitle") or anime["title"]).replace(" ", "-").lower()
@@ -51,7 +74,7 @@ class FrAnimeAdapter(BaseSourceAdapter):
     async def search_anime(self, query, container):
         query = query.casefold()
         rows = await self._catalogue(container)
-        return self._entries([a for a in rows if query in " ".join([a.get("title", ""), a.get("originalTitle", ""), *[v or "" for v in (a.get("titlesAlt") or {}).values()]]).casefold()], container)[:50]
+        return self._entries([a for a in rows if query in " ".join([a.get("title", ""), (a.get("originalTitle") or ""), *[v or "" for v in (a.get("titlesAlt") or {}).values()]]).casefold()], container)[:50]
 
     async def get_latest_releases(self, container):
         return self._entries(list(reversed(await self._catalogue(container)))[:18], container)

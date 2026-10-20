@@ -79,6 +79,7 @@
           crossorigin="anonymous"
           @timeupdate="onTimeUpdate"
           @loadedmetadata="onMetadataLoaded"
+          @error="onMediaError"
         >
           <track
             v-for="(sub, i) in playerStore.subtitles"
@@ -87,7 +88,8 @@
             :label="tx(sub.label || 'Français')"
             :srclang="sub.srclang || 'fr'"
             :src="sub.src"
-            :default="playerStore.selectedSubtitle === sub.src || (i === 0 && playerStore.selectedSubtitle !== '')"
+            :default="playerStore.selectedSubtitle === sub.src"
+            @load="syncSubtitleTracks"
           />
         </video>
 
@@ -105,7 +107,7 @@
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
           <p>{{ tx(playerStore.error) }}</p>
-          <button class="btn-primary" @click="playerStore.resolveStream"> {{ tx("Réessayer") }} </button>
+          <button class="btn-primary" @click="retryPlayback"> {{ tx("Réessayer") }} </button>
         </div>
       </div>
 
@@ -142,6 +144,7 @@ const libraryStore = useLibraryStore();
 
 const videoRef = ref<HTMLVideoElement | null>(null);
 let hlsInstance: Hls | null = null;
+let attachedVideo: HTMLVideoElement | null = null;
 let markedWatched = false;
 
 const hasQualities = computed(() => {
@@ -178,14 +181,25 @@ function onMetadataLoaded() {
   syncSubtitleTracks();
 }
 
-function setupVideo(url: string | null) {
-  if (!url || !videoRef.value) return;
-  markedWatched = false;
-
+function releaseVideo() {
   if (hlsInstance) {
     hlsInstance.destroy();
     hlsInstance = null;
   }
+  if (attachedVideo) {
+    attachedVideo.pause();
+    attachedVideo.removeAttribute('src');
+    attachedVideo.load();
+    attachedVideo = null;
+  }
+}
+
+function setupVideo(url: string | null) {
+  releaseVideo();
+  if (!url || !videoRef.value) return;
+  markedWatched = false;
+  playerStore.error = null;
+  attachedVideo = videoRef.value;
 
   const isHls = url.includes('.m3u8');
 
@@ -200,27 +214,54 @@ function setupVideo(url: string | null) {
       videoRef.value?.play().catch(() => {});
       syncSubtitleTracks();
     });
+    hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
+      if (data.fatal) {
+        playerStore.error = 'Impossible de lire ce flux vidéo. Réessayez ou choisissez un autre serveur.';
+      }
+    });
   } else {
     videoRef.value.src = url;
+    videoRef.value.load();
     videoRef.value.play().catch(() => {});
     syncSubtitleTracks();
   }
 }
 
 watch(
-  () => playerStore.videoUrl,
-  (newUrl) => {
+  [videoRef, () => playerStore.videoUrl],
+  ([, newUrl]) => {
     setupVideo(newUrl);
-  }
+  },
+  // Opening the modal and setting its URL happen in the same render cycle.
+  // Wait for the <video> ref; also reload when reopening the very same file.
+  { flush: 'post', immediate: true }
 );
 
 watch(
   () => playerStore.subtitles,
   () => {
-    setTimeout(syncSubtitleTracks, 100);
+    syncSubtitleTracks();
   },
-  { deep: true }
+  { deep: true, flush: 'post' }
 );
+
+function onMediaError() {
+  const error = videoRef.value?.error;
+  if (!playerStore.videoUrl || !error || error.code === 1) return;
+  playerStore.error = error.code === 2
+    ? 'Impossible de charger la vidéo. Vérifiez que le fichier existe et que le serveur est accessible.'
+    : error.code === 3
+      ? 'Le navigateur ne peut pas décoder cette vidéo. Le fichier peut être endommagé ou utiliser un codec non pris en charge.'
+      : 'Ce format vidéo ne peut pas être lu dans ce navigateur, ou le fichier est inaccessible. Essayez de l’ouvrir avec un lecteur comme VLC.';
+}
+
+function retryPlayback() {
+  if (playerStore.isDownloaded && playerStore.videoUrl) {
+    setupVideo(playerStore.videoUrl);
+  } else {
+    void playerStore.resolveStream();
+  }
+}
 
 function onServerChange(e: Event) {
   const target = e.target as HTMLSelectElement;
@@ -238,7 +279,7 @@ function onTimeUpdate() {
   const total = videoRef.value.duration;
   if (total > 0 && current / total >= 0.85) {
     markedWatched = true;
-    if (playerStore.currentEpisode) {
+    if (playerStore.currentEpisode && playerStore.animeUrl) {
       libraryStore.markWatched(playerStore.animeUrl, playerStore.currentEpisode.number, true, playerStore.currentEpisode.version || '', playerStore.animeTitle);
     }
   }
@@ -251,7 +292,7 @@ function onKeyDown(e: KeyboardEvent) {
   } else if (e.key === ' ' && e.target === document.body) {
     e.preventDefault();
     if (videoRef.value) {
-      if (videoRef.value.paused) videoRef.value.play();
+      if (videoRef.value.paused) videoRef.value.play().catch(() => {});
       else videoRef.value.pause();
     }
   }
@@ -263,9 +304,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
-  if (hlsInstance) {
-    hlsInstance.destroy();
-  }
+  releaseVideo();
 });
 </script>
 

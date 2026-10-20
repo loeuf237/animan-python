@@ -1,0 +1,56 @@
+@startuml
+!include theme.iuml
+' @source animan/services/extension_service.py:ExtensionService.import_repository
+' @source animan/services/extension_service.py:ExtensionService.toggle_extension
+' @source animan/services/aniyomi_dex_parser.py:AniyomiDexParser.parse_apk
+title Animan — import d'un dépôt et activation d'une source
+autonumber
+actor Utilisateur as U
+boundary "ExtensionsView" as UI
+control "API extensions" as API
+control ExtensionService as Ext
+control SourceHTTPService as HTTP
+participant "Dépôt JSON / APK" as Repo
+control AniyomiDexParser as Parser
+database "SQLite : extension_repos\nimported_extensions" as DB
+control "AniyomiContainerSource\n+ AdapterRegistry" as Runtime
+U -> UI : importer l'URL du dépôt
+UI -> API : POST /api/extensions/import-repo
+API -> Ext : import_repository(repo_url)
+Ext -> HTTP : récupérer le catalogue autorisé
+HTTP -> Repo : GET index JSON
+Repo --> Ext : métadonnées des extensions
+Ext -> DB : activer ce dépôt ; désactiver les autres
+Ext -> DB : mettre à jour le catalogue ; préserver choix existants
+Ext --> UI : liste ; nouvelles extensions désactivées
+U -> UI : activer une extension
+UI -> API : POST /api/extensions/{id}/toggle
+API -> Ext : toggle_extension(id, true)
+Ext -> HTTP : récupérer l'APK si recette à compiler
+HTTP -> Repo : GET APK
+Repo --> Ext : octets APK
+Ext -> Parser : parse_apk(apk_bytes, pkg, base_url)
+Parser --> Ext : SourceRecipe heuristique
+Ext -> DB : recette JSON + état d'activation
+Ext -> Runtime : construire le conteneur et sélectionner un adaptateur
+Ext --> UI : source activée / configuration nécessaire
+opt diagnostic ou sélecteurs personnalisés
+  U -> UI : tester / configurer
+  UI -> API : /diagnose ou PUT /recipe
+  API -> Ext : diagnose_extension / configure_extension
+  Ext -> Runtime : vérifier base URL, recette et accès catalogue
+  Runtime -> HTTP : requête source
+  HTTP --> Runtime : réponse / erreur réseau / challenge
+  Runtime --> UI : résultat explicite + URL si bloqué
+end
+note over Parser,Runtime
+L'APK n'est ni installé ni exécuté dans un moteur Kotlin/DEX.
+Une recette heuristique ne garantit pas la compatibilité
+d'une extension qui contient une logique personnalisée.
+end note
+note over Ext,DB
+SQL sqlite3 explicite pour les extensions ; les autres
+entités de bibliothèque passent par SQLAlchemy.
+Une recette modifiée doit invalider le conteneur en mémoire.
+end note
+@enduml

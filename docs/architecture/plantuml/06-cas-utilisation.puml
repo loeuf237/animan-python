@@ -1,0 +1,68 @@
+@startuml
+!include theme.iuml
+' @source animan/routers/anime.py:search_api
+' @source animan/routers/download.py:start_download
+' @source animan/routers/library.py:mark_watched
+title Animan — cas d'utilisation fonctionnels
+left to right direction
+actor Utilisateur as U
+actor "Site source / lecteur" as Site
+actor "Événement temporel" as Clock
+actor "Dépôt d'extensions" as Repo
+rectangle "Animan — moteur Python + interface" {
+  usecase "UC01 Explorer une source\n(sorties, catalogue, filtres disponibles)" as Browse
+  usecase "UC02 Rechercher un animé\n(source choisie ou toutes)" as Search
+  usecase "UC03 Consulter une fiche\net choisir épisode / version / qualité" as Detail
+  usecase "UC04 Lire un épisode\nlocal ou distant" as Play
+  usecase "Lire un média distant" as RemotePlay
+  usecase "UC05 Télécharger\nun épisode ou un lot" as Download
+  usecase "UC06 Piloter la file\npause, reprise, ordre, limite, planning" as Queue
+  usecase "UC07 Obtenir et fusionner\nles sous-titres" as Subs
+  usecase "UC08 Vérifier\nl'intégrité du média" as Verify
+  usecase "UC09 Gérer favoris\net progression de lecture" as Library
+  usecase "UC10 Surveiller les favoris\net télécharger les nouveautés" as Auto
+  usecase "UC11 Installer, activer,\nconfigurer une extension" as Ext
+  usecase "UC16 Personnaliser langue,\napparence et préférences" as Prefs
+  usecase "UC17 Consulter / nettoyer\nhistorique et tâches" as History
+  usecase "UC18 Reprendre\naprès une interruption" as Resume
+  usecase "Résoudre les lecteurs\net l'URL média" as Resolve
+}
+U -- Browse
+U -- Search
+U -- Detail
+U -- Play
+U -- Download
+U -- Queue
+U -- Library
+U -- Ext
+U -- Prefs
+U -- History
+U -- Resume
+Clock -- Auto
+Site -- Browse
+Site -- Search
+Site -- Resolve
+Repo -- Ext
+Download ..> Resolve : <<include>>
+Play <|-- RemotePlay
+RemotePlay ..> Resolve : <<include>>
+Download ..> Verify : <<include>>
+Subs ..> Download : <<extend>>\n[sous-titres demandés et présents]
+Auto ..> Download : crée une tâche si nouveauté
+Resume ..> Download : <<extend>>\n[tâche interrompue]
+note bottom of Auto
+UC10 utilise le registre des sources intégrées/importées.
+L'utilisateur règle version, pistes, qualité et lecteur.
+Les découvertes sont persistées par épisode/version.
+end note
+note bottom of Browse
+Genres, popularité, tri et pagination dépendent des
+capacités de chaque source. Pas de compte distant
+Animan ni de synchronisation multiappareil aujourd'hui.
+end note
+note bottom of Resolve
+« include » = sous-parcours requis dans le contexte
+indiqué ; « extend » = comportement conditionnel.
+Les erreurs/protections sont détaillées dans la vue suivante.
+end note
+@enduml
