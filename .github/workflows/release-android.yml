@@ -185,7 +185,12 @@ jobs:
           heap-size: 512M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: python scripts/android_run_probes.py android-validation android-test-results
+          # Emulator-only ADB access for collecting test evidence on API 30;
+          # this does not grant extra storage privileges to the application.
+          script: |
+            adb root
+            adb wait-for-device
+            python scripts/android_run_probes.py android-validation android-test-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:

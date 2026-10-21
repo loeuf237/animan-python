@@ -62,7 +62,13 @@ jobs:
           heap-size: 512M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          script: python scripts/android_run_probes.py android-validation signed-test-results
+          # Root only the disposable Google APIs emulator's ADB daemon so the
+          # collector can pull app-owned evidence on Android 11. The app still
+          # executes under its normal UID and production storage permissions.
+          script: |
+            adb root
+            adb wait-for-device
+            python scripts/android_run_probes.py android-validation signed-test-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
