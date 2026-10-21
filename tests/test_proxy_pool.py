@@ -164,6 +164,9 @@ async def test_health_renewal_prioritizes_expired_successes_over_unknown_address
 @pytest.mark.asyncio
 async def test_health_watch_checks_only_when_opted_in_and_obeys_five_minute_budget(pool, monkeypatch):
     ticks, checks = 0, 0
+    # A fresh runner can have less than five minutes of machine uptime. Zero
+    # means no probe yet, not a probe performed at boot.
+    monkeypatch.setattr('animan.services.proxy_pool.time.monotonic', lambda: 100.0)
     async def tick(_):
         nonlocal ticks
         ticks += 1

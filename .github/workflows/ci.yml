@@ -40,6 +40,7 @@ jobs:
 
   python:
     name: Python ${{ matrix.python }} tests
+    needs: frontend
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     strategy:
@@ -51,6 +52,10 @@ jobs:
       ANIMAN_HOST: '127.0.0.1'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: animelab-frontend
+          path: frontend/dist/
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}

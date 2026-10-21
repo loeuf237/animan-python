@@ -147,14 +147,29 @@ async def test_installed_chrome_cookie_exchange_with_local_server(tmp_path, monk
     service=BrowserVerificationService(transport)
     profile=tmp_path/'profile'
     profile.mkdir()
-    process=subprocess.Popen([browser['path'],'--headless=new',f'--user-data-dir={profile}',
-        '--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--no-first-run',
-        '--no-default-browser-check','--disable-background-networking',base+'/verify'],
-        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    browser_log=tmp_path/'browser-startup.log'
+    with browser_log.open('wb') as stderr:
+        process=subprocess.Popen([browser['path'],'--headless=new',f'--user-data-dir={profile}',
+            '--remote-debugging-port=0','--remote-debugging-address=127.0.0.1','--no-first-run',
+            '--no-default-browser-check','--disable-background-networking',base+'/verify'],
+            stdout=subprocess.DEVNULL,stderr=stderr)
     service.jobs['real']={'id':'real','domain':'127.0.0.1','url':base+'/episode','created':time.monotonic(),
         'mode':'browser','process':process,'window':None,'port_file':profile/'DevToolsActivePort'}
     try:
         with pytest.raises(VerificationRequired): await transport.async_client().get(base+'/episode')
+        # A cold browser on a shared runner may take longer than a normal CDP
+        # command's readiness budget. Wait for startup explicitly, retaining
+        # diagnostics instead of skipping or weakening the browser sandbox.
+        deadline=time.monotonic()+30
+        port_file=profile/'DevToolsActivePort'
+        while time.monotonic()<deadline:
+            if process.poll() is not None:
+                pytest.fail('Browser exited during startup: '+browser_log.read_text(errors='replace')[-3000:])
+            if port_file.exists() and len(port_file.read_text().splitlines())>=2:
+                break
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail('Browser startup timed out: '+browser_log.read_text(errors='replace')[-3000:])
         # The local fixture page sets a cookie; no production challenge is automated.
         for _ in range(30):
             cookies=(await service._cdp(service.jobs['real'],'Storage.getCookies')).get('cookies',[])

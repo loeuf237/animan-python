@@ -262,7 +262,7 @@ class ProxyPool:
         while True:
             await asyncio.sleep(30)
             if self.options["automatic"] and not self.refreshing and not self._checking:
-                if time.monotonic() - self.last_check >= 300 and self.snapshot()["healthyExits"] < 3:
+                if (not self.last_check or time.monotonic() - self.last_check >= 300) and self.snapshot()["healthyExits"] < 3:
                     await self.check()
 
     def choose(self, domain, current, *, automatic=False):
