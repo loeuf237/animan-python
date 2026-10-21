@@ -4,6 +4,9 @@ Install Pillow, then run `python scripts/branding.py` from any directory.
 The generated artwork itself is kept in docs/branding/concepts.
 """
 from pathlib import Path
+import hashlib
+import json
+import re
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +32,29 @@ def generate():
                            "apple-touch-icon.png": 180, "logo.jpg": 512}.items():
             save(base / "img" / name, size)
         save(base / "favicon.ico", 256, sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
+
+    # Vite gives imported artwork a content-hashed URL. An old service worker
+    # must never be able to substitute the former /img/icon-192.png response.
+    save(ROOT / "frontend/src/assets/brand-icon.png", 192)
+    public = ROOT / "frontend/public"
+    def versioned(url):
+        path = url.split("?", 1)[0]
+        digest = hashlib.sha256((public / path.lstrip("/")).read_bytes()).hexdigest()[:12]
+        return f"{path}?v={digest}"
+
+    for base in (public, ROOT / "animan/static"):
+        manifest = base / "manifest.json"
+        data = json.loads(manifest.read_text())
+        for group in [data.get("icons", []), *(s.get("icons", []) for s in data.get("shortcuts", []))]:
+            for icon in group:
+                icon["src"] = versioned(icon["src"])
+        manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+    for path in [ROOT / "frontend/index.html", ROOT / "animan/templates/fragments/navbar.html"]:
+        text = re.sub(r'(?P<prefix>(?:src|href)=")(?P<url>/img/(?:icon-[^"?]+\.png|favicon\.png|apple-touch-icon\.png))(?:\?[^"\s]*)?"',
+                      lambda match: match["prefix"] + versioned(match["url"]) + '"', path.read_text())
+        text = re.sub(r'href="/manifest\.json(?:\?[^"\s]*)?"',
+                      'href="' + versioned('/manifest.json') + '"', text)
+        path.write_text(text)
 
     res = ROOT / "android/app/src/main/res"
     for density, size, foreground in (("mdpi", 48, 108), ("hdpi", 72, 162),

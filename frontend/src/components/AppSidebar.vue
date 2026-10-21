@@ -3,7 +3,7 @@
     <!-- Brand Logo & Name -->
     <router-link to="/" class="brand-mark" aria-label="AnimeLab">
       <span class="brand-icon">
-        <img src="/img/icon-192.png" :alt="tx('AnimeLab Logo')" class="brand-logo-img" />
+        <img :src="brandIcon" :alt="tx('AnimeLab Logo')" class="brand-logo-img" />
       </span>
       <span class="brand-name">Anime<span>Lab</span></span>
     </router-link>
@@ -52,6 +52,7 @@
 </template>
 
 <script setup lang="ts">
+import brandIcon from '@/assets/brand-icon.png';
 import { tx } from '@/utils/locale';
 import { useDownloadStore } from '@/stores/downloads';
 import { useI18nStore } from '@/stores/i18n';

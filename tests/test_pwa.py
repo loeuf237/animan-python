@@ -1,4 +1,6 @@
 import pytest
+import hashlib
+from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 from run import app
 from animan.database import init_db
@@ -37,6 +39,10 @@ def test_pwa_manifest(client):
     # Check maskable icon
     has_maskable = any("maskable" in icon.get("purpose", "") for icon in icons)
     assert has_maskable
+    for icon in icons:
+        image = client.get(icon["src"])
+        assert image.status_code == 200
+        assert parse_qs(urlparse(icon["src"]).query)["v"] == [hashlib.sha256(image.content).hexdigest()[:12]]
 
 def test_pwa_service_worker(client):
     resp = client.get("/sw.js")
@@ -82,7 +88,7 @@ def test_pwa_integration_in_html_pages(client):
         assert resp.status_code == 200
         html = resp.text
         assert 'rel="manifest"' in html
-        assert 'href="/manifest.json"' in html
+        assert 'href="/manifest.json?v=' in html
         assert 'name="theme-color"' in html
         assert 'name="apple-mobile-web-app-capable"' in html
         assert '/js/pwa.js' in html

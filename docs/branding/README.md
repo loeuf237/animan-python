@@ -18,6 +18,8 @@ To regenerate the derived assets, install Pillow (`python -m pip install 'Pillow
 
 The wordmark is supplied separately as `animelab-wordmark.png`. Keep clear space around the mark. For app icons, use the square master rather than the horizontal wordmark. Check the launcher silhouette at small sizes and with circular masks when changing the master.
 
+The Vue navigation imports `frontend/src/assets/brand-icon.png`, so Vite generates a new URL whenever its bytes change. The generator also fingerprints the legacy page icons, favicon, touch icon and manifest references. Branding requests use network-first service-worker caching, with an offline fallback. SPA visits check for updates to an existing worker without forcing a page reload. This prevents an older installed cache from continuing to display the previous Animan logo after an upgrade.
+
 ## Upgrade compatibility
 
 The displayed product name is **AnimeLab**. The repository is `loeuf237/animelab`. New binary packages use `AnimeLab` filenames. Historical release assets and validation evidence keep their original filenames.

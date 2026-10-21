@@ -1,7 +1,7 @@
 <template>
   <header class="app-topbar">
     <router-link to="/" class="brand-mark-mobile" aria-label="AnimeLab">
-      <img src="/img/icon-192.png" :alt="tx('AnimeLab Logo')" class="brand-logo-img" />
+      <img :src="brandIcon" :alt="tx('AnimeLab Logo')" class="brand-logo-img" />
     </router-link>
 
     <button type="button" class="top-search search-input-wrap search-trigger" :aria-label="tx('Ouvrir la recherche')" aria-keyshortcuts="Control+K Meta+K" @click="emitOpenPalette">
@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import brandIcon from '@/assets/brand-icon.png';
 import { tx } from '@/utils/locale';
 import { ref, onMounted } from 'vue';
 import { useI18nStore } from '@/stores/i18n';

@@ -1,5 +1,5 @@
 // AnimeLab Service Worker - PWA Offline & Caching Engine
-const CACHE_NAME = 'animelab-cache-v0.1.0-brand1';
+const CACHE_NAME = 'animelab-cache-v0.1.0-brand2';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -63,6 +63,26 @@ self.addEventListener('fetch', (event) => {
 
   if (isVideoOrStream) {
     return; // Pass through directly to browser network
+  }
+
+  // Branding may be replaced at a stable URL on upgraded installations. Use
+  // cached artwork only when offline, rather than showing the previous logo
+  // for a whole page visit while background revalidation runs.
+  const isBranding = url.pathname === '/manifest.json' || url.pathname === '/favicon.ico' ||
+    /^\/(?:static\/)?img\/(?:icon-(?:192|512|maskable)|favicon|apple-touch-icon)\.png$/.test(url.pathname) ||
+    /^\/(?:static\/)?img\/logo\.jpg$/.test(url.pathname);
+  if (isBranding) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+      try {
+        const response = await fetch(request, { cache: 'no-cache' });
+        if (response.ok) await cache.put(request, response.clone());
+        return response;
+      } catch {
+        return (await cache.match(request)) || Response.error();
+      }
+    })());
+    return;
   }
 
   // 3. Navigation requests (HTML pages)
