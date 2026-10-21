@@ -1,3 +1,4 @@
+from animan.models.playback import PlaybackProgress
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
 from animan.models.favorite import FavoriteAnime
 from animan.models.watch_progress import WatchProgress

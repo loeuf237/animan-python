@@ -1,15 +1,18 @@
 # Android distribution and validation
 
-The [0.1.0 Android beta](https://github.com/loeuf237/animan-python/releases/tag/android-v0.1.0-beta.1)
+The [0.1.0 Android beta](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.1)
 ships one signed ARM64 APK, build provenance and checksums. It is a standalone
-application, not a wrapper requiring a running desktop server. Physical-device
-testing and the complete ARM64 media pipeline remain pending.
+application, not a wrapper requiring a running desktop server. Full ARM64
+physical-device validation remains pending for that previously published APK;
+the newer A11 source build is validated separately below.
 
 The current target is Android 10+ / ARM64, Python 3.13 and Chaquopy 17.1.0.
 `android/requirements.txt` pins the runtime. `scripts/android_native_wheels.py`
-builds cffi 2.0.0, pydantic-core 2.41.5 and lxml 6.1.3 with recent libxml2/libxslt
-against a pinned Chaquopy toolchain;
-curl_cffi 0.16.3 uses its unchanged official ARM64 wheel. Desktop wheels are never
+builds cffi 2.0.0 and pydantic-core 2.41.5 against a pinned Chaquopy toolchain;
+curl_cffi 0.16.3 uses its official ARM64 wheel. The wheel stays unchanged; A11
+strips debug/static symbols from copies inside the generated requirements archive.
+Android source adapters use BeautifulSoup with `html.parser`, so lxml and its
+native XML/XSLT libraries are no longer installed. Desktop wheels are never
 renamed into Android artifacts. AES uses javax.crypto rather than an outdated
 Android cryptography/OpenSSL wheel.
 
@@ -26,7 +29,9 @@ These are separate checks, not a completed ARM64 download-pipeline test. The
 software ARM64 guest probe is retained for diagnosis: current SDK system
 services crash during boot in that environment. A physical ARM64 test is needed.
 
-Run locally with Python 3.13, JDK 17+, Android SDK 35, NDK and native build tools:
+Run locally with Python 3.13, JDK 17+, Android SDK 35, NDK and native build tools.
+LLVM `llvm-strip` must be on `PATH`, or `ANIMAN_LLVM_STRIP` must point to the NDK's
+LLVM strip executable. `ANIMAN_BUILD_PYTHON` can select a Python 3.13 executable:
 
 ```bash
 python3.13 scripts/android_native_wheels.py
@@ -46,6 +51,38 @@ python scripts/android_instrumentation.py \
   android/app/build/outputs/apk/androidTest/validation/app-validation-androidTest.apk \
   build/android-test-results
 ```
+
+Release and validation builds enable R8 and resource shrinking. Python/JNI bridge
+names are kept explicitly; native allocation sections and segment mappings are
+checked before stripping. Original binaries and hashes are retained under
+`android/app/build/reports/native-optimization/`, and R8 maps under
+`android/app/build/outputs/mapping/`. CI uploads these diagnostic artifacts.
+The source synchronization removes only byte-identical public copies served
+from `animan/static`; it retains SPA assets, templates and all extractors.
+Native libraries remain uncompressed for direct loading.
+
+The A11 source build passed the complete direct/HLS/subtitle/export probe on a
+physical Android 10 ARM64 phone using a separate test package. Its DEX and all
+Python/native engine entries are identical to the normal signed deliverable.
+The test APK is 61.31 MB; the normal signed APK is 61.36 MB. Installed app and
+data after first render measured 97.37 MB versus 137.52 MB for the unoptimized
+control. These are clean-test-data snapshots, not the size of a personal library.
+See [A11 validation](architecture/a11-validation.md) for evidence and limits.
+
+For a controlled comparison, `-Paniman.optimizeApk=false` disables stripping,
+asset deduplication and R8/resource shrinking. To also restore an older dependency
+set for a benchmark, point `ANIMAN_ANDROID_REQUIREMENTS` to a saved requirements
+file. These overrides are for measurements; the release workflow requires the
+optimized packaging checks in `scripts/android_release.py --optimized`.
+
+On a personal phone, add `-Paniman.isolatedValidation=true` to build an independent
+`com.animan.app.a11test` application, labelled **AnimeLab A11 test**. Pass
+`--package com.animan.app.a11test` to the instrumentation script. This keeps the
+production library and preferences separate. Use a fresh test installation for
+each size measurement. Instrumentation records `footprint.json` after the first
+render, before media probes: APK bytes, installed application bytes and private
+data (including cache). Do not add the cache figure to the data figure again.
+Compare these device measurements separately from APK ZIP bytes.
 
 Optional CI signing uses `ANIMAN_ANDROID_KEYSTORE`, `ANIMAN_ANDROID_STORE_PASSWORD`,
 `ANIMAN_ANDROID_KEY_PASSWORD` and `ANIMAN_ANDROID_KEY_ALIAS`, with
@@ -125,6 +162,6 @@ the app; they do not update the previously published beta APK.
 A subtitle mux failing at the publication stage with `Errno 13`
 is handled by reserving a filename and renaming, without Android hard links.
 Some Android 11 MediaProvider versions only accept subtitle MIME types in
-`Movies/Animan`; Animan falls back there for separate subtitles and displays
+`Movies/AnimeLab`; AnimeLab falls back there for separate subtitles and displays
 that location. A folder authorized through the system picker keeps videos and
 subtitles together, independently of MediaStore's MIME/directory restrictions.

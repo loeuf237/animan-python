@@ -1,18 +1,18 @@
 <resources>
-    <string name="app_name">Animan</string>
+    <string name="app_name">AnimeLab</string>
     <string name="server_url_hint">http://192.168.1.50:8000</string>
     <string name="connect">Se connecter</string>
     <string name="connection_error_title">Serveur non détecté</string>
-    <string name="connection_error_desc">Assurez-vous qu\'Animan est lancé sur votre PC ou serveur local sur le même réseau Wi-Fi.</string>
+    <string name="connection_error_desc">Assurez-vous qu\'AnimeLab est lancé sur votre PC ou serveur local sur le même réseau Wi-Fi.</string>
     <string name="change_server">Configurer le serveur</string>
     <string name="retry">Retry</string>
-    <string name="starting_engine">Starting the embedded Animan engine…</string>
+    <string name="starting_engine">Starting the embedded AnimeLab engine…</string>
     <string name="engine_error">The embedded engine could not start: %1$s</string>
     <string name="engine_timeout">Startup timed out</string>
     <string name="download_channel">Anime downloads</string>
     <string name="active_downloads">%1$d active download(s)</string>
     <string name="pause_downloads">Pause downloads</string>
-    <string name="return_to_animan">Return to Animan</string>
+    <string name="return_to_animan">Return to AnimeLab</string>
     <string name="storage_permission_error">Storage access failed. Select a writable folder in Settings → Storage.</string>
     <string name="download_started">Téléchargement lancé</string>
 </resources>

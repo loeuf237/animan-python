@@ -199,7 +199,7 @@ const currentReleases = computed<AnimeResult[]>(() => {
 
 const sourceOptions = computed(() => [
   {id: 'french-manga', name: 'French-Manga'}, {id: 'voir-anime', name: 'VoirAnime'}, {id: 'animepahe', name: 'AnimePahe'},
-  ...enabledExtensions.value.map(ext => ({id: String(ext.id || ext.pkg), name: ext.name.replace(/^Aniyomi:\s*/i, '')})),
+  ...enabledExtensions.value.filter(ext => ext.supportsLatest !== false).map(ext => ({id: String(ext.id || ext.pkg), name: ext.name.replace(/^Aniyomi:\s*/i, '')})),
 ]);
 function emitOpenPalette() { emit('open-palette', '', selectedSource.value); }
 

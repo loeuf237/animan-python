@@ -3,7 +3,7 @@
 ' @source animan/services/download_manager.py:DownloadManagerService._execute_download
 ' @source animan/services/download_manager.py:DownloadManagerService._finalize_task
 ' @source animan/services/download_manager.py:DownloadManagerService._publish_mux_file
-title Animan — téléchargement, HLS, sous-titres et finalisation
+title AnimeLab — téléchargement, HLS, sous-titres et finalisation
 autonumber
 actor Utilisateur as U
 boundary "Vue / store downloads" as UI

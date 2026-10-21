@@ -1,3 +1,9 @@
+from animan.services.download_stages.state import transition
+from animan.services.download_errors import SubtitleError
+from animan.services.download_stages.transfer import TransferWorker
+from animan.services.download_stages.media import MediaPipeline
+from animan.services.download_stages.export import ExportCoordinator
+from animan.services.download_stages.scheduler import DownloadScheduler
 from animan.services.source_http import source_http, VerificationRequired, RateLimited, PROFILE
 import asyncio
 import errno
@@ -38,12 +44,6 @@ from animan.security import is_safe_path, is_safe_url
 
 logger = logging.getLogger("animan.download_manager")
 
-class SubtitleError(ValueError):
-    """A known subtitle track could not be downloaded or validated."""
-    def __init__(self, message: str, refresh_required: bool = False):
-        super().__init__(message)
-        self.refresh_required = refresh_required
-
 class ResolvedVideoInfo:
     def __init__(self):
         self.direct_url: str = ""
@@ -69,15 +69,20 @@ class DownloadManagerService:
 
         self.tasks: Dict[str, DownloadTask] = {}
         self.task_order: List[str] = []
-        self._finalization_locks: Dict[str, asyncio.Lock] = {}
-        self._media_jobs: Dict[str, asyncio.Task] = {}
-        self._export_locks: Dict[str, asyncio.Lock] = {}
-        self._native_exports: Dict[str, asyncio.Task] = {}
+        self.transfer_worker = TransferWorker(self)
+        self.media_pipeline = MediaPipeline(self)
+        self.export_coordinator = ExportCoordinator(self)
+        self.scheduler = DownloadScheduler(self)
+        # Compatibility aliases for integrations; each stage owns its state.
+        self._finalization_locks = self.media_pipeline.locks
+        self._media_jobs = self.media_pipeline.jobs
+        self._export_locks = self.export_coordinator.locks
+        self._native_exports = self.export_coordinator.jobs
         self.sse_subscribers: List[asyncio.Queue] = []
         self.resolved_info_cache: Dict[str, ResolvedVideoInfo] = {}
 
         self._active_workers: int = 0
-        self._lock = asyncio.Lock()
+        self._lock = self.scheduler.lock
         self._info_semaphore = asyncio.Semaphore(4)
 
     def _create_async_client(
@@ -90,6 +95,8 @@ class DownloadManagerService:
         return source_http.async_client(headers=headers, timeout=timeout, follow_redirects=follow_redirects)
 
     def _trigger_process_queue(self):
+        if self.scheduler.closing:
+            return
         try:
             loop = asyncio.get_running_loop()
             spawn(self.process_queue(), name="process-queue")
@@ -132,6 +139,7 @@ class DownloadManagerService:
         return False
 
     def init_from_db(self):
+        self.scheduler.closing = False
         try:
             library_service.recover_interrupted_exports()
             unfinished = library_service.get_unfinished_tasks()
@@ -163,7 +171,7 @@ class DownloadManagerService:
                     if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
                         verif = verification_service.verify_file(str(out_path), task.animeName, task.fileName)
                         if verif.valid and not self._has_pending_subtitles(task):
-                            task.status = DownloadStatus.COMPLETED
+                            transition(task, DownloadStatus.COMPLETED)
                             task.progress = 100.0
                             task.downloadedBytes = out_path.stat().st_size
                             task.totalBytes = max(task.totalBytes, out_path.stat().st_size)
@@ -183,7 +191,7 @@ class DownloadManagerService:
                             task.progress = min(99.9, (task.downloadedBytes / task.totalBytes) * 100.0)
 
                 if task.status in [DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING, DownloadStatus.MUXING]:
-                    task.status = DownloadStatus.PAUSED
+                    transition(task, DownloadStatus.PAUSED)
                     task.speed = 0
                     library_service.save_task(task)
                 self.tasks[task.id] = task
@@ -202,9 +210,14 @@ class DownloadManagerService:
     # Paramètres et Configuration
     # -------------------------------------------------------------------------
 
+    async def shutdown(self):
+        await self.scheduler.close()
+
     def get_settings(self) -> Dict[str, Any]:
         return {
             "maxConcurrentDownloads": self.max_concurrent_downloads,
+            "mediaWorkers": self.media_pipeline.budget.limit,
+            "exportWorkers": self.export_coordinator.budget.limit,
             "globalSpeedLimit": self.global_speed_limit,
             "plexOrganization": self.plex_organization,
             "selectedUserAgent": proxy_service.get_selected_user_agent(),
@@ -252,7 +265,7 @@ class DownloadManagerService:
 
     def _pause_destination_conflict(self, task):
         task.paused = True
-        task.status = DownloadStatus.PAUSED
+        transition(task, DownloadStatus.PAUSED)
         task.speed = 0
         task.error = "Plusieurs liens partagent ce fichier. Relancez la version souhaitée depuis la fiche animé."
         library_service.save_task(task)
@@ -985,9 +998,9 @@ class DownloadManagerService:
 
     def pause_download(self, task_id: str) -> bool:
         t = self.tasks.get(task_id)
-        if t and t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED]:
+        if t and t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED, DownloadStatus.MUXING]:
             t.paused = True
-            t.status = DownloadStatus.PAUSED
+            transition(t, DownloadStatus.PAUSED)
             t.speed = 0
             self.broadcast_update(t)
             library_service.save_task(t)
@@ -1002,6 +1015,8 @@ class DownloadManagerService:
         return sum(self.resume_download(task_id) for task_id in ids)
 
     def resume_download(self, task_id: str) -> bool:
+        if self._export_in_progress(task_id):
+            return False
         t = self.tasks.get(task_id)
         if not t:
             entity = library_service.get_task_entity(task_id)
@@ -1015,7 +1030,7 @@ class DownloadManagerService:
             if not t.verificationUrl or source_http.state(t.verificationUrl).blocked_url:
                 return False
             t.verificationUrl = None
-            t.status = DownloadStatus.PAUSED
+            transition(t, DownloadStatus.PAUSED)
         if t and self._has_destination_conflict(t):
             self._pause_destination_conflict(t)
             return False
@@ -1033,7 +1048,7 @@ class DownloadManagerService:
                 if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
                     verif = verification_service.verify_file(str(out_path), t.animeName, t.fileName)
                     if verif.valid and not self._has_pending_subtitles(t):
-                        t.status = DownloadStatus.COMPLETED
+                        transition(t, DownloadStatus.COMPLETED)
                         t.progress = 100.0
                         t.downloadedBytes = out_path.stat().st_size
                         t.totalBytes = max(t.totalBytes, out_path.stat().st_size)
@@ -1068,7 +1083,7 @@ class DownloadManagerService:
                 logger.info("Resume detected for %s: %s already downloaded",
                             t.fileName, format_bytes(t.downloadedBytes))
 
-            t.status = DownloadStatus.PENDING
+            transition(t, DownloadStatus.PENDING)
             self.broadcast_update(t)
             library_service.save_task(t)
             self._trigger_process_queue()
@@ -1089,7 +1104,7 @@ class DownloadManagerService:
         if t and t.status in cancellable_statuses:
             t.cancelled = True
             t.paused = False
-            t.status = DownloadStatus.CANCELLED
+            transition(t, DownloadStatus.CANCELLED)
             t.speed = 0
             proc = getattr(t, "activeProcess", None)
             if proc:
@@ -1107,7 +1122,7 @@ class DownloadManagerService:
                 task = entity.to_task()
                 task.cancelled = True
                 task.paused = False
-                task.status = DownloadStatus.CANCELLED
+                transition(task, DownloadStatus.CANCELLED)
                 task.speed = 0
                 library_service.save_task(task)
                 return True
@@ -1129,7 +1144,7 @@ class DownloadManagerService:
             if t.status in active_statuses:
                 t.cancelled = True
                 t.paused = False
-                t.status = DownloadStatus.CANCELLED
+                transition(t, DownloadStatus.CANCELLED)
                 t.speed = 0
                 proc = getattr(t, "activeProcess", None)
                 if proc:
@@ -1148,6 +1163,9 @@ class DownloadManagerService:
 
     def _export_in_progress(self, task_id: str) -> bool:
         task = self.tasks.get(task_id)
+        lock = self._finalization_locks.get(task_id)
+        if lock is not None and lock.locked():
+            return True
         media = self._media_jobs.get(task_id)
         if media is not None and not media.done():
             return True
@@ -1189,7 +1207,7 @@ class DownloadManagerService:
         for t in self.tasks.values():
             if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING, DownloadStatus.RETRYING, DownloadStatus.SCHEDULED, DownloadStatus.MUXING]:
                 t.paused = True
-                t.status = DownloadStatus.PAUSED
+                transition(t, DownloadStatus.PAUSED)
                 t.speed = 0
                 self.broadcast_update(t)
                 library_service.save_task(t)
@@ -1223,7 +1241,7 @@ class DownloadManagerService:
                     if out_path.exists() and out_path.stat().st_size > 1024 * 1024:
                         verif = verification_service.verify_file(str(out_path), t.animeName, t.fileName)
                         if verif.valid and not self._has_pending_subtitles(t):
-                            t.status = DownloadStatus.COMPLETED
+                            transition(t, DownloadStatus.COMPLETED)
                             t.progress = 100.0
                             t.downloadedBytes = out_path.stat().st_size
                             t.totalBytes = max(t.totalBytes, out_path.stat().st_size)
@@ -1242,7 +1260,7 @@ class DownloadManagerService:
                         if t.totalBytes > 0 and t.downloadedBytes > 0:
                             t.progress = min(99.9, (t.downloadedBytes / t.totalBytes) * 100.0)
 
-                t.status = DownloadStatus.PENDING
+                transition(t, DownloadStatus.PENDING)
                 self.broadcast_update(t)
                 library_service.save_task(t)
         self._trigger_process_queue()
@@ -1277,36 +1295,13 @@ class DownloadManagerService:
                     self.remove_task(tid)
 
     def move_task_to_top(self, task_id: str):
-        if task_id in self.task_order:
-            self.task_order.remove(task_id)
-            self.task_order.insert(0, task_id)
-            self._trigger_process_queue()
-            task = self.tasks.get(task_id)
-            if task:
-                self.broadcast_update(task)
+        return self.scheduler.move_task_to_top(task_id)
 
     def move_series_to_top(self, anime_name: str):
-        if not anime_name:
-            return
-        series_ids = [tid for tid in self.task_order if self.tasks.get(tid) and self.tasks[tid].animeName.lower() == anime_name.lower()]
-        if series_ids:
-            for tid in series_ids:
-                self.task_order.remove(tid)
-            for tid in reversed(series_ids):
-                self.task_order.insert(0, tid)
-            self._trigger_process_queue()
-            for tid in series_ids:
-                t = self.tasks.get(tid)
-                if t:
-                    self.broadcast_update(t)
+        return self.scheduler.move_series_to_top(anime_name)
 
     def reorder_tasks(self, ordered_ids: List[str]):
-        new_order = [tid for tid in ordered_ids if tid in self.tasks]
-        for tid in self.task_order:
-            if tid not in new_order:
-                new_order.append(tid)
-        self.task_order = new_order
-        self._trigger_process_queue()
+        return self.scheduler.reorder_tasks(ordered_ids)
 
     # -------------------------------------------------------------------------
     # Vérification d'intégrité & Re-téléchargement
@@ -1505,7 +1500,7 @@ class DownloadManagerService:
         task.cancelled = False
         task.paused = False
         task.directDownloadUrl = None  # Forcer la re-résolution de l'URL
-        task.status = DownloadStatus.PENDING
+        transition(task, DownloadStatus.PENDING)
         task.verificationStatus = "UNVERIFIED"
         task.verificationError = None
         task.completedAt = None
@@ -1528,1711 +1523,70 @@ class DownloadManagerService:
     # -------------------------------------------------------------------------
 
     async def process_queue(self):
-        async with self._lock:
-            active_count = sum(1 for t in self.tasks.values() if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.RETRYING])
-            slots = self.max_concurrent_downloads - active_count
-            if slots <= 0:
-                return
-
-            pending = [self.tasks[tid] for tid in self.task_order if tid in self.tasks and self.tasks[tid].status == DownloadStatus.PENDING]
-            for task in pending:
-                if slots <= 0:
-                    break
-                if self._has_destination_conflict(task):
-                    self._pause_destination_conflict(task)
-                    continue
-                slots -= 1
-                task.status = DownloadStatus.DOWNLOADING
-                task.phase = "resolving"
-                self.broadcast_update(task)
-                library_service.save_task(task)
-                spawn(self._execute_download(task), name=f"download-{task.id}")
+        return await self.scheduler.process_queue()
 
     # -------------------------------------------------------------------------
     # Exécution du téléchargement
     # -------------------------------------------------------------------------
 
     async def _execute_download(self, task: DownloadTask):
-        try:
-            max_retries = 5  # Tolérance robuste face aux coupures réseau et expirations CDN
-            task.retryCount = 0
-            need_resolve = True
-            skip_local = False
-
-            while True:
-                if task.cancelled:
-                    task.status = DownloadStatus.CANCELLED
-                    self.broadcast_update(task)
-                    library_service.save_task(task)
-                    return
-                if task.paused:
-                    task.status = DownloadStatus.PAUSED
-                    task.speed = 0
-                    self.broadcast_update(task)
-                    library_service.save_task(task)
-                    return
-
-                local_finalization = False
-                try:
-                    # Retry finalization locally before asking a possibly expired player
-                    # for another video URL. The file is still verified by the downloader.
-                    await asyncio.to_thread(self._recover_muxed_file, task)
-                    if not skip_local and task.savePath and Path(task.savePath).is_file():
-                        local = await asyncio.to_thread(verification_service.verify_file, task.savePath,
-                                                       expected_size=task.totalBytes or None)
-                        if local.valid:
-                            local_finalization = True
-                            await self._download_single_file(task, task.directDownloadUrl or task.fileUrl or "")
-                            return
-                    task.phase = "resolving"
-                    self.broadcast_update(task)
-                    direct_url = task.fileUrl
-                    clean_direct = (direct_url or "").split("#")[0].strip()
-                    parsed_u = urlparse(clean_direct)
-                    u_host = (parsed_u.hostname or "").lower()
-                    is_known_embed = extractor_registry.is_known_embed(clean_direct)
-                    is_imported = (
-                        (task.source and (task.source not in ("french-manga", "voir-anime", "animepahe"))) or
-                        is_known_embed
-                    )
-                    is_voir_anime = not is_imported and (("voir-anime" in (direct_url or "").lower()) or ("voiranime" in (direct_url or "").lower()) or task.source == "voir-anime")
-                    is_animepahe = not is_imported and (any(k in (direct_url or "").lower() for k in ["animepahe", "kwik.", "pahe."]) or task.source == "animepahe")
-                    server_type = "vidzy"
-                    chunks_json = "[]"
-
-                    # Réutiliser l'URL directe déjà résolue si disponible et valide (reprise)
-                    # S'assurer qu'elle n'est PAS une page HTML (ne contient pas /d/vidzy ou similaire)
-                    is_cached_valid = bool(
-                        task.directDownloadUrl and
-                        not self._needs_scraping_resolution(task.directDownloadUrl) and
-                        not re.search(r"vidzy\.[a-z]+/d/", task.directDownloadUrl)
-                    )
-
-                    if is_cached_valid and not need_resolve:
-                        direct_url = task.directDownloadUrl
-                        logger.info("Reusing cached direct URL for %s", task.fileName)
-                    elif is_imported:
-                        matched_container = None
-                        try:
-                            from animan.services.extension_service import extension_service
-                            if task.source and task.source not in ("french-manga", "voir-anime", "animepahe"):
-                                matched_container = extension_service.get_container_source_by_id(task.source)
-                            if not matched_container and u_host:
-                                for cs in extension_service.get_enabled_container_sources():
-                                    if cs.base_url and u_host in cs.base_url.lower():
-                                        matched_container = cs
-                                        break
-                        except VerificationRequired:
-                            raise
-                        except Exception:
-                            pass
-
-                        target_url = direct_url
-                        video_sources = []
-                        target = None
-                        if matched_container and not is_known_embed:
-                            video_sources = await matched_container.get_episode_sources(direct_url)
-                            target = None
-                            if task.selectedServer and task.selectedServer != "auto":
-                                for s in video_sources:
-                                    s_srv = s.get("server") or s.get("name") or ""
-                                    if task.selectedServer.lower() in s_srv.lower():
-                                        target = s
-                                        break
-                            if not target and task.selectedQuality and task.selectedQuality != "auto":
-                                for s in video_sources:
-                                    q_name = s.get("quality") or s.get("server") or ""
-                                    if task.selectedQuality.lower() in q_name.lower():
-                                        target = s
-                                        break
-                            if not target and video_sources:
-                                target = video_sources[0]
-                            if target and target.get("url"):
-                                target_url = target.get("url", "")
-
-                        resolved = None
-                        candidate_urls = []
-                        if target and target.get("url"):
-                            candidate_urls.append(target.get("url"))
-                        if video_sources:
-                            for vs in video_sources:
-                                v_u = vs.get("url")
-                                if v_u and v_u not in candidate_urls:
-                                    candidate_urls.append(v_u)
-
-                        for cand_u in (candidate_urls or [target_url]):
-                            try:
-                                cand_res = await self.resolve_imported_video_stream(
-                                    cand_u, preferred_quality=task.selectedQuality
-                                )
-                                if cand_res and cand_res.get("videoUrl"):
-                                    resolved = cand_res
-                                    break
-                            except VerificationRequired:
-                                raise
-                            except Exception:
-                                pass
-
-                        if not resolved or not resolved.get("videoUrl"):
-                            clean_t = target_url.split("#")[0].strip()
-                            if re.search(r"\.(mp4|m3u8|webm|mkv)(\?.*)?$", clean_t, re.IGNORECASE):
-                                resolved = {
-                                    "videoUrl": clean_t,
-                                    "serverType": "direct",
-                                    "selectedQuality": task.selectedQuality or "HD",
-                                }
-                            else:
-                                raise ValueError(f"Impossible de résoudre le flux vidéo de la source importée pour {task.fileName}")
-
-                        direct_url = resolved["videoUrl"]
-                        server_type = resolved.get("serverType", "imported")
-                        task.selectedServer = server_type
-                        task.directDownloadUrl = direct_url
-                        self._update_resolved_subtitles(task, resolved.get("subtitles", []), target_url)
-                        task.subtitleUrl = resolved.get("subtitleUrl") or task.subtitleUrl
-                        if resolved.get("size") and task.totalBytes <= 0:
-                            task.totalBytes = resolved["size"]
-                    elif is_voir_anime:
-                        from animan.services.source_settings_service import source_settings_service
-                        va_settings = source_settings_service.get_source_settings("voir-anime")
-                        va_strategy = va_settings.get("quality_strategy", "highest")
-                        pref_srv = task.selectedServer or self.voiranime_default_server
-                        # Si échec répété du serveur distant (client confirmé en ligne) ou erreur HTML, repli sur serveurs alternatifs
-                        consec_errs = getattr(task, "consecutiveServerErrors", 0)
-                        client_offline = getattr(task, "clientOffline", False)
-                        has_html_err = "html" in (task.error or "").lower()
-                        # Le basculement vers d'autres hébergeurs n'intervient que sur pannes serveur avérées répétées ou page HTML d'erreur
-                        if not client_offline and (consec_errs >= 2 or has_html_err):
-                            logger.info("[download_manager] Falling back to alternative servers for %s after confirmed failures on %s", task.fileName, pref_srv)
-                            if pref_srv:
-                                part_clean = Path(task.savePath + ".part")
-                                if part_clean.exists():
-                                    part_clean.unlink(missing_ok=True)
-                                segments_clean = Path(task.savePath).parent / f".{Path(task.savePath).stem}_segments"
-                                if segments_clean.exists():
-                                    shutil.rmtree(segments_clean, ignore_errors=True)
-                                task.downloadedBytes = 0
-                                task.progress = 0.0
-                            pref_srv = None
-                            task.selectedServer = None
-                            task.selectedQuality = None
-
-                        info = await asyncio.to_thread(
-                            voiranime_service.extract_download_info,
-                            direct_url,
-                            preferred_server=pref_srv,
-                            preferred_quality=task.selectedQuality,
-                            quality_strategy=va_strategy,
-                        )
-                        direct_url = info.get("videoUrl", "")
-                        if not direct_url:
-                            raise ValueError(f"Impossible d'extraire l'URL vidéo pour {task.fileName}")
-                        server_type = info.get("serverType", "unknown")
-                        chunks_json = info.get("videoChunks", "[]")
-                        task.directDownloadUrl = direct_url
-                        if (skip_local or not task.subtitleUrl) and info.get("subtitleUrl"):
-                            task.subtitleUrl = info["subtitleUrl"]
-                        self._update_resolved_subtitles(task, info.get("subtitles", []), task.fileUrl)
-                    elif is_animepahe:
-                        from animan.services.animepahe_service import animepahe_service
-                        server_type = "kwik"
-                        if ("kwik." in direct_url or "pahe." in direct_url) and ("/e/" in direct_url or "/d/" in direct_url):
-                            extracted = await animepahe_service.extract_kwik_stream(direct_url)
-                            if not extracted:
-                                raise ValueError(f"Impossible de résoudre le flux Kwik pour {task.fileName}")
-                            direct_url = extracted
-                        elif task.selectedServer and ("kwik." in task.selectedServer or "pahe." in task.selectedServer):
-                            extracted = await animepahe_service.extract_kwik_stream(task.selectedServer)
-                            if not extracted:
-                                raise ValueError(f"Impossible de résoudre le flux Kwik sélectionné pour {task.fileName}")
-                            direct_url = extracted
-                        else:
-                            sources = await animepahe_service.get_episode_sources(direct_url)
-                            target = None
-                            if task.selectedQuality and task.selectedQuality != "auto":
-                                for s in sources:
-                                    q_name = s.get("name") or s.get("quality", "")
-                                    if task.selectedQuality.lower() in q_name.lower() or task.selectedQuality.lower() in s.get("quality", "").lower():
-                                        target = s
-                                        break
-                            if not target and sources:
-                                target = sources[0]
-                            if not target or not target.get("url"):
-                                raise ValueError(f"Aucune source Kwik trouvée pour {task.fileName}")
-                            extracted = await animepahe_service.extract_kwik_stream(target["url"])
-                            if not extracted:
-                                raise ValueError(f"Échec d'extraction du flux vidéo Kwik pour {task.fileName}")
-                            direct_url = extracted
-                        task.directDownloadUrl = direct_url
-                    elif direct_url and self._needs_scraping_resolution(direct_url):
-                        info = await asyncio.to_thread(scraping_service.extract_download_info, direct_url)
-                        direct_url = info.get("videoUrl", "")
-                        if not direct_url:
-                            raise ValueError(f"Impossible d'extraire l'URL vidéo directe pour {task.fileName}")
-                        task.directDownloadUrl = direct_url
-                        if (skip_local or not task.subtitleUrl) and info.get("subtitleUrl"):
-                            task.subtitleUrl = info["subtitleUrl"]
-                        if skip_local or not task.subtitlesJson or task.subtitlesJson == "[]":
-                            self._update_resolved_subtitles(task, info.get("subtitles", []), task.fileUrl)
-                    else:
-                        task.directDownloadUrl = direct_url
-
-                    need_resolve = False  # Les retries suivants réutiliseront l'URL sauf si déconnexion
-
-                    if server_type == "myTV" and chunks_json != "[]":
-                        chunks = json.loads(chunks_json)
-                        if len(chunks) > 1:
-                            await self._download_mytv_chunks(task, chunks)
-                            return
-
-                    bytes_before = task.downloadedBytes
-                    is_hls = bool(direct_url and (".m3u8" in direct_url.lower()))
-                    if is_hls:
-                        await self._download_hls_stream(task, direct_url)
-                        return
-
-                    await self._download_single_file(task, direct_url)
-                    break
-
-                except VerificationRequired as exc:
-                    task.status = DownloadStatus.VERIFICATION_REQUIRED
-                    task.verificationUrl = exc.url
-                    task.error = str(exc)
-                    task.speed = 0
-                    self.broadcast_update(task)
-                    library_service.save_task(task)
-                    return
-                except Exception as e:
-                    if isinstance(e, (httpx.RequestError, httpx.HTTPStatusError)) and not isinstance(e, RateLimited):
-                        request = getattr(e, "request", None)
-                        if request is not None:
-                            task.verificationUrl = str(request.url)
-                    if isinstance(e, RateLimited):
-                        # A large Retry-After should not consume all download attempts.
-                        task.status = DownloadStatus.PAUSED
-                        task.error = f"Limitation de débit ; réessayez après {int(e.retry_after)} secondes"
-                        task.speed = 0
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-                        return
-                    if isinstance(e, SubtitleError):
-                        if local_finalization and e.refresh_required:
-                            skip_local = True
-                            need_resolve = True
-                            continue
-                        task.status = DownloadStatus.FAILED
-                        task.error = str(e)
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-                        return
-                    if task.cancelled:
-                        task.status = DownloadStatus.CANCELLED
-                        task.speed = 0
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-                        return
-                    if task.paused:
-                        task.status = DownloadStatus.PAUSED
-                        task.speed = 0
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-                        return
-
-                    bytes_gained = task.downloadedBytes - bytes_before if 'bytes_before' in locals() else 0
-                    if bytes_gained > 0:
-                        logger.info("Progress of %s bytes for %s despite network interruption, keeping host %s and resetting server errors",
-                                    format_bytes(bytes_gained), task.fileName, task.selectedServer)
-                        task.retryCount = max(0, task.retryCount - 1)
-                        task.consecutiveServerErrors = 0
-
-                    err_msg = str(e).lower()
-
-                    # 1. Tester d'abord si la machine locale est déconnectée d'Internet
-                    client_online = await self.is_client_online()
-                    if not client_online:
-                        task.clientOffline = True
-                        logger.warning(
-                            "[download_manager] Local Internet disconnection detected for %s (error: %s). "
-                            "Retaining host %s and partial data. Waiting for network recovery...",
-                            task.fileName, err_msg, task.selectedServer
-                        )
-                        task.status = DownloadStatus.RETRYING
-                        task.error = "Local Internet connection interrupted. Waiting for network recovery..."
-                        task.speed = 0
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-
-                        # Attente active du retour de la connexion sans consommer les retries serveur ni changer d'hôte
-                        while not task.cancelled and not task.paused:
-                            await asyncio.sleep(5.0)
-                            if await self.is_client_online():
-                                logger.info(
-                                    "[download_manager] Internet connection restored for %s! Resuming download on host %s.",
-                                    task.fileName, task.selectedServer
-                                )
-                                task.clientOffline = False
-                                need_resolve = True  # Re-résoudre sur le même serveur en cas de token/lien direct expiré
-                                task.directDownloadUrl = None
-                                break
-                        continue
-
-                    task.clientOffline = False
-
-                    if task.retryCount < max_retries:
-                        task.retryCount += 1
-
-                        # Détection des coupures réseau distantes, timeouts, expirations CDN ou réponses invalides de l'hébergeur
-                        is_disconnect = (
-                            "peer closed connection" in err_msg
-                            or "remote protocol" in err_msg
-                            or "connection reset" in err_msg
-                            or "connection closed" in err_msg
-                            or "incompleteread" in err_msg
-                            or "broken pipe" in err_msg
-                            or "readtimeout" in err_msg
-                            or "connecttimeout" in err_msg
-                            or "timeout" in err_msg
-                            or "416" in err_msg
-                            or "403" in err_msg
-                            or "401" in err_msg
-                            or "404" in err_msg
-                            or "410" in err_msg
-                            or "502" in err_msg
-                            or "503" in err_msg
-                            or "html" in err_msg
-                        )
-                        if is_disconnect:
-                            if bytes_gained <= 0:
-                                task.consecutiveServerErrors = getattr(task, "consecutiveServerErrors", 0) + 1
-                                logger.info("Connection failure or expired link without progress (%s) for %s, consecutive server failures: %d",
-                                            err_msg, task.fileName, task.consecutiveServerErrors)
-                            else:
-                                task.consecutiveServerErrors = 0
-                            need_resolve = True
-                            task.directDownloadUrl = None
-                        elif task.retryCount >= 2:
-                            need_resolve = True
-                            task.directDownloadUrl = None
-
-                        # Détection des pannes DNS transitoires
-                        is_dns = (
-                            "name resolution" in err_msg
-                            or "gaierror" in err_msg
-                            or "temporary failure" in err_msg
-                            or "nodename nor servname" in err_msg
-                        )
-                        if is_dns:
-                            logger.warning("Transient DNS failure (%s) for %s, waiting 5s", err_msg, task.fileName)
-                            await asyncio.sleep(5.0)
-                            if task.retryCount > 0:
-                                task.retryCount -= 1
-
-                        task.status = DownloadStatus.RETRYING
-                        task.error = f"Erreur serveur hébergeur: {str(e)}. Reprise ({task.retryCount}/{max_retries})"
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-
-                        backoff = min(15.0, 2.0 + math.pow(1.3, min(task.retryCount, 10)))
-                        await asyncio.sleep(backoff)
-                    else:
-                        task.status = DownloadStatus.FAILED
-                        task.error = str(e)
-                        task.speed = 0
-                        self.broadcast_update(task)
-                        library_service.save_task(task)
-                        break
-        finally:
-            self._trigger_process_queue()
+        return await self.transfer_worker._execute_download(task)
 
     async def _download_single_file(self, task: DownloadTask, direct_url: str):
-        task.phase = "video"
-        self.broadcast_update(task)
-        output_path = Path(task.savePath)
-        part_path = Path(task.savePath + ".part")
-        metadata_path = Path(task.savePath + ".part.resume.json")
-
-        # 1. Gestion propre du fichier existant et reprise
-        existing_len = 0
-        if output_path.exists():
-            if output_path.stat().st_size < 1024 * 1024:
-                try:
-                    with open(output_path, "rb") as f_chk:
-                        h = f_chk.read(100).lower()
-                        if b"<html" in h or b"<!doctype" in h:
-                            logger.warning("Corrupted final file (HTML) detected and deleted for %s", task.fileName)
-                            output_path.unlink(missing_ok=True)
-                except VerificationRequired:
-                    raise
-                except Exception:
-                    pass
-
-            if output_path.exists():
-                verif = await asyncio.to_thread(
-                    verification_service.verify_file,
-                    file_path_str=str(output_path),
-                    anime_name=task.animeName,
-                    file_name=task.fileName,
-                    expected_size=task.totalBytes if task.totalBytes and task.totalBytes > 0 else None
-                )
-                if verif.valid:
-                    logger.info("Final file already exists and is valid for %s (%s)",
-                                task.fileName, format_bytes(output_path.stat().st_size))
-                    part_path.unlink(missing_ok=True)
-                    if task.downloadSubtitles:
-                        await self._download_subtitles(task)
-                        await self._finalize_task(task)
-                        return
-                    task.downloadedBytes = output_path.stat().st_size
-                    if not task.totalBytes or task.totalBytes <= 0:
-                        task.totalBytes = output_path.stat().st_size
-                    await self._finalize_task(task, verification=verif)
-                    return
-                else:
-                    logger.warning("Existing final file invalid/corrupted for %s (%s), deleting: %s",
-                                   task.fileName, format_bytes(output_path.stat().st_size), verif.error)
-                    output_path.unlink(missing_ok=True)
-
-        if not direct_url:
-            raise ValueError("URL directe introuvable")
-
-        if part_path.exists():
-            part_size = part_path.stat().st_size
-            if part_size < 1024 * 1024:
-                try:
-                    with open(part_path, "rb") as f_chk:
-                        h = f_chk.read(100).lower()
-                        if b"<html" in h or b"<!doctype" in h:
-                            logger.warning("Corrupted .part file (HTML) detected and deleted for %s", task.fileName)
-                            part_path.unlink(missing_ok=True)
-                except VerificationRequired:
-                    raise
-                except Exception:
-                    pass
-            elif task.totalBytes and task.totalBytes > 0 and part_size > task.totalBytes:
-                logger.warning(".part file (%s) exceeds expected size (%s) for %s, deleting",
-                               format_bytes(part_size), format_bytes(task.totalBytes), task.fileName)
-                part_path.unlink(missing_ok=True)
-
-            if part_path.exists():
-                existing_len = part_path.stat().st_size
-
-        headers = self.get_headers_for_url(direct_url, getattr(task, "selectedServer", None))
-        proxy = proxy_service.get_random_proxy()
-
-        timeout = httpx.Timeout(connect=20.0, read=60.0, write=30.0, pool=None)
-        async with self._create_async_client(headers=headers, proxy=proxy, timeout=timeout) as client:
-            req_headers = dict(headers)
-            req_headers["Accept-Encoding"] = "identity"
-            is_resume = existing_len > 0
-            previous = read_metadata(metadata_path) if is_resume else {}
-            resource = media_resource(direct_url)
-            if previous.get("resource") and previous["resource"] != resource:
-                # ETags are scoped to a resource, not globally comparable across
-                # renewed CDN hosts/paths. Preserve the partial until GET succeeds.
-                existing_len = 0
-                is_resume = False
-            request_start = max(0, existing_len - RESUME_OVERLAP) if is_resume else 0
-            if is_resume:
-                req_headers["Range"] = f"bytes={request_start}-"
-                if previous.get("validator"):
-                    req_headers["If-Range"] = previous["validator"]
-                logger.info("Resume attempt for %s from %s", task.fileName, format_bytes(existing_len))
-
-            while True:
-                async with client.stream("GET", direct_url, headers=req_headers) as stream_resp:
-                    # Gestion du code 416 Range Not Satisfiable
-                    if stream_resp.status_code == 416:
-                        logger.warning("HTTP 416 (Range Not Satisfiable) for %s with existing_len=%s",
-                                       task.fileName, format_bytes(existing_len))
-                        unsatisfied = re.fullmatch(r"bytes\s+\*/(\d+)",
-                                                   stream_resp.headers.get("Content-Range", ""), re.IGNORECASE)
-                        if part_path.exists() and unsatisfied and int(unsatisfied[1]) == existing_len:
-                            verif_part = await asyncio.to_thread(
-                                verification_service.verify_file,
-                                file_path_str=str(part_path),
-                                anime_name=task.animeName,
-                                file_name=task.fileName,
-                                expected_size=existing_len,
-                            )
-                            if verif_part.valid:
-                                logger.info(".part file is actually complete and valid for %s, finalizing", task.fileName)
-                                publish_file(part_path, output_path)
-                                metadata_path.unlink(missing_ok=True)
-                                await self._finalize_task(task)
-                                return
-                            else:
-                                logger.warning("Invalid/corrupted .part file (%s), deleting for clean resume", verif_part.error)
-                                part_path.unlink(missing_ok=True)
-
-                        existing_len = 0
-                        is_resume = False
-                        task.downloadedBytes = 0
-                        request_start = 0
-                        had_range = "Range" in req_headers
-                        req_headers.pop("Range", None)
-                        req_headers.pop("If-Range", None)
-                        metadata_path.unlink(missing_ok=True)
-                        if had_range:
-                            continue
-                        raise ConnectionError("HTTP 416 (Range Not Satisfiable): Plage invalide, re-résolution requise")
-
-                    if stream_resp.status_code not in [200, 206]:
-                        raise ConnectionError(f"HTTP {stream_resp.status_code}")
-
-                    # Contrôle strict du type de contenu (rejeter formellement le HTML)
-                    content_type = stream_resp.headers.get("Content-Type", "").lower()
-                    if "text/html" in content_type or "text/plain" in content_type or "application/json" in content_type:
-                        raise ValueError(f"Réponse HTTP invalide : type '{content_type}' reçu au lieu d'un flux vidéo binaire")
-
-                    # Le serveur ne supporte pas Range — on recommence depuis 0
-                    if stream_resp.status_code == 200 and is_resume:
-                        logger.warning("Server does not support resume for %s, downloading from beginning", task.fileName)
-                        existing_len = 0
-                        is_resume = False
-                        request_start = 0
-
-                    # Extraction et validation de la taille via Content-Range ou Content-Length
-                    total_bytes = 0
-                    response_length = None
-                    if stream_resp.status_code == 206:
-                        total_bytes, response_length = response_range(stream_resp.headers, request_start)
-                    else:
-                        cl = stream_resp.headers.get("Content-Length")
-                        if cl and cl.isdigit():
-                            total_bytes = response_length = int(cl)
-
-                    if stream_resp.status_code == 206 and not total_bytes:
-                        raise ConnectionError("Cannot confirm complete media from an unknown Content-Range total")
-                    current = {**representation(stream_resp.headers, total_bytes), "resource": resource}
-                    if is_resume and ((previous.get("validator") and current["validator"]
-                                       and previous["validator"] != current["validator"])
-                                      or (previous.get("total") and total_bytes
-                                          and previous["total"] != total_bytes)):
-                        # Keep the old partial intact until a full response is accepted.
-                        existing_len = request_start = 0
-                        is_resume = False
-                        req_headers.pop("Range", None)
-                        req_headers.pop("If-Range", None)
-                        continue
-
-                    if total_bytes > 0:
-                        task.totalBytes = total_bytes
-                        self.broadcast_update(task)
-
-                    # Si le .part dépasse la taille totale, purge et reprise depuis 0
-                    if total_bytes > 0 and existing_len > total_bytes:
-                        logger.warning(".part file (%s) larger than total_bytes (%s) for %s, resetting",
-                                       format_bytes(existing_len), format_bytes(total_bytes), task.fileName)
-                        part_path.unlink(missing_ok=True)
-                        existing_len = 0
-                        is_resume = False
-                        req_headers.pop("Range", None)
-                        req_headers.pop("If-Range", None)
-                        request_start = 0
-                        continue
-
-                    accept_ranges = "bytes" in stream_resp.headers.get("Accept-Ranges", "").lower() or stream_resp.status_code == 206
-                    task.supportsResume = accept_ranges
-
-                    # Vérifier si le .part est déjà complet
-                    if total_bytes > 0 and existing_len >= total_bytes:
-                        logger.info(".part file already complete for %s, verifying", task.fileName)
-                        if part_path.exists():
-                            verif_part = await asyncio.to_thread(
-                                verification_service.verify_file,
-                                file_path_str=str(part_path),
-                                anime_name=task.animeName,
-                                file_name=task.fileName
-                            )
-                            if verif_part.valid:
-                                publish_file(part_path, output_path)
-                                metadata_path.unlink(missing_ok=True)
-                                await self._finalize_task(task)
-                                return
-                            else:
-                                logger.warning(".part file complete but corrupted for %s, resetting", task.fileName)
-                                part_path.unlink(missing_ok=True)
-                                existing_len = 0
-                                is_resume = False
-                                req_headers.pop("Range", None)
-                                req_headers.pop("If-Range", None)
-                                request_start = 0
-                                continue
-
-                    # Check disk space
-                    free_space = shutil.disk_usage(self.download_dir).free
-                    req_space = (total_bytes - existing_len) if total_bytes > 0 else 500 * 1024 * 1024
-                    if free_space < req_space:
-                        raise OSError(f"Espace disque insuffisant (Requis: {format_bytes(req_space)}, Disponible: {format_bytes(free_space)})")
-
-                    # Toujours écrire dans le fichier .part, jamais le fichier final
-                    mode = "ab" if is_resume else "wb"
-                    downloaded = existing_len
-                    task.reset_speed()
-                    if downloaded > 0:
-                        task.speed_tracker.add_sample(downloaded)
-                    last_time = time.time()
-                    first_chunk = True
-                    overlap = b""
-                    if is_resume:
-                        with open(part_path, "rb") as existing_file:
-                            existing_file.seek(request_start)
-                            overlap = existing_file.read(existing_len - request_start)
-                    overlap_position = received = 0
-                    metadata_written = False
-
-                    if task.status != DownloadStatus.DOWNLOADING:
-                        task.status = DownloadStatus.DOWNLOADING
-                        task.error = None
-                        self.broadcast_update(task)
-
-                    try:
-                        with open(part_path, mode) as f:
-                            async for chunk in stream_resp.aiter_bytes(chunk_size=65536):
-                                received += len(chunk)
-                                if response_length is not None and received > response_length:
-                                    raise ConnectionError("Media response exceeds its declared byte range")
-                                if overlap_position < len(overlap):
-                                    count = min(len(chunk), len(overlap) - overlap_position)
-                                    if chunk[:count] != overlap[overlap_position:overlap_position + count]:
-                                        raise ResumeMismatch("Media identity changed during resume")
-                                    overlap_position += count
-                                    chunk = chunk[count:]
-                                    if not chunk:
-                                        continue
-                                if not metadata_written:
-                                    write_metadata(metadata_path, current)
-                                    metadata_written = True
-                                # Vérification des premiers octets pour s'assurer que ce n'est pas du HTML
-                                if first_chunk and not is_resume:
-                                    head_chk = chunk[:100].lower()
-                                    if b"<html" in head_chk or b"<!doctype" in head_chk:
-                                        raise ValueError("Contenu reçu est du HTML et non un flux vidéo")
-                                    first_chunk = False
-
-                                if task.cancelled:
-                                    task.status = DownloadStatus.CANCELLED
-                                    task.reset_speed()
-                                    task.downloadedBytes = downloaded
-                                    self.broadcast_update(task)
-                                    library_service.save_task(task)
-                                    logger.info("Cancelled %s — .part file kept (%s)",
-                                                task.fileName, format_bytes(downloaded))
-                                    return
-                                if task.paused:
-                                    task.status = DownloadStatus.PAUSED
-                                    task.reset_speed()
-                                    task.downloadedBytes = downloaded
-                                    self.broadcast_update(task)
-                                    library_service.save_task(task)
-                                    logger.info("Paused %s — progress saved (%s)",
-                                                task.fileName, format_bytes(downloaded))
-                                    return
-
-                                f.write(chunk)
-                                downloaded += len(chunk)
-
-                                # Throttling
-                                await self._apply_throttle(task, len(chunk))
-
-                                now = time.time()
-                                task.update_progress(downloaded, now)
-                                if total_bytes > 0:
-                                    task.progress = min(100.0, (downloaded / total_bytes) * 100.0)
-
-                                if now - last_time >= 0.5:
-                                    last_time = now
-                                    f.flush()
-                                    self.broadcast_update(task)
-                    except ResumeMismatch:
-                        logger.warning("Different media bytes after reconnect for %s; restarting safely", task.fileName)
-                        existing_len = request_start = 0
-                        is_resume = False
-                        req_headers.pop("Range", None)
-                        req_headers.pop("If-Range", None)
-                        continue
-
-                    if overlap_position < len(overlap) or (response_length is not None and received != response_length):
-                        raise ConnectionError("Incomplete media response during resume")
-
-                    if total_bytes > 0 and downloaded < total_bytes:
-                        raise ConnectionError(f"Incomplete download: {downloaded}/{total_bytes} bytes")
-                    if downloaded <= 0:
-                        raise ConnectionError("0 bytes received")
-
-                    break
-
-        # Téléchargement complet : renommer .part → fichier final
-        if part_path.exists():
-            publish_file(part_path, output_path)
-            logger.info(".part file renamed to final file: %s (%s)", output_path.name, format_bytes(downloaded))
-        metadata_path.unlink(missing_ok=True)
-
-        # Sous-titres
-        if task.downloadSubtitles:
-            await self._download_subtitles(task)
-
-        await self._finalize_task(task)
+        return await self.transfer_worker._download_single_file(task, direct_url)
 
     async def _download_mytv_chunks(self, task: DownloadTask, chunks: List[str]):
-        task.phase = "video"
-        self.broadcast_update(task)
-        logger.info("myTV: %d chunk(s) to download for %s", len(chunks), task.fileName)
-        base_path = re.sub(r"\.(mp4|mkv)$", "", task.savePath)
-        chunk_files = []
-        total_all_chunks = 0
-
-        # Estimer la taille totale
-        for curl in chunks:
-            sz = await self.get_remote_file_size(curl)
-            if sz > 0:
-                total_all_chunks += sz
-
-        if total_all_chunks > 0:
-            task.totalBytes = total_all_chunks
-            self.broadcast_update(task)
-
-        downloaded_total = 0
-        headers = {"User-Agent": proxy_service.get_user_agent(), "Referer": "https://vidzy.live/"}
-        proxy = proxy_service.get_random_proxy()
-
-        async with self._create_async_client(headers=headers, proxy=proxy, timeout=settings.READ_TIMEOUT) as client:
-            for idx, curl in enumerate(chunks):
-                if task.cancelled:
-                    task.status = DownloadStatus.CANCELLED
-                    self.broadcast_update(task)
-                    return
-                if task.paused:
-                    task.status = DownloadStatus.PAUSED
-                    self.broadcast_update(task)
-                    return
-
-                part_file = Path(f"{base_path}_part{idx + 1}.tmp")
-                chunk_files.append(part_file)
-
-                async with client.stream("GET", curl) as resp:
-                    if resp.status_code not in [200, 206]:
-                        raise ConnectionError(f"HTTP {resp.status_code} pour morceau {idx + 1}")
-
-                    last_time = time.time()
-                    last_bytes = downloaded_total
-                    chunk_downloaded = 0
-
-                    with open(part_file, "wb") as f:
-                        async for chunk in resp.aiter_bytes(chunk_size=16384):
-                            if task.cancelled:
-                                task.status = DownloadStatus.CANCELLED
-                                task.reset_speed()
-                                self.broadcast_update(task)
-                                return
-                            if task.paused:
-                                task.status = DownloadStatus.PAUSED
-                                task.reset_speed()
-                                self.broadcast_update(task)
-                                return
-
-                            f.write(chunk)
-                            chunk_downloaded += len(chunk)
-                            cur_glob = downloaded_total + chunk_downloaded
-
-                            await self._apply_throttle(task, len(chunk))
-
-                            now = time.time()
-                            task.update_progress(cur_glob, now)
-                            if total_all_chunks > 0:
-                                task.progress = (cur_glob / total_all_chunks) * 100.0
-
-                            if now - last_time >= 0.5:
-                                last_time = now
-                                self.broadcast_update(task)
-
-                    downloaded_total += chunk_downloaded
-
-        # Concaténer
-        logger.info("Concatenating %d chunks to %s", len(chunk_files), task.fileName)
-        output_file = Path(task.savePath)
-        with open(output_file, "wb") as outfile:
-            for pf in chunk_files:
-                with open(pf, "rb") as infile:
-                    shutil.copyfileobj(infile, outfile, length=65536)
-                pf.unlink(missing_ok=True)
-
-        if task.downloadSubtitles:
-            await self._download_subtitles(task)
-
-        await self._finalize_task(task)
+        return await self.transfer_worker._download_mytv_chunks(task, chunks)
 
     async def _download_hls_stream(self, task: DownloadTask, m3u8_url: str):
-        logger.info("HLS download for %s from %s", task.fileName, m3u8_url)
-        if task.totalBytes <= 0:
-            try:
-                est_sz = await self.estimate_hls_size(m3u8_url)
-                if est_sz > 0:
-                    task.totalBytes = est_sz
-                    self.broadcast_update(task)
-            except VerificationRequired:
-                raise
-            except Exception:
-                pass
-
-        # Téléchargement natif par segments avec micro-retries in-situ et reprise sans perte
-        await self._download_hls_segments_native(task, m3u8_url)
+        return await self.transfer_worker._download_hls_stream(task, m3u8_url)
 
     async def _download_hls_segments_native(self, task: DownloadTask, m3u8_url: str):
-        task.phase = "video"
-        self.broadcast_update(task)
-        logger.info("Segmented HLS download (with resume) for %s", task.fileName)
-        output_path = Path(task.savePath)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        segments_dir = output_path.parent / f".{output_path.stem}_segments"
-        segments_dir.mkdir(parents=True, exist_ok=True)
-
-        headers = self.get_headers_for_url(m3u8_url, getattr(task, "selectedServer", None))
-        proxy = proxy_service.get_random_proxy()
-
-        timeout = httpx.Timeout(connect=20.0, read=45.0, write=30.0, pool=30.0)
-        async with self._create_async_client(headers=headers, proxy=proxy, timeout=timeout) as client:
-            resp = await client.get(m3u8_url)
-            if resp.status_code != 200:
-                raise ConnectionError(f"HTTP {resp.status_code} on m3u8 playlist")
-
-            playlist_text = resp.text
-            sub_url = m3u8_url
-            # Si le m3u8 ne contient pas directement de tags #EXTINF, c'est une master playlist
-            if "#EXTINF" not in playlist_text:
-                for line in playlist_text.splitlines():
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        sub_url = urljoin(m3u8_url, line)
-                        break
-
-                if sub_url != m3u8_url:
-                    sub_resp = await client.get(sub_url)
-                    if sub_resp.status_code != 200:
-                        raise ConnectionError(f"HTTP {sub_resp.status_code} on HLS sub-playlist")
-                    playlist_text = sub_resp.text
-
-            segments = []
-            encryption = []
-            current_key = None
-            sequence = 0
-            for line in playlist_text.splitlines():
-                line = line.strip()
-                if line.startswith("#EXT-X-MEDIA-SEQUENCE:"):
-                    sequence = int(line.split(":", 1)[1])
-                elif line.startswith("#EXT-X-KEY:"):
-                    attrs = dict(re.findall(r'(\w+)=("[^"\n]*"|[^,\n]*)', line.split(":", 1)[1]))
-                    method = attrs.get("METHOD", "NONE")
-                    if method == "NONE":
-                        current_key = None
-                    elif method == "AES-128" and attrs.get("URI"):
-                        key_url = urljoin(sub_url, attrs["URI"].strip('"'))
-                        iv = bytes.fromhex(attrs["IV"].removeprefix("0x").zfill(32)) if attrs.get("IV") else None
-                        if iv is not None and len(iv) != 16:
-                            raise ValueError("IV AES-128 HLS invalide")
-                        current_key = (key_url, iv)
-                    else:
-                        raise ValueError("Méthode de chiffrement HLS non prise en charge")
-                elif line.startswith(("#EXT-X-BYTERANGE:", "#EXT-X-MAP:")):
-                    raise ValueError("HLS byte ranges and initialization maps require a dedicated assembler")
-                elif line and not line.startswith("#"):
-                    segments.append(urljoin(sub_url, line))
-                    encryption.append((current_key[0], current_key[1] or sequence.to_bytes(16, "big")) if current_key else None)
-                    sequence += 1
-            keys = {}
-
-            if not segments:
-                raise ValueError("No segments found in HLS playlist")
-
-            prepare_hls_cache(segments_dir, sub_url, playlist_text)
-
-            total_segments = len(segments)
-
-            # Analyser les segments déjà complétés sur le disque pour reprise instantanée sans perte
-            existing_bytes = 0
-            completed_indices = set()
-            for idx in range(total_segments):
-                sf = segments_dir / f"seg_{idx:05d}.ts"
-                if valid_cached_segment(sf):
-                    existing_bytes += sf.stat().st_size
-                    completed_indices.add(idx)
-
-            downloaded = existing_bytes
-            if existing_bytes > 0:
-                logger.info("HLS resume for %s: %d/%d segments already present (%s)",
-                            task.fileName, len(completed_indices), total_segments, format_bytes(existing_bytes))
-                task.downloadedBytes = downloaded
-                if total_segments > 0:
-                    task.progress = min(99.0, (len(completed_indices) / total_segments) * 100.0)
-                self.broadcast_update(task)
-
-            task.reset_speed()
-            if task.downloadedBytes > 0:
-                task.speed_tracker.add_sample(task.downloadedBytes)
-            last_time = time.time()
-
-            for idx, seg_url in enumerate(segments):
-                if task.cancelled:
-                    shutil.rmtree(segments_dir, ignore_errors=True)
-                    task.status = DownloadStatus.CANCELLED
-                    task.reset_speed()
-                    self.broadcast_update(task)
-                    return
-                if task.paused:
-                    task.status = DownloadStatus.PAUSED
-                    task.reset_speed()
-                    self.broadcast_update(task)
-                    return
-
-                seg_file = segments_dir / f"seg_{idx:05d}.ts"
-                if idx in completed_indices and seg_file.exists() and seg_file.stat().st_size > 0:
-                    continue
-
-                seg_tmp = segments_dir / f"seg_{idx:05d}.tmp"
-                max_seg_retries = 5
-                seg_success = False
-
-                for attempt in range(1, max_seg_retries + 1):
-                    if task.cancelled or task.paused:
-                        break
-                    seg_bytes_this_attempt = 0
-                    try:
-                        if hasattr(client, "stream"):
-                            async with client.stream("GET", seg_url) as seg_resp:
-                                if seg_resp.status_code != 200:
-                                    if seg_resp.status_code in (403, 404, 410):
-                                        raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx} (expired or not found link)")
-                                    raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx}")
-
-                                with open(seg_tmp, "wb") as f_seg:
-                                    async for chunk_data in seg_resp.aiter_bytes(chunk_size=16384):
-                                        if task.cancelled or task.paused:
-                                            break
-                                        f_seg.write(chunk_data)
-                                        chunk_len = len(chunk_data)
-                                        seg_bytes_this_attempt += chunk_len
-                                        downloaded += chunk_len
-                                        await self._apply_throttle(task, chunk_len)
-
-                                        now = time.time()
-                                        task.update_progress(downloaded, now)
-                                        if now - last_time >= 0.5:
-                                            last_time = now
-                                            task.progress = min(99.0, (len(completed_indices) / total_segments) * 100.0)
-                                            self.broadcast_update(task)
-                                declared_length = seg_resp.headers.get("Content-Length")
-                                if not (task.cancelled or task.paused) and declared_length is not None and (
-                                        not declared_length.isdigit() or int(declared_length) != seg_bytes_this_attempt):
-                                    raise ConnectionError(f"Incomplete HLS segment {idx}")
-                        else:
-                            seg_resp = await client.get(seg_url)
-                            if seg_resp.status_code != 200:
-                                if seg_resp.status_code in (403, 404, 410):
-                                    raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx} (expired or not found link)")
-                                raise ConnectionError(f"HTTP {seg_resp.status_code} on segment {idx}")
-                            chunk_data = seg_resp.content
-                            with open(seg_tmp, "wb") as f_seg:
-                                f_seg.write(chunk_data)
-                            chunk_len = len(chunk_data)
-                            seg_bytes_this_attempt += chunk_len
-                            downloaded += chunk_len
-                            await self._apply_throttle(task, chunk_len)
-                            now = time.time()
-                            task.update_progress(downloaded, now)
-
-                        if task.cancelled:
-                            if seg_tmp.exists():
-                                seg_tmp.unlink(missing_ok=True)
-                            shutil.rmtree(segments_dir, ignore_errors=True)
-                            task.status = DownloadStatus.CANCELLED
-                            task.reset_speed()
-                            self.broadcast_update(task)
-                            return
-                        if task.paused:
-                            if seg_tmp.exists():
-                                seg_tmp.unlink(missing_ok=True)
-                            task.status = DownloadStatus.PAUSED
-                            task.reset_speed()
-                            self.broadcast_update(task)
-                            return
-
-                        if seg_tmp.exists() and seg_tmp.stat().st_size > 0:
-                            if encryption[idx]:
-                                key_url, iv = encryption[idx]
-                                if key_url not in keys:
-                                    key_response = await client.get(key_url)
-                                    key_response.raise_for_status()
-                                    if len(key_response.content) != 16:
-                                        raise ValueError("Clé AES-128 HLS invalide")
-                                    keys[key_url] = key_response.content
-                                plaintext = media_tools.decrypt_aes_cbc(
-                                    seg_tmp.read_bytes(), keys[key_url], iv, unpad=True)
-                                seg_tmp.write_bytes(plaintext)
-                            commit_segment(seg_tmp, seg_file)
-                            completed_indices.add(idx)
-                            seg_success = True
-                            break
-                        else:
-                            raise ConnectionError(f"Segment {idx} downloaded empty (0 bytes)")
-
-                    except (VerificationRequired, RateLimited):
-                        raise
-                    except Exception as seg_err:
-                        if seg_bytes_this_attempt > 0:
-                            downloaded -= seg_bytes_this_attempt
-                            task.downloadedBytes = downloaded
-                        if seg_tmp.exists():
-                            seg_tmp.unlink(missing_ok=True)
-
-                        err_str = str(seg_err).lower()
-                        if "expiré" in err_str or "expired" in err_str or "403" in err_str or "410" in err_str:
-                            raise seg_err
-
-                        if attempt >= max_seg_retries:
-                            logger.warning("Permanent failure for segment %d/%d after %d retries for %s: %s",
-                                           idx + 1, total_segments, max_seg_retries, task.fileName, seg_err)
-                            raise seg_err
-
-                        backoff = min(1.0 * attempt, 4.0)
-                        logger.warning("Micro-interruption on segment %d/%d for %s (%s), retry %d/%d in %.1fs...",
-                                       idx + 1, total_segments, task.fileName, seg_err, attempt + 1, max_seg_retries, backoff)
-                        await asyncio.sleep(backoff)
-
-                if not seg_success and not (task.cancelled or task.paused):
-                    raise ConnectionError(f"Cannot download segment {idx}")
-
-                now = time.time()
-                task.update_progress(downloaded, now)
-                task.progress = min(99.0, (len(completed_indices) / total_segments) * 100.0)
-                if now - last_time >= 0.5:
-                    last_time = now
-                    self.broadcast_update(task)
-
-        task.phase = "assembling"
-        task.reset_speed()
-        self.broadcast_update(task)
-
-        # Assemblage final sans perte des segments HLS
-        logger.info("Assembling %d HLS segments to %s", total_segments, task.fileName)
-        temp_output = output_path.with_suffix(".tmp.mp4")
-        if temp_output.exists():
-            temp_output.unlink(missing_ok=True)
-
-        concat_file = segments_dir / "concat_list.txt"
-        with open(concat_file, "w", encoding="utf-8") as f_concat:
-            for idx in range(total_segments):
-                sf = segments_dir / f"seg_{idx:05d}.ts"
-                f_concat.write(f"file '{sf.name}'\n")
-
-        merged = False
-        if self.is_ffmpeg_available() and task.fileName.endswith(".mp4"):
-            remux_cmd = [
-                "ffmpeg", "-v", "error", "-y",
-                "-f", "concat",
-                "-safe", "0",
-                "-i", str(concat_file),
-                "-c", "copy",
-                "-bsf:a", "aac_adtstoasc",
-                str(temp_output)
-            ]
-            if media_tools.is_native():
-                result = await asyncio.to_thread(media_tools.run, remux_cmd, timeout=300)
-                r_rc = result.returncode
-                if r_rc:
-                    raise RuntimeError("Android HLS remux failed: " + result.stderr[-1000:])
-            else:
-                r_proc = await asyncio.create_subprocess_exec(
-                    *remux_cmd, cwd=str(segments_dir),
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                r_rc = await r_proc.wait()
-            if r_rc == 0 and temp_output.exists() and temp_output.stat().st_size > 0:
-                merged = True
-
-        if not merged:
-            # Fallback concaténation binaire directe
-            with open(temp_output, "wb") as outfile:
-                for idx in range(total_segments):
-                    sf = segments_dir / f"seg_{idx:05d}.ts"
-                    if not valid_cached_segment(sf):
-                        raise ConnectionError(f"HLS segment {idx} is missing or corrupted during assembly")
-                    with open(sf, "rb") as infile:
-                        shutil.copyfileobj(infile, outfile, length=65536)
-                outfile.flush()
-                os.fsync(outfile.fileno())
-        if task.cancelled or task.paused:
-            temp_output.unlink(missing_ok=True)
-            return
-        # Publish only after the full assembly succeeded. On failure the cache
-        # remains available and an existing final file is left untouched.
-        if output_path.exists():
-            raise FileExistsError("A final media file appeared during HLS assembly")
-        publish_file(temp_output, output_path)
-
-        # Nettoyage sécurisé du dossier temporaire de segments une fois l'assemblage validé
-        shutil.rmtree(segments_dir, ignore_errors=True)
-
-        final_size = output_path.stat().st_size if output_path.exists() else downloaded
-        task.downloadedBytes = final_size
-        task.totalBytes = final_size
-        task.progress = 100.0
-        task.reset_speed()
-
-        if task.downloadSubtitles:
-            await self._download_subtitles(task)
-
-        await self._finalize_task(task)
+        return await self.transfer_worker._download_hls_segments_native(task, m3u8_url)
 
     async def _apply_throttle(self, task: DownloadTask, bytes_read: int):
-        speed_limit = task.maxSpeedLimit if task.maxSpeedLimit > 0 else self.global_speed_limit
-        if speed_limit <= 0:
-            return
-
-        now_ms = time.time() * 1000
-        if task.throttleStartTimeMs == 0:
-            task.throttleStartTimeMs = now_ms
-            task.throttleBytesWritten = 0
-
-        task.throttleBytesWritten += bytes_read
-        elapsed_ms = max(1.0, now_ms - task.throttleStartTimeMs)
-
-        expected_time_ms = (task.throttleBytesWritten * 1000.0) / speed_limit
-        sleep_time_ms = expected_time_ms - elapsed_ms
-
-        if sleep_time_ms > 0:
-            await asyncio.sleep(min(sleep_time_ms / 1000.0, 1.0))
-
-        if elapsed_ms > 2000 or task.throttleBytesWritten > 1024 * 1024:
-            task.throttleStartTimeMs = time.time() * 1000
-            task.throttleBytesWritten = 0
+        return await self.transfer_worker._apply_throttle(task, bytes_read)
 
     async def export_task(self, task: DownloadTask, *, manual=False):
-        """Persist an independent, retryable native export. Never fetch media."""
-        if platform_events.completed_handler is None:
-            raise ValueError("Android export is unavailable")
-        native_job = self._native_exports.get(task.id)
-        if native_job is not None and not native_job.done():
-            raise ValueError("An export is already in progress for this download")
-        lock = self._export_locks.setdefault(task.id, asyncio.Lock())
-        if lock.locked():
-            raise ValueError("An export is already in progress for this download")
-        async with lock:
-            previous_phase = task.phase
-            try:
-                if manual:
-                    task.paused = task.cancelled = False
-                if task.paused or task.cancelled:
-                    raise ValueError("Export was paused or cancelled")
-                self.tasks[task.id] = task
-                if task.id not in self.task_order:
-                    self.task_order.append(task.id)
-                task.exportStatus = ExportStatus.EXPORTING
-                task.exportError = None
-                task.exportUrisJson = "[]"
-                task.exportedAt = None
-                task.exportAttempts += 1
-                task.phase = "exporting"
-                library_service.save_task(task)
-                self.broadcast_update(task)
-                storage = await asyncio.to_thread(platform_events.storage_status)
-                task.exportDestination = storage.get("destination") if storage else None
-                if storage is not None and not storage.get("authorized"):
-                    raise PermissionError("Storage access unavailable; authorize a folder in Settings > Storage")
-                native_job = asyncio.create_task(asyncio.to_thread(platform_events.completed, task))
-                self._native_exports[task.id] = native_job
-                def finished(job):
-                    if self._native_exports.get(task.id) is job:
-                        self._native_exports.pop(task.id, None)
-                    # Retrieve an exception even if the caller was cancelled.
-                    if not job.cancelled():
-                        job.exception()
-                native_job.add_done_callback(finished)
-                result = await asyncio.shield(native_job)
-                if task.paused or task.cancelled:
-                    raise ValueError("Export was paused or cancelled")
-                uris = result.get("uris") if isinstance(result, dict) else None
-                if not isinstance(uris, list) or not uris or not all(isinstance(uri, str) and uri for uri in uris):
-                    raise ValueError("The storage provider did not confirm the exported files")
-                task.exportStatus = ExportStatus.EXPORTED
-                task.exportUrisJson = json.dumps(uris)
-                task.exportDestination = result.get("destination") or task.exportDestination
-                task.exportedAt = datetime.now(timezone.utc)
-                return result
-            except (Exception, asyncio.CancelledError) as exc:
-                if isinstance(exc, asyncio.CancelledError):
-                    task.paused = True  # Stop the still-running native copy at its next chunk.
-                task.exportStatus = ExportStatus.PENDING if task.paused or task.cancelled or isinstance(exc, asyncio.CancelledError) else ExportStatus.EXPORT_FAILED
-                task.exportError = str(exc) or "Export interrupted; retry from the private library copy."
-                raise
-            finally:
-                if task.error and task.error.startswith("Android export failed;"):
-                    task.error = None
-                task.phase = previous_phase
-                try:
-                    library_service.save_task(task)
-                    self.broadcast_update(task)
-                finally:
-                    self._export_locks.pop(task.id, None)
+        return await self.export_coordinator.export_task(task, manual=manual)
 
     async def _finalize_task(self, task: DownloadTask, verification=None):
-        native = self._media_jobs.get(task.id)
-        if native is not None and not native.done():
-            raise ValueError("Media finalization is still in progress")
-        lock = self._finalization_locks.setdefault(task.id, asyncio.Lock())
-        if lock.locked():
-            raise ValueError("Media finalization is already in progress")
-        try:
-            async with lock:
-                await self._finalize_task_locked(task, verification)
-        except asyncio.CancelledError:
-            task.paused = True
-            if task.status != DownloadStatus.COMPLETED:
-                task.status = DownloadStatus.PAUSED
-            library_service.save_task(task)
-            self.broadcast_update(task)
-            raise
-        finally:
-            self._finalization_locks.pop(task.id, None)
+        return await self.media_pipeline._finalize_task(task, verification)
 
     async def _finalize_task_locked(self, task: DownloadTask, verification=None):
-        if task.cancelled or task.paused:
-            task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
-            library_service.save_task(task)
-            self.broadcast_update(task)
-            return
-        task.progress = 100.0
-        task.speed = 0
-
-        # Muxing FFmpeg si sous-titres présents
-        if task.savePathSubtitle and self.is_ffmpeg_available():
-            verification = None  # A newly muxed output needs its own integrity check.
-            task.status = DownloadStatus.MUXING
-            task.phase = "muxing"
-            self.broadcast_update(task)
-            library_service.save_task(task)
-            try:
-                job = asyncio.create_task(asyncio.to_thread(self._mux_subtitles_with_ffmpeg, task))
-                self._media_jobs[task.id] = job
-                def media_finished(finished):
-                    if self._media_jobs.get(task.id) is finished:
-                        self._media_jobs.pop(task.id, None)
-                    if not finished.cancelled():
-                        finished.exception()
-                job.add_done_callback(media_finished)
-                await asyncio.shield(job)
-            except Exception as exc:
-                task.status = DownloadStatus.FAILED
-                task.error = f"Échec de fusion des sous-titres : {exc}"
-                self.broadcast_update(task)
-                library_service.save_task(task)
-                return
-
-        if task.cancelled or task.paused:
-            task.status = DownloadStatus.CANCELLED if task.cancelled else DownloadStatus.PAUSED
-            library_service.save_task(task)
-            self.broadcast_update(task)
-            return
-
-        task.phase = "verifying"
-        self.broadcast_update(task)
-
-        # Vérification d'intégrité automatique du fichier téléchargé
-        verif = verification or await asyncio.to_thread(
-            verification_service.verify_file,
-            file_path_str=task.savePath,
-            anime_name=task.animeName,
-            file_name=task.fileName,
-            expected_size=task.totalBytes
-        )
-
-        if verif.relocatedPath and verif.relocatedPath != task.savePath:
-            task.savePath = verif.relocatedPath
-
-        task.verificationStatus = verif.status
-        task.verifiedAt = datetime.now(timezone.utc)
-        task.videoDuration = verif.duration
-        task.verificationError = verif.error
-
-        if verif.valid:
-            task.error = None
-            # A verified private file is complete even if publication is paused,
-            # denied or interrupted. EXPORTING keeps Android's service alive.
-            task.status = DownloadStatus.COMPLETED
-            task.progress = 100.0
-            task.completedAt = datetime.now(timezone.utc)
-            library_service.save_task(task)
-            library_service.mark_as_downloaded(
-                task.animeUrl or task.downloadPageUrl or "", task.animeName,
-                task.episodeNumber, task.version)
-            if platform_events.completed_handler is not None and task.exportStatus != ExportStatus.EXPORTED:
-                try:
-                    await self.export_task(task)
-                except Exception as exc:
-                    logger.exception("Completed media could not be exported by the native platform")
-            task.status = DownloadStatus.COMPLETED
-            task.phase = None
-            task.progress = 100.0
-            task.completedAt = datetime.now(timezone.utc)
-            part_path = Path(task.savePath + ".part")
-            if part_path.exists():
-                part_path.unlink(missing_ok=True)
-            self.broadcast_update(task)
-            library_service.save_task(task)
-
-            logger.info("Download completed and verified: %s (%s, duration: %s)", task.fileName, task.formattedTotalSize, verif.formattedDuration)
-
-            if self.plex_organization:
-                await asyncio.to_thread(self._generate_nfo_files, task)
-        else:
-            task.status = DownloadStatus.FAILED
-            task.error = f"Integrity verification failed: {verif.error}"
-            self.broadcast_update(task)
-            library_service.save_task(task)
-            logger.error("Download failed after verification for %s: %s", task.fileName, verif.error)
+        return await self.media_pipeline._finalize_task_locked(task, verification)
 
     # -------------------------------------------------------------------------
     # Sous-titres & FFmpeg
     # -------------------------------------------------------------------------
 
     def _update_resolved_subtitles(self, task: DownloadTask, value, base_url: str):
-        tracks = normalize_subtitles(value, base_url)
-        # A failed/empty re-extraction must not erase known pending subtitles.
-        if not tracks:
-            return
-        previous = {track["url"]: track for track in normalize_subtitles(task.subtitlesJson)}
-        for track in tracks:
-            cached = previous.get(track["url"], {})
-            for key in ("path", "muxed"):
-                if key in cached:
-                    track[key] = cached[key]
-        task.subtitlesJson = json.dumps(tracks)
+        return self.media_pipeline._update_resolved_subtitles(task, value, base_url)
 
     def _recover_muxed_file(self, task: DownloadTask) -> bool:
-        """Recover a legacy task whose MP4 was removed after a successful MKV export.
-
-        Only the exact sibling destination is considered, and every requested track
-        must be present with its title and language. Never adopt an arbitrary MKV.
-        """
-        if not task.savePath or Path(task.savePath).exists():
-            return False
-        candidate = Path(task.savePath).with_suffix(".mkv")
-        if not candidate.is_file() or not media_tools.which("ffprobe"):
-            return False
-        try:
-            tracks = normalize_subtitles(task.subtitlesJson)
-            if task.downloadSubtitles and not tracks:
-                return False
-            result = verification_service.verify_file(str(candidate), expected_size=task.totalBytes or None)
-            if not result.valid:
-                return False
-            probe = media_tools.run([media_tools.which("ffprobe"), "-v", "error", "-show_streams",
-                                    "-of", "json", str(candidate)], capture_output=True,
-                                   text=True, check=True, timeout=30)
-            present = Counter((stream.get("tags", {}).get("title", ""),
-                               stream.get("tags", {}).get("language", "und"))
-                              for stream in json.loads(probe.stdout).get("streams", [])
-                              if stream.get("codec_type") == "subtitle")
-            expected = Counter((track["label"], subtitle_language(track.get("lang"))) for track in tracks)
-            if task.downloadSubtitles and any(present[key] < count for key, count in expected.items()):
-                return False
-            for track in tracks:
-                track["muxed"] = True
-            task.subtitlesJson = json.dumps(tracks)
-            task.savePathSubtitle = None
-            task.savePath = str(candidate)
-            task.fileName = candidate.name
-            task.totalBytes = task.downloadedBytes = candidate.stat().st_size
-            library_service.save_task(task)
-            return True
-        except (OSError, ValueError, subprocess.SubprocessError):
-            logger.warning("Unable to recover existing mux for %s", task.fileName, exc_info=True)
-            return False
+        return self.media_pipeline._recover_muxed_file(task)
 
     def _has_pending_subtitles(self, task: DownloadTask) -> bool:
-        if not task.downloadSubtitles:
-            return False
-        if task.savePathSubtitle:
-            return True
-        try:
-            tracks = normalize_subtitles(task.subtitlesJson)
-        except (ValueError, TypeError):
-            return True
-        return not tracks or any(not track.get("muxed") for track in tracks)
+        return self.media_pipeline._has_pending_subtitles(task)
 
     async def _download_subtitles(self, task: DownloadTask):
-        base_url = task.downloadPageUrl or task.fileUrl or task.directDownloadUrl or ""
-        try:
-            subs = normalize_subtitles(task.subtitlesJson, base_url)
-        except (ValueError, TypeError) as exc:
-            raise SubtitleError(f"Métadonnées de sous-titres invalides : {exc}") from exc
-        if not subs and task.subtitleUrl:
-            subs = normalize_subtitles([{"url": task.subtitleUrl}], base_url)
-        pending = [(index, sub) for index, sub in enumerate(subs) if not sub.get("muxed")]
-        if not pending:
-            return
-
-        task.phase = "subtitles"
-        task.reset_speed()
-        self.broadcast_update(task)
-        downloaded_paths = []
-        errors = []
-        refresh_required = False
-        parent = Path(task.savePath).parent
-
-        async def validate_request(request):
-            if not is_safe_url(str(request.url)):
-                raise ValueError("URL de sous-titres non autorisée")
-
-        headers = self.get_headers_for_url(base_url, task.selectedServer)
-        if base_url:
-            headers["Referer"] = base_url
-        try:
-            async with self._create_async_client(headers=headers, timeout=30.0) as client:
-                client.event_hooks.setdefault("request", []).append(validate_request)
-                for index, sub in pending:
-                    if task.cancelled or task.paused:
-                        return
-                    url, label = sub["url"], sub["label"]
-                    try:
-                        # A completed sidecar survives retries, including an expired CDN URL.
-                        cached = Path(sub["path"]) if sub.get("path") else None
-                        if cached and is_safe_path(cached, [parent]) and cached.is_file():
-                            if 0 < cached.stat().st_size <= 10 * 1024 * 1024:
-                                try:
-                                    subtitle_extension(cached.read_bytes())
-                                    downloaded_paths.append(str(cached))
-                                    continue
-                                except ValueError:
-                                    pass
-                        if not is_safe_url(url):
-                            raise ValueError("URL de sous-titres non autorisée")
-                        request_headers = dict(sub.get("headers") or {})
-                        if sub.get("referer"):
-                            request_headers["Referer"] = sub["referer"]
-                        for attempt in range(3):
-                            if task.cancelled or task.paused:
-                                return
-                            try:
-                                resp = await client.get(url, headers=request_headers)
-                                resp.raise_for_status()
-                                break
-                            except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
-                                transient = (not hasattr(exc, "kind") and
-                                    (not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in (408, 500, 502, 503, 504)))
-                                if (isinstance(exc, httpx.HTTPStatusError) and hasattr(client, "service")
-                                        and exc.response.status_code in (502, 503, 504)):
-                                    transient = False  # The common transport already retried these.
-                                if not transient or attempt == 2:
-                                    raise
-                                await asyncio.sleep(2 ** attempt)
-                        if not resp.content or len(resp.content) > 10 * 1024 * 1024:
-                            raise ValueError("Sous-titres vides ou trop volumineux")
-                        ext = subtitle_extension(resp.content)
-                        clean_label = self.sanitize_file_name(str(label)) or "Sous-titres"
-                        sub_name = f"{Path(task.savePath).stem}.sub{index + 1}.{clean_label}{ext}"
-                        sub_path = parent / sub_name
-                        if not is_safe_path(sub_path, [parent]):
-                            raise ValueError("Chemin de sous-titres non autorisé")
-                        parent.mkdir(parents=True, exist_ok=True)
-                        staging = None
-                        try:
-                            with tempfile.NamedTemporaryFile(dir=parent, prefix=".animan-sub-", delete=False) as temp:
-                                staging = Path(temp.name)
-                                temp.write(resp.content)
-                            staging.replace(sub_path)
-                        finally:
-                            if staging:
-                                staging.unlink(missing_ok=True)
-                        sub["path"] = str(sub_path)
-                        downloaded_paths.append(str(sub_path))
-                        logger.info("Subtitles downloaded: %s", sub_name)
-                    except (VerificationRequired, RateLimited):
-                        raise
-                    except Exception as exc:
-                        if isinstance(exc, httpx.TimeoutException):
-                            reason = "Délai réseau dépassé après 3 tentatives"
-                        elif isinstance(exc, httpx.HTTPStatusError):
-                            reason = f"HTTP {exc.response.status_code}"
-                            refresh_required = refresh_required or exc.response.status_code in (401, 403, 404, 410)
-                        else:
-                            reason = str(exc).strip() or type(exc).__name__
-                        errors.append(f"{label}: {reason}")
-                        logger.warning("Error downloading subtitles %s: %s", label, reason)
-        finally:
-            # Persist partial success even when a later track requires verification.
-            task.subtitlesJson = json.dumps(subs)
-            task.savePathSubtitle = json.dumps(downloaded_paths) if downloaded_paths else None
-            library_service.save_task(task)
-        if errors:
-            raise SubtitleError("Échec du téléchargement des sous-titres : " + "; ".join(errors), refresh_required)
+        return await self.media_pipeline._download_subtitles(task)
 
     def is_ffmpeg_available(self) -> bool:
-        return media_tools.which("ffmpeg") is not None
+        return self.media_pipeline.is_ffmpeg_available()
 
     def _mux_subtitles_with_ffmpeg(self, task: DownloadTask):
-        if not self.is_ffmpeg_available():
-            raise RuntimeError("FFmpeg indisponible")
-        video_path = Path(task.savePath)
-        if not video_path.is_file():
-            raise ValueError("Vidéo introuvable")
-
-        try:
-            sub_paths = json.loads(task.savePathSubtitle or "[]")
-        except (ValueError, TypeError):
-            sub_paths = [task.savePathSubtitle]
-        if not isinstance(sub_paths, list):
-            sub_paths = [sub_paths]
-        existing_subs = [Path(sp) for sp in sub_paths if sp and
-                         is_safe_path(Path(sp), [video_path.parent]) and Path(sp).is_file()]
-        if not existing_subs or len(existing_subs) != len(sub_paths):
-            raise ValueError("Fichier de sous-titres introuvable")
-        metadata = {s.get("path"): s for s in normalize_subtitles(task.subtitlesJson)}
-
-        original = verification_service.verify_file(str(video_path), expected_size=task.totalBytes)
-        if not original.valid:
-            raise ValueError(f"Vidéo source invalide : {original.error}")
-        probe_path = media_tools.which("ffprobe")
-        if not probe_path:
-            raise RuntimeError("FFprobe requis pour valider les pistes fusionnées")
-
-        def probe(path):
-            result = media_tools.run([probe_path, "-v", "error", "-show_streams", "-of", "json", str(path)],
-                                    capture_output=True, text=True, check=True, timeout=30)
-            return json.loads(result.stdout).get("streams", [])
-
-        embedded = [s for s in probe(video_path) if s.get("codec_type") == "subtitle"]
-        output_path = video_path.with_suffix(".mkv")
-        with tempfile.NamedTemporaryFile(dir=video_path.parent, prefix=".animan-mux-", suffix=".mkv", delete=False) as temp:
-            staging = Path(temp.name)
-        try:
-            cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(video_path)]
-            for sf in existing_subs:
-                cmd.extend(["-i", str(sf)])
-            cmd.extend(["-map", "0:v", "-map", "0:a?", "-map", "0:s?",
-                        "-c:v", "copy", "-c:a", "copy", "-c:s", "copy"])
-            for index, stream in enumerate(embedded):
-                if stream.get("codec_name") == "mov_text":
-                    cmd.extend([f"-c:s:{index}", "srt"])
-            for index, sf in enumerate(existing_subs):
-                cmd.extend(["-map", f"{index + 1}:s:0"])
-                stream_index = len(embedded) + index
-                if sf.suffix.lower() == ".vtt":
-                    cmd.extend([f"-c:s:{stream_index}", "srt"])
-                track = metadata.get(str(sf), {})
-                title = track.get("label") or sf.stem
-                lang = subtitle_language(track.get("lang") or track.get("srclang"))
-                cmd.extend([f"-metadata:s:s:{stream_index}", f"language={lang}",
-                            f"-metadata:s:s:{stream_index}", f"title={title}"])
-            cmd.append(str(staging))
-            result = media_tools.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode:
-                raise RuntimeError(result.stderr.strip()[-1000:] or "FFmpeg a échoué")
-            verification = verification_service.verify_file(str(staging))
-            if not verification.valid:
-                raise ValueError(f"Vidéo fusionnée invalide : {verification.error}")
-            subtitles = [s for s in probe(staging) if s.get("codec_type") == "subtitle"]
-            if len(subtitles) != len(embedded) + len(existing_subs):
-                raise ValueError("Pistes de sous-titres manquantes après fusion")
-            if task.cancelled or task.paused:
-                return
-            output_path = self._publish_mux_file(staging, video_path, output_path, task.id)
-            task.fileName = output_path.name
-            task.savePath = str(output_path)
-            task.totalBytes = task.downloadedBytes = output_path.stat().st_size
-            task.savePathSubtitle = None
-            tracks = normalize_subtitles(task.subtitlesJson)
-            for track in tracks:
-                if track.get("path") in sub_paths:
-                    track["muxed"] = True
-            task.subtitlesJson = json.dumps(tracks)
-            library_service.save_task(task)
-            for obsolete in ([video_path] if video_path != output_path else []) + existing_subs:
-                try:
-                    obsolete.unlink(missing_ok=True)
-                except OSError:
-                    logger.warning("Export completed; unable to remove %s", obsolete.name, exc_info=True)
-            logger.info("FFmpeg muxing succeeded: %s", output_path.name)
-        finally:
-            staging.unlink(missing_ok=True)
+        return self.media_pipeline._mux_subtitles_with_ffmpeg(task)
 
     def _publish_mux_file(self, staging: Path, video_path: Path, output_path: Path, task_id: str) -> Path:
-        if output_path == video_path:
-            staging.replace(output_path)
-            return output_path
-        # Preserve unrelated episodes, including a destination created during mux.
-        for collision in range(1000):
-            candidate = output_path if collision == 0 else output_path.with_name(
-                f"{output_path.stem}.subtitled-{self.sanitize_file_name(task_id)[:12]}-{collision}.mkv")
-            try:
-                if not media_tools.is_native():
-                    try:
-                        os.link(staging, candidate)
-                        return candidate
-                    except OSError as exc:
-                        if exc.errno not in (errno.EACCES, errno.EPERM, errno.ENOSYS, errno.EOPNOTSUPP):
-                            raise
-                # Android/FAT may reject hard links despite allowing ordinary
-                # writes. Reserve exclusively and replace only our placeholder.
-                fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(fd)
-                try:
-                    staging.replace(candidate)
-                except BaseException:
-                    candidate.unlink(missing_ok=True)
-                    raise
-                return candidate
-            except FileExistsError:
-                continue
-        raise FileExistsError("Impossible de réserver un nom de fichier pour la fusion")
+        return self.media_pipeline._publish_mux_file(staging, video_path, output_path, task_id)
 
     # -------------------------------------------------------------------------
     # Plex / Jellyfin NFO
     # -------------------------------------------------------------------------
 
     def _generate_nfo_files(self, task: DownloadTask):
-        try:
-            video_file = Path(task.savePath)
-            season_dir = video_file.parent
-            anime_dir = season_dir.parent
-
-            tvshow_nfo = anime_dir / "tvshow.nfo"
-            if not tvshow_nfo.exists():
-                synopsis = ""
-                studio = ""
-                genres = []
-
-                # Favoris ou recherche pour métadonnées
-                fav = next((f for f in library_service.get_all_favorites() if f.title.lower() == task.animeName.lower()), None)
-                if fav:
-                    pass
-
-                content = (
-                    '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'
-                    '<tvshow>\n'
-                    f'    <title>{saxutils.escape(task.animeName)}</title>\n'
-                    f'    <plot>{saxutils.escape(synopsis)}</plot>\n'
-                    f'    <studio>{saxutils.escape(studio)}</studio>\n'
-                )
-                for g in genres:
-                    content += f'    <genre>{saxutils.escape(g)}</genre>\n'
-                content += '</tvshow>\n'
-
-                with open(tvshow_nfo, "w", encoding="utf-8") as f:
-                    f.write(content)
-
-            ep_nfo = season_dir / f"{video_file.stem}.nfo"
-            ep_content = (
-                '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'
-                '<episodedetails>\n'
-                f'    <title>{saxutils.escape(f"Épisode {task.episodeNumber}")}</title>\n'
-                f'    <episode>{task.episodeNumber}</episode>\n'
-                '    <season>1</season>\n'
-                f'    <plot>{saxutils.escape(f"{task.animeName} - Épisode {task.episodeNumber}")}</plot>\n'
-                '</episodedetails>\n'
-            )
-            with open(ep_nfo, "w", encoding="utf-8") as f:
-                f.write(ep_content)
-        except Exception as e:
-            logger.error("Error generating NFO: %s", e)
+        return self.media_pipeline._generate_nfo_files(task)
 
     # -------------------------------------------------------------------------
     # SSE Broadcast
@@ -3251,6 +1605,8 @@ class DownloadManagerService:
             self.sse_subscribers.remove(q)
 
     def broadcast_update(self, task: DownloadTask):
+        from animan.diagnostics import telemetry
+        telemetry.task_phase(task)
         try:
             platform_events.progress(task)
         except Exception:
@@ -3268,13 +1624,7 @@ class DownloadManagerService:
     # -------------------------------------------------------------------------
 
     async def check_scheduled_tasks(self):
-        now = datetime.now(timezone.utc)
-        for t in self.tasks.values():
-            if t.status == DownloadStatus.SCHEDULED and t.scheduledStartTime:
-                if ensure_utc(t.scheduledStartTime) <= now:
-                    t.status = DownloadStatus.PENDING
-                    self.broadcast_update(t)
-        await self.process_queue()
+        return await self.scheduler.check_scheduled_tasks()
 
     # -------------------------------------------------------------------------
     # Helpers

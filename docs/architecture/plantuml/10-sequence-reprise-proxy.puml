@@ -3,7 +3,7 @@
 ' @source animan/services/source_http.py:SourceHTTPService.rotate_proxy
 ' @source animan/services/download_manager.py:DownloadManagerService._download_single_file
 ' @source animan/services/download_resume.py:prepare_hls_cache
-title Animan — rotation de proxy et reprise sans mélanger les représentations
+title AnimeLab — rotation de proxy et reprise sans mélanger les représentations
 autonumber
 actor Utilisateur as U
 control "API network" as API

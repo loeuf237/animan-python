@@ -1,5 +1,12 @@
 # Android APK size study
 
+The study below records the original October 15 baseline and simulations.
+The A11 implementation now enables native-symbol stripping, R8/resource
+shrinking, public-asset deduplication and removal of the unused Android XML stack.
+See [A11 implementation and validation](architecture/a11-validation.md) for actual
+build comparisons and device-test coverage. The historical estimates below are
+not measurements of the new build.
+
 Measured on 15 October 2026 against the signed, ARM64-only Android 0.1.0 beta
 (version code 212, application source `c1d47fc5bacdf737ca49ed666051049654986ef8`).
 The published APK is **77,688,756 bytes: 77.69 MB / 74.09 MiB**.

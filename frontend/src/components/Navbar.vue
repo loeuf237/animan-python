@@ -8,7 +8,7 @@
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
         </div>
-        <span class="brand-text">Animan</span>
+        <span class="brand-text">AnimeLab</span>
         <span class="brand-badge">SPA</span>
       </router-link>
 

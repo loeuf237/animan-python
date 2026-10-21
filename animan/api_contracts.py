@@ -1,3 +1,4 @@
+from animan.services.playback_service import PlaybackState
 """JSON boundary contracts for the public API (wire format version 1).
 
 Models validate legacy handlers too. Dynamic source settings and recipe keys are
@@ -417,6 +418,10 @@ REQUESTS = {
     'proxy_pool_settings': dict[str, bool],
 }
 RESPONSES = {
+    'open_playback': PlaybackState,
+    'save_playback': Result,
+    'export_diagnostics': dict[str, JsonValue],
+
     'get_all_status': list[DownloadTaskResponse], 'get_history': list[DownloadTaskResponse],
     'search_api': SearchResponse | list[AnimeResult], 'api_source_feed': SourceFeed,
     'api_latest_releases': SourceFeed | dict[str, list[AnimeResult]],

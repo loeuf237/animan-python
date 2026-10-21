@@ -44,7 +44,7 @@ def signing_identity():
 def sign(source, destination, tools):
     from android_release import inspect_apk
     info = json.loads((source / 'Android-build-info.json').read_text())
-    app = source / 'Animan-Android-under-test.apk'
+    app = source / 'AnimeLab-Android-under-test.apk'
     for line in (source / 'SHA256SUMS.txt').read_text().splitlines():
         expected, name = line.split('  ', 1)
         if Path(name).name != name: raise ValueError('Invalid checksum path')
@@ -52,18 +52,18 @@ def sign(source, destination, tools):
     inspect_apk(app)
     badging = subprocess.check_output([str(tools / 'aapt2'), 'dump', 'badging', str(app)], text=True)
     if 'application-debuggable' in badging or "name='com.animan.app'" not in badging:
-        raise RuntimeError('Release signing requires the non-debuggable Animan package')
+        raise RuntimeError('Release signing requires the non-debuggable AnimeLab package')
     key, values = signing_identity()
     env = {**os.environ, 'ANIMAN_LOCAL_STORE_PASS': values['store_password'], 'ANIMAN_LOCAL_KEY_PASS': values['key_password']}
     destination.mkdir(parents=True, exist_ok=True)
-    for name in ['Animan-Android-under-test.apk', 'Animan-instrumentation.apk']:
+    for name in ['AnimeLab-Android-under-test.apk', 'AnimeLab-instrumentation.apk']:
         subprocess.run([str(tools / 'apksigner'), 'sign', '--ks', str(key), '--ks-key-alias', values['alias'],
                         '--ks-pass', 'env:ANIMAN_LOCAL_STORE_PASS', '--key-pass', 'env:ANIMAN_LOCAL_KEY_PASS',
                         '--out', str(destination / name), str(source / name)], env=env, check=True, capture_output=True, text=True)
         subprocess.run([str(tools / 'zipalign'), '-c', '-P', '16', '4', str(destination / name)], check=True)
     certificate = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(destination / app.name)], text=True)
     fingerprint = re.search(r'certificate SHA-256 digest: ([a-f0-9]+)', certificate).group(1)
-    test_certificate = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(destination / 'Animan-instrumentation.apk')], text=True)
+    test_certificate = subprocess.check_output([str(tools / 'apksigner'), 'verify', '--print-certs', str(destination / 'AnimeLab-instrumentation.apk')], text=True)
     if fingerprint not in test_certificate: raise RuntimeError('Instrumentation signing identity differs from the app')
     info.update(validation_key_only=False, signing_method='local_apksigner',
                 source_build_variant='validation_with_release_flags', signing_certificate_sha256=fingerprint)

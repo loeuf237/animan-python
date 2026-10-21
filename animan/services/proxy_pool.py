@@ -90,7 +90,6 @@ class ProxyPool:
         self.last_check = 0
         self._domain_attempts = {}
         with config._get_conn() as conn:
-            conn.execute("CREATE TABLE IF NOT EXISTS public_proxy_pool (id INTEGER PRIMARY KEY CHECK(id=1), payload TEXT NOT NULL)")
             row = conn.execute("SELECT payload FROM public_proxy_pool WHERE id=1").fetchone()
         if row:
             try:

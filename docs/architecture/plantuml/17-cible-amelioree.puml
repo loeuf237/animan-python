@@ -1,11 +1,11 @@
 @startuml
 !include theme.iuml
-title Animan — architecture cible proposée (non implémentée)
+title AnimeLab — cible modulaire partiellement réalisée (A03–A08)
 left to right direction
 skinparam componentBackgroundColor #ECFDF5
 skinparam componentBorderColor #047857
 boundary "Vue / Pinia\nAPI typée" as UI
-package "Monolithe modulaire Python proposé" {
+package "Monolithe Python : réalisé et propositions restantes" {
   component "Couche application\ncas d'usage et validation" as App
   component "SourceRegistry\ncapabilities + identité stable" as Registry
   interface "SourceProvider\nProtocol commun" as SourcePort
@@ -48,8 +48,7 @@ note bottom of Export
 États d'export indépendants : NOT_REQUESTED,
 PENDING, EXPORTING, EXPORTED, EXPORT_FAILED.
 Un média peut être localement valide sans être exporté.
-Ces états sont déjà implémentés (A02) ; l'extraction
-d'un ExportCoordinator séparé reste proposée (A03).
+États (A02) et ExportCoordinator séparé (A03) implémentés.
 end note
 note bottom of Registry
 La même résolution de source sert recherche,
@@ -57,9 +56,12 @@ catalogue, lecture, téléchargement et watchdog.
 Contrats testés par source et corpus HTML/JSON.
 end note
 note bottom of Orchestrator
-Tous les composants verts sont une proposition.
-Le suivi par version (A01) et les états (A02) existent
-déjà dans les services actuels, sans ce découpage.
+A03 : TransferWorker, MediaPipeline, ExportCoordinator
+et DownloadScheduler extraits avec budgets distincts.
+A04 : SourceRegistry / SourceProvider réalisés.
+A05 : transactions et migrations versionnées réalisées.
+Repository, PlatformAdapter et événements métiers
+typés restent des propositions de découplage.
 Conserver Python et les garanties de reprise déjà présentes.
 Découper progressivement avec tests de contrat et métriques.
 end note

@@ -121,7 +121,8 @@ def command(action):
 
 def native_probe(include_media=True):
     """Called by instrumentation, not by a public API or untrusted WebView."""
-    import cffi, curl_cffi, pydantic, sqlalchemy, lxml.etree, websockets, yt_dlp
+    import cffi, curl_cffi, pydantic, sqlalchemy, websockets, yt_dlp
+    from bs4 import BeautifulSoup
     from animan import media_tools
     from animan.database import engine
     from animan.services.source_http import source_http
@@ -148,7 +149,9 @@ def native_probe(include_media=True):
     # TLS + Chrome impersonation, outside source security/cache policy.
     response = curl_cffi.requests.get("https://example.com", impersonate="chrome", timeout=20)
     assert response.status_code == 200
-    assert lxml.etree.fromstring(b"<probe/>").tag == "probe"
+    # Exercise the parser used by built-in and imported source adapters.
+    soup = BeautifulSoup('<article class="anime"><a href="/episode">Probe</a></article>', "html.parser")
+    assert soup.select_one(".anime a")["href"] == "/episode"
     # This exercises the actual Python-to-Java AES boundary even when the
     # emulator's ARM binary translation cannot execute FFmpeg CLI commands.
     key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
@@ -172,7 +175,7 @@ def media_pipeline_probe():
     from animan.config import settings
     from animan.models.download_task import DownloadTask, DownloadStatus
     import importlib
-    manager_module = importlib.import_module("animan.services.download_manager")
+    media_module = importlib.import_module("animan.services.download_stages.media")
     from animan.services.download_manager import download_manager as manager
     from animan.services.download_resume import write_metadata
     from animan.services.verification_service import verification_service
@@ -209,9 +212,9 @@ def media_pipeline_probe():
         return httpx.Response(206 if "range" in request.headers else 200, headers=headers, content=payload[start:])
 
     async def transfer():
-        original_client, original_safe = manager._create_async_client, manager_module.is_safe_url
+        original_client, original_safe = manager._create_async_client, media_module.is_safe_url
         manager._create_async_client = lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), trust_env=False)
-        manager_module.is_safe_url = lambda url, *a, **kw: urlparse(str(url)).hostname == "fixtures.animan.invalid"
+        media_module.is_safe_url = lambda url, *a, **kw: urlparse(str(url)).hostname == "fixtures.animan.invalid"
         tasks = []
         try:
             url = "https://fixtures.animan.invalid/video.mp4"
@@ -239,7 +242,7 @@ def media_pipeline_probe():
             return {"direct_resume": True, "aes128_hls": True, "subtitle_mux": True,
                     "media_paths": [direct.savePath, hls.savePath], "decode_verification": True}
         finally:
-            manager._create_async_client, manager_module.is_safe_url = original_client, original_safe
+            manager._create_async_client, media_module.is_safe_url = original_client, original_safe
             for task in tasks:
                 manager.tasks.pop(task.id, None)
                 if task.id in manager.task_order: manager.task_order.remove(task.id)

@@ -3,7 +3,7 @@
 ' @source android_runtime.py:start
 ' @source android/app/src/main/java/com/animan/app/EngineHost.kt:EngineHost
 ' @source animan/android_security.py:AndroidSessionMiddleware
-title Animan — déploiement Android autonome actuel
+title AnimeLab — déploiement Android autonome actuel
 top to bottom direction
 node "Appareil Android 10+ / ARM64\nAPK com.animan.app ; target SDK 35" as Device {
   node "Processus de l'application / UID privé" {
@@ -40,7 +40,7 @@ node "Appareil Android 10+ / ARM64\nAPK com.animan.app ; target SDK 35" as Devic
   }
   folder "Stockage partagé" {
     artifact "Downloads/Animan\nou dossier / carte SD choisi via SAF" as Shared
-    artifact "Movies/Animan\nrepli sous-titres selon MediaProvider" as Sidecars
+    artifact "Movies/AnimeLab\nrepli sous-titres selon MediaProvider" as Sidecars
   }
   Engine --> DB
   Engine --> Private

@@ -1,6 +1,6 @@
 @startuml
 !include theme.iuml
-title Animan — sessions HTTP, protection des sites et proxies
+title AnimeLab — sessions HTTP, protection des sites et proxies
 ' @source animan/services/source_http.py:SourceHTTPService
 ' @source animan/services/source_http.py:DomainSession
 ' @source animan/services/source_http.py:SourceClient

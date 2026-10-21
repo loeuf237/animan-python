@@ -13,13 +13,13 @@ def assemble(release_id, output):
     output.mkdir(parents=True, exist_ok=True)
     def get(path, accept='application/vnd.github+json'):
         req = Request('https://api.github.com/repos/'+REPOSITORY+path, headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],
-            'Accept':accept,'X-GitHub-Api-Version':'2022-11-28','User-Agent':'Animan-APK-assembly'})
+            'Accept':accept,'X-GitHub-Api-Version':'2022-11-28','User-Agent':'AnimeLab-APK-assembly'})
         with build_opener(SafeRedirect()).open(req,timeout=60) as r: return r.read()
     release=json.loads(get('/releases/'+str(release_id)))
     assert release['draft'] and release['tag_name']=='android-v0.1.0-beta.1'
     assets={a['name']:a for a in json.loads(get('/releases/'+str(release_id)+'/assets?per_page=100'))}
     manifest=json.loads(get('/releases/assets/'+str(assets['Android-apk-parts.json']['id']),'application/octet-stream'))
-    assert manifest['filename']=='Animan-v0.1.0-Android-arm64.apk'
+    assert manifest['filename'] in ('AnimeLab-v0.1.0-Android-arm64.apk', 'Animan-v0.1.0-Android-arm64.apk')
     target=output/manifest['filename']
     with target.open('wb') as file:
         for index, part in enumerate(manifest['parts'],1):
@@ -39,9 +39,9 @@ def assemble(release_id, output):
         subprocess.run(['gh','release','upload','android-v0.1.0-beta.1',str(target),'--clobber','--repo',REPOSITORY],check=True)
     # Publish only verified signing outputs as a test artifact. The tester can
     # read this with actions:read; unpublished release assets require writers.
-    for name in ('Animan-instrumentation.apk','Android-build-info.json','SHA256SUMS.txt'):
-        (output/name).write_bytes(get('/releases/assets/'+str(assets[name]['id']),'application/octet-stream'))
-    target.rename(output/'Animan-Android-under-test.apk')
+    for name in ('AnimeLab-instrumentation.apk','Android-build-info.json','SHA256SUMS.txt'):
+        (output/name).write_bytes(get('/releases/assets/'+str((assets.get(name) or assets[name.replace('AnimeLab', 'Animan')])['id']),'application/octet-stream'))
+    target.rename(output/'AnimeLab-Android-under-test.apk')
     print('Checksummed APK assembled and verified; release remains a draft')
 
 if __name__=='__main__':

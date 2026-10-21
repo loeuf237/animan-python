@@ -128,7 +128,10 @@ async def test_repository_refresh_invalidates_changed_recipes_and_removes_stale(
     rows[:] = [{**rows[0], 'version':'2'}]
     await service.import_repository('https://repo.example/index.min.json')
     visible = service.get_visible_extensions()
-    assert len(visible) == 1 and visible[0]['recipe_json'] is None
+    assert len(visible) == 1
+    # A13 stores the regenerated effective recipe as a new revision after invalidation.
+    assert json.loads(visible[0]['recipe_json'])['schema_version'] == 1
+    assert service.recipe_history(visible[0]['id'])['revisions']
     assert visible[0]['is_enabled'] == 1
     assert service.get_container_source_by_id('ext.alpha') is not None
     assert service.get_container_source_by_id('alp') is None

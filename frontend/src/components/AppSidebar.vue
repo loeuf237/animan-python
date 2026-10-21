@@ -1,11 +1,11 @@
 <template>
   <aside class="app-sidebar">
     <!-- Brand Logo & Name -->
-    <router-link to="/" class="brand-mark" aria-label="Animan">
+    <router-link to="/" class="brand-mark" aria-label="AnimeLab">
       <span class="brand-icon">
-        <img src="/img/icon-192.png" :alt="tx('Animan Logo')" class="brand-logo-img" />
+        <img src="/img/icon-192.png" :alt="tx('AnimeLab Logo')" class="brand-logo-img" />
       </span>
-      <span class="brand-name">Ani<span>man</span></span>
+      <span class="brand-name">Anime<span>Lab</span></span>
     </router-link>
 
     <!-- Sidebar Menu -->

@@ -1,4 +1,4 @@
-Animan Android includes dynamically loaded FFmpeg/FFprobe libraries.
+AnimeLab Android includes dynamically loaded FFmpeg/FFprobe libraries.
 Package: dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.4 (LGPL-3.0).
 Corresponding source and build instructions:
 https://github.com/ffmpegkit-maintained/ffmpeg

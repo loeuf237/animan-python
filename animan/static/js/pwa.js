@@ -1,4 +1,4 @@
-// Animan PWA Registration and Installation Handler
+// AnimeLab PWA Registration and Installation Handler
 (() => {
   'use strict';
 
@@ -16,14 +16,14 @@
             if (installingWorker) {
               installingWorker.addEventListener('statechange', () => {
                 if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('[Animan PWA] Nouvelle version prête. Rafraîchissez pour l\'activer.');
+                  console.log('[AnimeLab PWA] Nouvelle version prête. Rafraîchissez pour l\'activer.');
                 }
               });
             }
           });
         })
         .catch((err) => {
-          console.warn('[Animan PWA] Erreur enregistrement Service Worker:', err);
+          console.warn('[AnimeLab PWA] Erreur enregistrement Service Worker:', err);
         });
     });
   }
@@ -57,7 +57,7 @@
   window.installPwaApp = async () => {
     if (!deferredInstallPrompt) {
       if (typeof showToast === 'function') {
-        showToast('Animan est déjà installé ou prêt dans votre navigateur.', 'info');
+        showToast('AnimeLab est déjà installé ou prêt dans votre navigateur.', 'info');
       }
       return;
     }
@@ -66,7 +66,7 @@
       deferredInstallPrompt.prompt();
       const choice = await deferredInstallPrompt.userChoice;
       if (choice.outcome === 'accepted') {
-        console.log('[Animan PWA] Installation acceptée par l\'utilisateur');
+        console.log('[AnimeLab PWA] Installation acceptée par l\'utilisateur');
       }
       deferredInstallPrompt = null;
 
@@ -79,7 +79,7 @@
         banner.style.display = 'none';
       }
     } catch (err) {
-      console.warn('[Animan PWA] Erreur lors de l\'installation:', err);
+      console.warn('[AnimeLab PWA] Erreur lors de l\'installation:', err);
     }
   };
 
@@ -103,7 +103,7 @@
       banner.style.display = 'none';
     }
     if (typeof showToast === 'function') {
-      showToast('Animan a été installé avec succès sur votre appareil !', 'success');
+      showToast('AnimeLab a été installé avec succès sur votre appareil !', 'success');
     }
   });
 })();

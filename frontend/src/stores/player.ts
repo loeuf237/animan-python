@@ -1,8 +1,13 @@
+import type { PlaybackState, PlaybackOpen, PlaybackTrack, PlaybackCheckpoint } from '@/types/api';
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { api } from '@/api/client';
 import { episodeKey } from '@/utils/episodes';
 import type { Episode, SubtitleTrack } from '@/types';
+
+export function playbackTrackKey(track: {kind?: string; srclang?: string; label?: string}) {
+  return JSON.stringify([track.kind || 'subtitles',track.srclang || '',track.label || '']).slice(0,500);
+}
 
 export const usePlayerStore = defineStore('player', () => {
   const isOpen = ref(false);
@@ -24,6 +29,64 @@ export const usePlayerStore = defineStore('player', () => {
   const isLoading = ref(false);
   const error = ref<string | null>(null);
   let requestVersion = 0;
+
+  const mediaEpoch=ref(0);
+  const playback = ref<PlaybackState | null>(null);
+  const resumePosition = ref<number | null>(null);
+  const progressNotice = ref('');
+  const audioTracks = ref<PlaybackTrack[]>([]);
+  const selectedAudio = ref<string | null>(null);
+  let clock: {positionSeconds: number; durationSeconds: number} | null = null;
+  let lastSave = -Infinity, sequence = 0, lastFingerprint = '';
+
+  function recordTime(position: number, duration: number) {
+    if (!Number.isFinite(position) || !Number.isFinite(duration) || duration <= 0 || position < 0) return;
+    clock = {positionSeconds: Math.min(position,duration,604800), durationSeconds: Math.min(duration,604800)};
+  }
+  function selection() {
+    const subtitle = subtitles.value.find(track => track.src === selectedSubtitle.value);
+    return {quality:selectedQuality.value,server:selectedServer.value,
+            subtitle:subtitle ? playbackTrackKey(subtitle) : null,audio:selectedAudio.value};
+  }
+  function savePlayback(final = false, ended = false): Promise<void> {
+    const session = playback.value;
+    if (!session || !clock || !api.savePlaybackCheckpoint) return Promise.resolve();
+    const fingerprint = JSON.stringify([session.sessionId,clock,selection(),ended]);
+    if (fingerprint === lastFingerprint || (!final && Date.now()-lastSave < 5000)) return Promise.resolve();
+    lastSave=Date.now();lastFingerprint=fingerprint;
+    const body: PlaybackCheckpoint={sessionId:session.sessionId,sequence:++sequence,...clock,selection:selection(),final,ended};
+    return api.savePlaybackCheckpoint(body).then(result => {
+      if (playback.value?.sessionId === session.sessionId) progressNotice.value=result?.reason==='superseded'
+        ? 'Une autre fenêtre a repris la lecture de cet épisode.' : '';
+    }).catch(() => {
+      if (playback.value?.sessionId === session.sessionId) {
+        progressNotice.value='La progression n’a pas pu être enregistrée.';
+        lastFingerprint='';
+      }
+    });
+  }
+  async function loadPlayback(body: PlaybackOpen, request: number) {
+    ++mediaEpoch.value;
+    playback.value=null;resumePosition.value=null;clock=null;sequence=0;lastSave=-Infinity;lastFingerprint='';
+    progressNotice.value='';audioTracks.value=[];selectedAudio.value=null;
+    if (!api.openPlaybackSession) return;
+    const controller=new AbortController();
+    const timer=setTimeout(() => controller.abort(),2000);
+    try {
+      const result=await api.openPlaybackSession(body,controller.signal);
+      if (request!==requestVersion) return;
+      playback.value=result;resumePosition.value=result.positionSeconds;
+      selectedQuality.value=result.selection.quality;selectedServer.value=result.selection.server;
+      selectedAudio.value=result.selection.audio;
+    } catch {
+      if (request===requestVersion) progressNotice.value='La reprise de lecture est momentanément indisponible.';
+    } finally {clearTimeout(timer);}
+  }
+  function chooseSubtitles() {
+    const choice=playback.value?.selection.subtitle;
+    selectedSubtitle.value=choice === null ? null : choice && choice!=='auto'
+      ? subtitles.value.find(track=>playbackTrackKey(track)===choice)?.src || null : subtitles.value[0]?.src || null;
+  }
 
   const hasNext = computed(() => {
     if (!currentEpisode.value || !episodes.value.length) return false;
@@ -67,7 +130,7 @@ export const usePlayerStore = defineStore('player', () => {
       if (res && finalUrl) {
         videoUrl.value = finalUrl;
         subtitles.value = res.subtitles || [];
-        selectedSubtitle.value = subtitles.value.length > 0 ? subtitles.value[0].src : null;
+        chooseSubtitles();
         isDownloaded.value = Boolean(res.isDownloaded);
 
         const qMap = res.qualities || res.videoQualities || {};
@@ -99,6 +162,10 @@ export const usePlayerStore = defineStore('player', () => {
     episode: Episode,
     allEps: Episode[] = []
   ) {
+    void savePlayback(true);
+    ++mediaEpoch.value;
+    videoUrl.value=null;
+    const openRequest=++requestVersion;
     animeTitle.value = title;
     animeUrl.value = url;
     source.value = src;
@@ -109,10 +176,14 @@ export const usePlayerStore = defineStore('player', () => {
     selectedQuality.value = 'HD';
     subtitles.value = [];
     selectedSubtitle.value = null;
-    await resolveStream();
+    await loadPlayback({source:src,animeUrl:url,animeName:title,episodeNumber:Number(episode.number),version:episode.version || ''},openRequest);
+    if (openRequest===requestVersion) await resolveStream();
   }
 
   function closePlayer() {
+    void savePlayback(true);
+    ++mediaEpoch.value;
+    playback.value=null;resumePosition.value=null;clock=null;
     ++requestVersion;
     isOpen.value = false;
     videoUrl.value = null;
@@ -127,7 +198,13 @@ export const usePlayerStore = defineStore('player', () => {
     if (!hasNext.value) return;
     const idx = episodes.value.findIndex((e) => currentEpisode.value !== null && episodeKey(e) === episodeKey(currentEpisode.value));
     if (idx >= 0 && idx < episodes.value.length - 1) {
+      void savePlayback(true);
+      ++mediaEpoch.value;videoUrl.value=null;
+      const request=++requestVersion;
       currentEpisode.value = episodes.value[idx + 1];
+      const episode=currentEpisode.value!;
+      await loadPlayback({source:source.value,animeUrl:animeUrl.value,animeName:animeTitle.value,episodeNumber:Number(episode.number),version:episode.version || ''},request);
+      if (request!==requestVersion) return;
       await resolveStream();
     }
   }
@@ -136,17 +213,27 @@ export const usePlayerStore = defineStore('player', () => {
     if (!hasPrev.value) return;
     const idx = episodes.value.findIndex((e) => currentEpisode.value !== null && episodeKey(e) === episodeKey(currentEpisode.value));
     if (idx > 0) {
+      void savePlayback(true);
+      ++mediaEpoch.value;videoUrl.value=null;
+      const request=++requestVersion;
       currentEpisode.value = episodes.value[idx - 1];
+      const episode=currentEpisode.value!;
+      await loadPlayback({source:source.value,animeUrl:animeUrl.value,animeName:animeTitle.value,episodeNumber:Number(episode.number),version:episode.version || ''},request);
+      if (request!==requestVersion) return;
       await resolveStream();
     }
   }
 
   async function changeServer(srv: string) {
+    void savePlayback(true);
+    resumePosition.value=clock?.positionSeconds ?? null;
     selectedServer.value = srv;
     await resolveStream();
   }
 
   async function changeQuality(q: string) {
+    void savePlayback(true);
+    resumePosition.value=clock?.positionSeconds ?? null;
     selectedQuality.value = q;
     if (availableQualities.value && availableQualities.value[q]) {
       videoUrl.value = availableQualities.value[q];
@@ -157,9 +244,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   function changeSubtitle(src: string | null) {
     selectedSubtitle.value = src;
+    if (playback.value) playback.value.selection.subtitle=selection().subtitle;
+    void savePlayback(true);
   }
 
   async function playLocalFile(taskId: string | number, title: string, epNum: number | string, fileName?: string) {
+    void savePlayback(true);
+    ++mediaEpoch.value;
     const request = ++requestVersion;
     animeTitle.value = title;
     animeUrl.value = '';
@@ -182,17 +273,25 @@ export const usePlayerStore = defineStore('player', () => {
     selectedQuality.value = 'HD';
     subtitles.value = [];
     selectedSubtitle.value = null;
+    await loadPlayback({taskId:String(taskId)},request);
+    if (request!==requestVersion) return;
+    if (playback.value) {
+      animeUrl.value=playback.value.animeUrl;
+      source.value=playback.value.source;
+      if (currentEpisode.value) currentEpisode.value.version=playback.value.version;
+    }
     try {
       const tracks = await api.getLocalSubtitles(taskId);
       if (request !== requestVersion) return;
       subtitles.value = tracks;
-      selectedSubtitle.value = tracks[0]?.src || null;
+      chooseSubtitles();
     } catch {
       // Optional captions must never prevent the local video from playing.
     }
   }
 
   return {
+    mediaEpoch,playback,resumePosition,progressNotice,audioTracks,selectedAudio,recordTime,savePlayback,
     isOpen,
     animeTitle,
     animeUrl,

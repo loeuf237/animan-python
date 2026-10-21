@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "origin": "Hand-authored, sanitized contract examples. No live site snapshot or user data.",
+  "htmlRecipe": {
+    "schema_version": 1,
+    "pkg": "contract.fixture",
+    "name": "Contract fixture",
+    "base_url": "https://fixtures.example",
+    "latest_selector": "article.anime-card",
+    "search_selector": "article.anime-card",
+    "item_link_selector": "a[href]",
+    "item_title_selector": "h2",
+    "item_thumb_selector": "img",
+    "episode_list_selector": ".episodes a",
+    "lang": "en"
+  },
+  "cases": [
+    {
+      "file": "catalogue.html",
+      "expectedCount": 2
+    },
+    {
+      "file": "changed.html",
+      "expectedError": "SelectorMismatch"
+    },
+    {
+      "file": "empty.html",
+      "expectedCount": 0
+    }
+  ],
+  "jsonCases": [
+    {
+      "adapter": "AniWorld",
+      "file": "aniworld-search.json",
+      "expectedCount": 1,
+      "expectedTitle": "River"
+    }
+  ]
+}

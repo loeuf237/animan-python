@@ -1,18 +1,27 @@
 """Install the APK under test and require a successful instrumentation report."""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import re
 import subprocess
+import time
 
 
 def validate(app, tests, output, skip_native_media=False, package="com.animan.app"):
     output.mkdir(parents=True, exist_ok=True)
+    is_engine = package == "com.animan.app" or package.startswith("com.animan.app.")
     for apk in (app, tests):
         subprocess.run(["adb", "install", "-r", str(apk)], check=True, timeout=90)
     api = int(subprocess.check_output(["adb", "shell", "getprop", "ro.build.version.sdk"], text=True).strip())
     if api >= 33:
-        if package == "com.animan.app":
+        if is_engine:
             subprocess.run(["adb", "shell", "pm", "grant", package, "android.permission.POST_NOTIFICATIONS"], check=True, timeout=15)
+    # Installing a large APK can outlast the phone's screen timeout. Wake only
+    # for the test; Android still requires normal authentication on a secure lock.
+    subprocess.run(["adb", "shell", "input", "keyevent", "KEYCODE_WAKEUP"], check=True, timeout=15)
+    subprocess.run(["adb", "shell", "wm", "dismiss-keyguard"], check=True, timeout=15)
+    time.sleep(2)
     command = ["adb", "shell", "am", "instrument", "-w", "-r"]
     if skip_native_media: command += ["-e", "skip_native_media", "true"]
     command += [package + ".test/androidx.test.runner.AndroidJUnitRunner"]
@@ -20,13 +29,30 @@ def validate(app, tests, output, skip_native_media=False, package="com.animan.ap
                             capture_output=True, text=True, timeout=480)
     report = result.stdout + result.stderr
     (output / "instrumentation.txt").write_text(report)
-    logs = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, timeout=30)
-    (output / "logcat.txt").write_text(logs.stdout)
-    if package == "com.animan.app":
-        subprocess.run(["adb", "pull", "/sdcard/Android/data/com.animan.app/files/screen.png", str(output / "screen.png")], timeout=15)
+    pid = subprocess.run(["adb", "shell", "pidof", package], capture_output=True, text=True, timeout=15)
+    target_pids = pid.stdout.split()
+    if target_pids and target_pids[0].isdigit():
+        logs = subprocess.run(["adb", "logcat", "-d", "--pid=" + target_pids[0]],
+                              capture_output=True, text=True, timeout=30)
+        (output / "logcat.txt").write_text(logs.stdout)
+    else:
+        (output / "logcat.txt").write_text("Target process exited; see instrumentation.txt.\n")
+    if is_engine:
+        subprocess.run(["adb", "pull", f"/sdcard/Android/data/{package}/files/screen.png", str(output / "screen.png")], timeout=15)
+        subprocess.run(["adb", "pull", f"/sdcard/Android/data/{package}/files/footprint.json",
+                        str(output / "footprint.json")], timeout=15)
     print(report)
     if result.returncode or not re.search(r"OK \(1 test\)", report) or "FAILURES" in report or "INSTRUMENTATION_FAILED" in report:
         raise RuntimeError("The installed Android engine did not pass instrumentation")
+    if is_engine:
+        footprint_path = output / "footprint.json"
+        footprint = json.loads(footprint_path.read_text())
+        if footprint["apk_bytes"] != app.stat().st_size:
+            raise RuntimeError("Installed footprint does not match the APK under test")
+        with app.open("rb") as source:
+            footprint["apk_sha256"] = hashlib.file_digest(source, "sha256").hexdigest()
+        footprint["package"] = package
+        footprint_path.write_text(json.dumps(footprint, indent=2) + "\n")
 
 
 if __name__ == "__main__":

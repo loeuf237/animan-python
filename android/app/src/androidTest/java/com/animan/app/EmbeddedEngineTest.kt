@@ -26,12 +26,27 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(AndroidJUnit4::class)
 class EmbeddedEngineTest {
+    @org.junit.After fun removeIsolatedProbeExports() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        if (context.packageName != "com.animan.app.a11test") return
+        // These preferences belong only to the disposable validation app. Delete
+        // its exact exported URIs, never files selected by name in user's Downloads.
+        val exports = context.getSharedPreferences("animan_exports", android.content.Context.MODE_PRIVATE)
+        exports.all.values.filterIsInstance<String>().filter { it.startsWith("content://") }.distinct().forEach {
+            context.contentResolver.delete(Uri.parse(it), null, null)
+        }
+        exports.edit().clear().commit()
+    }
+
     private fun waitForHome(scenario: ActivityScenario<MainActivity>, message: String) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60)
         while (System.nanoTime() < deadline) {
             val checked = CountDownLatch(1)
             val rendered = AtomicBoolean(false)
             scenario.onActivity { activity ->
+                // Keep only this test window awake; closing it restores normal
+                // screen behavior without changing the user's timeout settings.
+                activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 val webView = activity.findViewById<WebView>(R.id.webView)
                 if (webView.url?.startsWith(EngineHost.baseUrl + "/spa/") != true ||
                     !activity.hasWindowFocus() ||
@@ -81,6 +96,23 @@ class EmbeddedEngineTest {
             assertEquals(401, request("/api/download/status", false).first)
             assertEquals(200, request("/api/download/status").first)
             waitForHome(scenario, "Vue did not render in the installed System WebView")
+            // Measure installed storage separately from APK size, before media
+            // fixtures create downloads. Querying our own UID needs no extra grant.
+            val storageManager = context.getSystemService(android.os.storage.StorageManager::class.java)
+            val stats = context.getSystemService(android.app.usage.StorageStatsManager::class.java)
+                .queryStatsForUid(storageManager.getUuidForPath(context.dataDir), context.applicationInfo.uid)
+            val footprint = JSONObject()
+                .put("phase", "after_first_render_before_media_probes")
+                .put("api", android.os.Build.VERSION.SDK_INT)
+                .put("apk_bytes", File(context.applicationInfo.sourceDir).length())
+                .put("installed_app_bytes", stats.appBytes)
+                .put("data_bytes_including_cache", stats.dataBytes)
+                .put("cache_bytes", stats.cacheBytes)
+                .put("installed_total_bytes", stats.appBytes + stats.dataBytes)
+                .put("native_library_packaging", "direct_load_uncompressed")
+            File(requireNotNull(context.getExternalFilesDir(null)), "footprint.json")
+                .writeText(footprint.toString(2))
+            println("ANIMAN_ANDROID_FOOTPRINT=$footprint")
             val port = EngineHost.port
             scenario.recreate()
             assertEquals("Activity recreation started another server", port, EngineHost.port)

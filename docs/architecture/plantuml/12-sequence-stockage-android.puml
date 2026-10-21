@@ -5,7 +5,7 @@
 ' @source animan/services/download_manager.py:DownloadManagerService.export_task
 ' @source android/app/src/main/java/com/animan/app/StorageAccess.kt:StorageAccess
 ' @source android/app/src/main/java/com/animan/app/NativeHooks.kt:NativeHooks
-title Animan Android — autoriser une destination et publier un média
+title AnimeLab Android — autoriser une destination et publier un média
 autonumber
 actor Utilisateur as U
 boundary "Vue paramètres / téléchargements" as UI
@@ -66,6 +66,6 @@ note over DM,Shared
 Une interruption conserve COMPLETED et ramène l'export à PENDING.
 Au redémarrage, les exports interrompus restent à reprendre.
 Les anciens exports sans preuve URI restent NOT_REQUESTED.
-Certains MediaProvider imposent Movies/Animan pour les SRT.
+Certains MediaProvider imposent Movies/AnimeLab pour les SRT.
 end note
 @enduml

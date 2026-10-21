@@ -3,13 +3,13 @@
 ' @source animan/routers/anime.py:search_api
 ' @source animan/routers/download.py:start_download
 ' @source animan/routers/library.py:mark_watched
-title Animan — cas d'utilisation fonctionnels
+title AnimeLab — cas d'utilisation fonctionnels
 left to right direction
 actor Utilisateur as U
 actor "Site source / lecteur" as Site
 actor "Événement temporel" as Clock
 actor "Dépôt d'extensions" as Repo
-rectangle "Animan — moteur Python + interface" {
+rectangle "AnimeLab — moteur Python + interface" {
   usecase "UC01 Explorer une source\n(sorties, catalogue, filtres disponibles)" as Browse
   usecase "UC02 Rechercher un animé\n(source choisie ou toutes)" as Search
   usecase "UC03 Consulter une fiche\net choisir épisode / version / qualité" as Detail
@@ -58,7 +58,7 @@ end note
 note bottom of Browse
 Genres, popularité, tri et pagination dépendent des
 capacités de chaque source. Pas de compte distant
-Animan ni de synchronisation multiappareil aujourd'hui.
+AnimeLab ni de synchronisation multiappareil aujourd'hui.
 end note
 note bottom of Resolve
 « include » = sous-parcours requis dans le contexte

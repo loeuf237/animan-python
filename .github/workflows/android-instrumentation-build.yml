@@ -33,7 +33,7 @@ jobs:
       - name: Record test provenance
         run: |
           mkdir -p instrumentation-only
-          cp android/app/build/outputs/apk/androidTest/validation/app-validation-androidTest.apk instrumentation-only/Animan-instrumentation.apk
+          cp android/app/build/outputs/apk/androidTest/validation/app-validation-androidTest.apk instrumentation-only/AnimeLab-instrumentation.apk
           python - <<'PY'
           import json, os
           from pathlib import Path

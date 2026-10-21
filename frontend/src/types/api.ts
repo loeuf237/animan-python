@@ -35,3 +35,10 @@ export interface VerificationResult extends Result { domain: string; resumed: nu
 export interface DownloadResult extends Result { taskId?: string; task?: DownloadTask }
 export interface BatchDownloadResult extends Result { count?: number; started?: number; queued?: number }
 export interface FavoriteResult extends Result { id?: number; favorite: FavoriteItem }
+export interface PlaybackSelection { quality: string; server: string; subtitle: string | null; audio: string | null }
+export interface PlaybackState { sessionId: string; source: string; animeUrl: string; episodeNumber: number; version: string; positionSeconds: number; durationSeconds: number; selection: PlaybackSelection }
+export interface PlaybackOpen { taskId?: string; source?: string; animeUrl?: string; animeName?: string; episodeNumber?: number; version?: string }
+export interface PlaybackCheckpoint { sessionId: string; sequence: number; positionSeconds: number; durationSeconds: number; selection: PlaybackSelection; final: boolean; ended: boolean }
+export interface PlaybackTrack { kind: string; srclang: string; label: string }
+export interface ExtensionHealth { operation: string; status: string; code: string; messageKey: string; checked_at: string; success_at: string | null; failure_streak: number; duration_ms: number; result_count: number; recipe_revision: number }
+export interface RecipeRevision { revision: number; schema_version: number; fingerprint: string; reason: string; created_at: string }

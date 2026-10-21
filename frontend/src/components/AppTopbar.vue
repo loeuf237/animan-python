@@ -1,7 +1,7 @@
 <template>
   <header class="app-topbar">
-    <router-link to="/" class="brand-mark-mobile" aria-label="Animan">
-      <img src="/img/icon-192.png" :alt="tx('Animan Logo')" class="brand-logo-img" />
+    <router-link to="/" class="brand-mark-mobile" aria-label="AnimeLab">
+      <img src="/img/icon-192.png" :alt="tx('AnimeLab Logo')" class="brand-logo-img" />
     </router-link>
 
     <button type="button" class="top-search search-input-wrap search-trigger" :aria-label="tx('Ouvrir la recherche')" aria-keyshortcuts="Control+K Meta+K" @click="emitOpenPalette">

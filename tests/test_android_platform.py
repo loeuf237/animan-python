@@ -39,6 +39,37 @@ def test_native_media_rejects_global_working_directory(native):
         media_tools.run(["ffmpeg", "-version"], cwd="/private")
 
 
+def test_android_hls_assembly_uses_absolute_paths_without_process_cwd(tmp_path, monkeypatch):
+    from animan.models.download_task import DownloadTask
+    from animan.services.download_manager import DownloadManagerService
+    from pathlib import Path
+
+    folder = tmp_path / "episode's segments"
+    folder.mkdir()
+    (folder / "seg_00000.ts").write_bytes(b"transport segment")
+    output = tmp_path / "episode.mp4"
+    old_cwd = Path.cwd()
+    calls = []
+    class NativeRemux:
+        def execute(self, tool, arguments, timeout):
+            args = json.loads(arguments)
+            calls.append(args)
+            manifest = Path(args[args.index("-i") + 1])
+            assert tool == "ffmpeg" and timeout == 300000
+            assert manifest.is_absolute() and Path(args[-1]).is_absolute()
+            assert manifest.read_text() == "file 'seg_00000.ts'\n"
+            assert (manifest.parent / "seg_00000.ts").read_bytes() == b"transport segment"
+            Path(args[-1]).write_bytes(b"native remuxed output")
+            return json.dumps({"returncode": 0, "stdout": "", "stderr": ""})
+    monkeypatch.setattr(media_tools, "_native_media", NativeRemux())
+    manager = DownloadManagerService()
+    task = DownloadTask(fileName="episode.mp4", savePath=str(output))
+    manager.media_pipeline._assemble_hls(task, output, folder, 1)
+    assert len(calls) == 1
+    assert output.read_bytes() == b"native remuxed output"
+    assert Path.cwd() == old_cwd
+
+
 def test_aes_platforms_match_nist_vector(monkeypatch):
     key = bytes.fromhex("2b7e151628aed2a6abf7158809cf4f3c")
     iv = bytes.fromhex("000102030405060708090a0b0c0d0e0f")

@@ -1,3 +1,4 @@
+from animan.services.source_registry import source_registry, RegisteredSource
 """Browse each source using its actual routes, filters and extension recipe."""
 import hashlib
 import time
@@ -25,30 +26,10 @@ class SourceCatalogueService:
         self._cursors = {}
 
     def provider(self, source_id):
-        natives = {'french-manga': scraping_service, 'voir-anime': voiranime_service,
-                   'animepahe': animepahe_service}
-        service = natives.get(source_id) or extension_service.get_container_source_by_id(source_id)
-        if service is None:
-            raise CatalogueError('Source introuvable ou désactivée')
-        return service
+        return source_registry.get(source_id)
 
     def descriptor(self, source_id, service):
-        recipe = getattr(service, 'recipe', None)
-        adapter = adapter_registry.find_adapter(service.pkg, service.base_url) if recipe else None
-        api_catalogue = bool(adapter and adapter.name in ('FRAnime', 'Hanime'))
-        views = [{'id': 'latest', 'label': 'Dernières sorties'}] if not recipe or recipe.supports_latest else []
-        if source_id == 'voir-anime' or (recipe and recipe.popular_request_path and recipe.popular_selector and not adapter):
-            views.append({'id': 'popular', 'label': 'Populaires'})
-        if source_id == 'french-manga':
-            views.append({'id': 'featured', 'label': 'Coups de cœur'})
-        if api_catalogue or not adapter or (recipe and recipe.popular_request_path and recipe.popular_selector):
-            views.append({'id': 'catalogue', 'label': 'Catalogue'})
-        views.append({'id': 'search', 'label': 'Recherche'})
-        return {'id': source_id, 'name': getattr(service, 'name', None) or
-                {'french-manga': 'French-Manga', 'voir-anime': 'VoirAnime', 'animepahe': 'AnimePahe'}.get(source_id, source_id),
-                'baseUrl': service.base_url, 'lang': getattr(service, 'lang', 'en' if source_id == 'animepahe' else 'fr'),
-                'type': 'imported' if recipe else 'native', 'isEnabled': True, 'views': views,
-                'multiTags': source_id == 'voir-anime' or api_catalogue}
+        return (service if isinstance(service, RegisteredSource) else source_registry.describe(source_id, service)).descriptor()
 
     def sources(self):
         entries = [self.descriptor(sid, self.provider(sid)) for sid in ('voir-anime', 'animepahe', 'french-manga')]
@@ -70,7 +51,7 @@ class SourceCatalogueService:
             return response.text, str(response.url)
 
     async def filters(self, source_id):
-        service = self.provider(source_id)
+        service = self.provider(source_id).service
         key = (source_id, service.base_url)
         cached = self._filters.get(key)
         if cached and cached['expires'] > time.monotonic():
@@ -182,7 +163,11 @@ class SourceCatalogueService:
         return self.remember_cursor(context, target)
 
     async def browse(self, source_id, mode='latest', query='', tags=(), order='source', cursor=None):
-        service = self.provider(source_id)
+        provider=self.provider(source_id)
+        return await provider.observe('browse',self._browse(source_id,mode,query,tags,order,cursor))
+
+    async def _browse(self, source_id, mode='latest', query='', tags=(), order='source', cursor=None):
+        service = self.provider(source_id).service
         recipe = getattr(service, 'recipe', None)
         adapter = adapter_registry.find_adapter(service.pkg, service.base_url) if recipe else None
         api_catalogue = bool(adapter and adapter.name in ('FRAnime', 'Hanime'))

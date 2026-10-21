@@ -24,7 +24,12 @@ const component=(await import(moduleUrl(compileScript(descriptor,{id:'playback-r
  vue,'@/stores/player':storeUrl,
  '@/utils/locale':inline('export const tx=v=>String(v??"");'),
  '@/stores/library':inline('export const useLibraryStore=()=>({markWatched(){}});'),
- 'hls.js':inline('export default class Hls {static isSupported(){return false;}}'),
+ 'hls.js':inline(`export default class Hls {
+ static Events={MANIFEST_PARSED:'manifest',ERROR:'error'};
+ static isSupported(){return Boolean(globalThis.__hlsTest);}
+ constructor(){this.audioTracks=[{lang:'en',name:'English'},{lang:'ja',name:'Japanese'}];this.audioTrack=0;this.handlers={};globalThis.__hlsInstance=this;}
+ on(event,callback){this.handlers[event]=callback;}loadSource(){}attachMedia(){}destroy(){}
+}`),
 }))).default;
 function mountPlayer(){
  const videos=[];
@@ -76,8 +81,10 @@ test('subtitle tracks use the real file list and stale responses cannot replace 
  setActivePinia(createPinia());const player=usePlayerStore();let finishRemote,finishOld;
  api.resolveVideoStream=()=>new Promise(resolve=>finishRemote=resolve);
  const remote=player.openPlayer('Remote','remote','french-manga',{number:1,playerUrl:'https://example.org/1'});
+ await Promise.resolve();
  api.getLocalSubtitles=()=>new Promise(resolve=>finishOld=resolve);
  const old=player.playLocalFile('old','Old',1);
+ await Promise.resolve();
  api.getLocalSubtitles=async()=>[{src:'/api/media/subtitle/new/0',srclang:'fr',label:'French'}];
  await player.playLocalFile('new','New',2);
  finishOld([{src:'/api/media/subtitle/old/0'}]);await old;
@@ -87,4 +94,64 @@ test('subtitle tracks use the real file list and stale responses cannot replace 
  player.closePlayer();api.getLocalSubtitles=async()=>{throw new Error('optional subtitles failed');};
  await player.playLocalFile('none','No captions',1);
  assert.equal(player.error,null);assert.deepEqual(player.subtitles,[]);assert.equal(player.videoUrl,'/api/media/stream/none');
+});
+
+test('resume uses stable task identity, restores the time and preserves it through quality changes',async t=>{
+ globalThis.window={addEventListener(){},removeEventListener(){}};
+ setActivePinia(createPinia());const writes=[],opens=[];
+ api.openPlaybackSession=async body=>{opens.push(body);return {sessionId:'a'.repeat(32),source:'source',animeUrl:'https://example.org/series',episodeNumber:3,version:'VF',positionSeconds:130,durationSeconds:1500,selection:{quality:'720p',server:'auto',subtitle:null,audio:null}};};
+ api.savePlaybackCheckpoint=async body=>{writes.push(body);return {success:true,accepted:true};};
+ api.getLocalSubtitles=async()=>[];
+ const player=usePlayerStore(),{videos,app}=mountPlayer();
+ t.after(()=>{app.unmount();delete api.openPlaybackSession;delete api.savePlaybackCheckpoint;delete globalThis.window;});
+ await player.playLocalFile('downloaded-task','Series',3);await nextTick();
+ assert.deepEqual(opens,[{taskId:'downloaded-task'}]);assert.equal(player.currentEpisode.version,'VF');
+ const video=videos[0];video.duration=1500;video.currentTime=0;video.readyState=1;
+ video.props.onLoadedmetadata();assert.equal(video.currentTime,130);
+ video.currentTime=225;video.props.onTimeupdate();await Promise.resolve();
+ const writeCount=writes.length;video.currentTime=226;video.props.onTimeupdate();await Promise.resolve();
+ assert.equal(writes.length,writeCount,'timeupdates must be throttled');
+ player.availableQualities={'1080p':'/quality.mp4'};
+ await player.changeQuality('1080p');await nextTick();
+ video.currentTime=0;video.props.onLoadedmetadata();
+ assert.equal(video.currentTime,226);assert.equal(opens.length,1,'quality must keep the same session');
+ video.currentTime=240;video.props.onPause();await Promise.resolve();
+ assert.equal(writes.at(-1).selection.quality,'1080p');assert.equal(writes.at(-1).positionSeconds,240);
+ player.closePlayer();await nextTick();
+});
+
+test('an old video cannot save its clock in a new episode while resume is loading',async t=>{
+ globalThis.window={addEventListener(){},removeEventListener(){}};
+ setActivePinia(createPinia());const writes=[];let finish;
+ const state=id=>({sessionId:id.repeat(32),source:'source',animeUrl:'series',episodeNumber:id==='a'?1:2,version:'VF',positionSeconds:0,durationSeconds:1000,selection:{quality:'HD',server:'auto',subtitle:'auto',audio:null}});
+ api.openPlaybackSession=async()=>state('a');api.savePlaybackCheckpoint=async b=>{writes.push(b);return {success:true};};api.getLocalSubtitles=async()=>[];
+ const player=usePlayerStore(),{videos,app}=mountPlayer();
+ t.after(()=>{app.unmount();delete api.openPlaybackSession;delete api.savePlaybackCheckpoint;delete globalThis.window;});
+ await player.playLocalFile('first','Series',1);await nextTick();
+ const old=videos[0];old.currentTime=150;old.duration=1000;old.props.onTimeupdate();
+ api.openPlaybackSession=()=>new Promise(resolve=>finish=resolve);
+ const opening=player.playLocalFile('second','Series',2);
+ old.currentTime=700;old.props.onTimeupdate();old.props.onPause();
+ finish(state('b'));await opening;await nextTick();
+ assert.ok(writes.every(b=>b.sessionId==='a'.repeat(32) && b.positionSeconds===150));
+ player.closePlayer();await nextTick();
+});
+
+test('HLS audio selection restores by language and label, then saves the new choice',async t=>{
+ globalThis.window={addEventListener(){},removeEventListener(){}};globalThis.__hlsTest=true;
+ setActivePinia(createPinia());const writes=[];
+ const english=JSON.stringify(['audio','en','English']),japanese=JSON.stringify(['audio','ja','Japanese']);
+ api.openPlaybackSession=async()=>({sessionId:'a'.repeat(32),source:'source',animeUrl:'series',episodeNumber:1,version:'VO',positionSeconds:25,durationSeconds:1000,selection:{quality:'HD',server:'auto',subtitle:null,audio:japanese}});
+ api.savePlaybackCheckpoint=async b=>{writes.push(b);return {success:true};};api.getLocalSubtitles=async()=>[];
+ const player=usePlayerStore(),{videos,app,root}=mountPlayer();
+ t.after(()=>{app.unmount();delete api.openPlaybackSession;delete api.savePlaybackCheckpoint;delete globalThis.window;delete globalThis.__hlsTest;delete globalThis.__hlsInstance;});
+ await player.playLocalFile('task','Series',1);await nextTick();
+ player.videoUrl='/api/media/hls-proxy/playlist.m3u8';await nextTick();
+ const hls=globalThis.__hlsInstance;hls.handlers.manifest();await nextTick();
+ assert.equal(hls.audioTrack,1);assert.equal(player.audioTracks.length,2);
+ const selectors=[];function walk(el){if(el.type==='select')selectors.push(el);for(const c of el.children)walk(c);}walk(root);
+ selectors.find(el=>el.props.value===japanese).props.onChange({target:{value:english}});
+ assert.equal(hls.audioTrack,0);
+ const video=videos[0];video.currentTime=80;video.duration=1000;video.props.onPause();await Promise.resolve();
+ assert.equal(writes.at(-1).selection.audio,english);player.closePlayer();await nextTick();
 });

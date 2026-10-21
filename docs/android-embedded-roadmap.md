@@ -1,10 +1,13 @@
 # Android: complete embedded Python engine and Vue interface
 
 Status: the implementation, native dependency wheels and a locally signed
-[0.1.0 beta](https://github.com/loeuf237/animan-python/releases/tag/android-v0.1.0-beta.1)
+[0.1.0 beta](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.1)
 are available. Emulator checks cover the ARM64 runtime through native translation
-and native media commands separately on x86_64. Physical-device validation and
-the complete ARM64 download/media pipeline remain pending. The ordered route
+and native media commands separately on x86_64. For that published beta,
+physical-device validation remains pending. The newer A11 source build passed
+the complete direct/HLS/subtitle/export probe on an Android 10 ARM64 phone in an
+isolated package; its DEX and engine/native entries match the normal signed
+deliverable. See [A11 validation](architecture/a11-validation.md). The ordered route
 below retains the additional targets for broader, stable support. See
 [Android distribution](android-distribution.md) for the build and publication gates.
 
@@ -42,7 +45,9 @@ A successful Gradle build alone still does not establish real-phone reliability.
 
 Create a minimal Android dependency probe on `arm64-v8a` and `x86_64`. Verify
 imports and real operations for curl_cffi/cffi and its native curl/TLS library,
-cryptography, lxml, SQLAlchemy, Pydantic, websockets and yt-dlp. Align Python and
+SQLAlchemy, Pydantic, websockets and yt-dlp. Android AES uses JCA rather than
+cryptography; the HTML adapters use `html.parser`, so A11 removes the unused
+lxml/XML stack from Android. Align Python and
 FastAPI with the desktop engine where Android wheels permit. Chaquopy supports
 native requirements only when compatible artifacts are available; do not assume
 desktop wheels work on Android. Python 3.12+ is a 64-bit path in its current

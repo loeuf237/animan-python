@@ -41,6 +41,7 @@ class APIProblem(RuntimeError):
     def __init__(self, code: str, *, status=400, category: Category = 'validation', action: Action | None = None):
         self.status = status
         self.problem = Problem(code=code, category=category, messageKey={
+            'source_operation_unsupported': 'Cette source ne propose pas cette fonctionnalité.',
             'verification_route_changed': 'La route réseau a changé. Fermez cette fenêtre et recommencez la vérification.',
             'verification_cancelled': 'Cette vérification est fermée. Ouvrez une nouvelle fenêtre.',
             'verification_mode_unavailable': 'Ce mode de vérification est indisponible pour cette plateforme ou ce proxy.',

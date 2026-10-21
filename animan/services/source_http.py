@@ -24,6 +24,7 @@ from curl_cffi.requests.exceptions import RequestException as CurlRequestError
 from curl_cffi.requests.impersonate import DEFAULT_CHROME
 
 from animan.config import settings
+from animan.diagnostics import remember_secret
 from animan.security import is_safe_url
 
 PROFILE = DEFAULT_CHROME
@@ -137,10 +138,12 @@ class SourceHTTPService:
                         jar.clear()
                 except (OSError, ValueError):
                     pass
+                for cookie in jar: remember_secret(cookie.value)
                 self._domains[domain] = DomainSession(domain, proxy, jar)
             return self._domains[domain]
 
     def _save(self, state):
+        for cookie in state.cookies: remember_secret(cookie.value)
         try:
             self.storage.mkdir(parents=True, exist_ok=True, mode=0o700)
             state.cookies.clear_expired_cookies()

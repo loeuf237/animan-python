@@ -1,5 +1,5 @@
 """
-Service d'internationalisation (i18n) pour Animan.
+Service d'internationalisation (i18n) pour AnimeLab.
 Fournit les catalogues de traductions (Français & Anglais),
 la détection de langue et les helpers de traduction.
 """
@@ -20,7 +20,7 @@ current_request_lang: ContextVar[str] = ContextVar("current_request_lang", defau
 TRANSLATIONS: Dict[str, Dict[str, str]] = {
     "fr": {
         # Navigation & Shell
-        "nav_brand": "Animan",
+        "nav_brand": "AnimeLab",
         "nav_home": "Accueil",
         "nav_search": "Recherche",
         "nav_downloads": "Téléchargements",
@@ -334,7 +334,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
     },
     "en": {
         # Navigation & Shell
-        "nav_brand": "Animan",
+        "nav_brand": "AnimeLab",
         "nav_home": "Home",
         "nav_search": "Search",
         "nav_downloads": "Downloads",

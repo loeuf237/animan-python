@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Animan — dossier UML et architecture</title>
+<title>AnimeLab — dossier UML et architecture</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f6fb;--fg:#172033;--surface:#fff;--muted:#536174;--line:#d5d9e4;--accent:#6d28d9}
 @media(prefers-color-scheme:dark){:root{--bg:#101422;--fg:#edf0f6;--surface:#191f31;--muted:#bac3d6;--line:#3b455c;--accent:#c4a7ff}}
@@ -25,197 +25,197 @@ dialog::backdrop{background:#000b}.dialog-bar{display:flex;align-items:center;ga
 main{max-width:none;padding:0}article{break-before:page;break-inside:avoid;background:#fff;padding:0;border-radius:0;margin:0}
 figure img{max-height:220mm;width:100%;height:220mm;object-fit:contain}a{color:#111}.kind{color:#333}}
 </style></head><body><header>
-<h1>Animan — dossier UML</h1>
+<h1>AnimeLab — dossier UML</h1>
 <p>5 classes · 2 cas d’utilisation · 7 séquences · 2 déploiements · 1 proposition. Les vues de l’existant sont issues du code ; la vue verte décrit une évolution proposée.</p>
-<p><a href="README.md">Cas d’utilisation détaillés et axes d’amélioration</a> · Révision analysée : <code>20ab9cd3856c</code>.</p>
+<p><a href="README.md">Cas d’utilisation détaillés et axes d’amélioration</a> · Révision analysée : <code>9d596c1b6ba0</code>.</p>
 <nav aria-label="Familles de diagrammes"><button type="button" data-category="all" aria-pressed="true">Tout</button><button type="button" data-category="classes" aria-pressed="false">Classes</button><button type="button" data-category="cas" aria-pressed="false">Cas d’utilisation</button><button type="button" data-category="sequence" aria-pressed="false">Séquences</button><button type="button" data-category="deploiement" aria-pressed="false">Déploiement</button><button type="button" data-category="cible" aria-pressed="false">Proposition</button><button type="button" id="print">Imprimer la sélection</button></nav>
 <div class="search"><label for="filter">Filtrer les titres</label> <input id="filter" type="search" placeholder="Ex. : Android, reprise, classes…"></div>
 <p id="count" role="status" aria-live="polite">17 diagrammes affichés</p></header>
 <main><article data-category="classes" id="01-classes-domaine">
-<h2>Animan — classes du domaine et persistance actuelle</h2><p class="kind">Classes
+<h2>AnimeLab — classes du domaine et persistance actuelle</h2><p class="kind">Classes
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/01-classes-domaine.svg"
-data-title="Animan — classes du domaine et persistance actuelle" data-width="1598">Agrandir</button>
+data-title="AnimeLab — classes du domaine et persistance actuelle" data-width="1895">Agrandir</button>
 <a href="svg/01-classes-domaine.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/01-classes-domaine.puml">Source PlantUML</a><a href="#01-classes-domaine">Lien direct</a></div>
-<figure><img src="svg/01-classes-domaine.svg" width="1598" height="1634"
-loading="lazy" alt="Animan — classes du domaine et persistance actuelle"><figcaption>Animan — classes du domaine et persistance actuelle</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/models/anime.py#L33">AnimeDetail</a> — <code>animan/models/anime.py</code></li><li><a href="../../animan/models/anime.py#L22">AnimeResult</a> — <code>animan/models/anime.py</code></li><li><a href="../../animan/models/anime.py#L11">Episode</a> — <code>animan/models/anime.py</code></li><li><a href="../../animan/models/download_task.py#L220">DownloadTask</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L178">DownloadTaskEntity.to_task</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L31">SpeedTracker</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L91">DownloadStatus</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L104">ExportStatus</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/auto_download.py#L13">AutoDownloadEpisode</a> — <code>animan/models/auto_download.py</code></li><li><a href="../../animan/models/favorite.py#L5">FavoriteAnime</a> — <code>animan/models/favorite.py</code></li><li><a href="../../animan/models/watch_progress.py#L4">WatchProgress</a> — <code>animan/models/watch_progress.py</code></li></ul></details>
+<figure><img src="svg/01-classes-domaine.svg" width="1895" height="1634"
+loading="lazy" alt="AnimeLab — classes du domaine et persistance actuelle"><figcaption>AnimeLab — classes du domaine et persistance actuelle</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/models/anime.py#L33">AnimeDetail</a> — <code>animan/models/anime.py</code></li><li><a href="../../animan/models/anime.py#L22">AnimeResult</a> — <code>animan/models/anime.py</code></li><li><a href="../../animan/models/anime.py#L11">Episode</a> — <code>animan/models/anime.py</code></li><li><a href="../../animan/models/download_task.py#L220">DownloadTask</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L178">DownloadTaskEntity.to_task</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L31">SpeedTracker</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L91">DownloadStatus</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/download_task.py#L104">ExportStatus</a> — <code>animan/models/download_task.py</code></li><li><a href="../../animan/models/auto_download.py#L13">AutoDownloadEpisode</a> — <code>animan/models/auto_download.py</code></li><li><a href="../../animan/models/favorite.py#L5">FavoriteAnime</a> — <code>animan/models/favorite.py</code></li><li><a href="../../animan/models/watch_progress.py#L4">WatchProgress</a> — <code>animan/models/watch_progress.py</code></li><li><a href="../../animan/models/playback.py#L7">PlaybackProgress</a> — <code>animan/models/playback.py</code></li><li><a href="../../animan/migrations.py#L8">Migration</a> — <code>animan/migrations.py</code></li><li><a href="../../animan/migrations.py#L151">migrate</a> — <code>animan/migrations.py</code></li><li><a href="../../animan/database.py#L51">transaction</a> — <code>animan/database.py</code></li><li><a href="../../animan/database.py#L35">sqlite_connection</a> — <code>animan/database.py</code></li></ul></details>
 </article>
 <article data-category="classes" id="02-classes-services">
-<h2>Animan — orchestration des téléchargements et bibliothèque</h2><p class="kind">Classes
+<h2>AnimeLab — orchestration des téléchargements et bibliothèque</h2><p class="kind">Classes
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/02-classes-services.svg"
-data-title="Animan — orchestration des téléchargements et bibliothèque" data-width="1776">Agrandir</button>
+data-title="AnimeLab — orchestration des téléchargements et bibliothèque" data-width="2509">Agrandir</button>
 <a href="svg/02-classes-services.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/02-classes-services.puml">Source PlantUML</a><a href="#02-classes-services">Lien direct</a></div>
-<figure><img src="svg/02-classes-services.svg" width="1776" height="1124"
-loading="lazy" alt="Animan — orchestration des téléchargements et bibliothèque"><figcaption>Animan — orchestration des téléchargements et bibliothèque</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/download_manager.py#L61">DownloadManagerService</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_manager.py#L46">ResolvedVideoInfo</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/library_service.py#L11">LibraryService</a> — <code>animan/services/library_service.py</code></li><li><a href="../../animan/services/verification_service.py#L47">DownloadVerificationService</a> — <code>animan/services/verification_service.py</code></li><li><a href="../../animan/services/verification_service.py#L30">VerificationResult</a> — <code>animan/services/verification_service.py</code></li><li><a href="../../animan/services/watchdog_service.py#L12">WatchdogService</a> — <code>animan/services/watchdog_service.py</code></li><li><a href="../../animan/media_tools.py#L30">run</a> — <code>animan/media_tools.py</code></li><li><a href="../../animan/platform_events.py#L13">completed</a> — <code>animan/platform_events.py</code></li></ul></details>
+<figure><img src="svg/02-classes-services.svg" width="2509" height="1477"
+loading="lazy" alt="AnimeLab — orchestration des téléchargements et bibliothèque"><figcaption>AnimeLab — orchestration des téléchargements et bibliothèque</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/download_manager.py#L62">DownloadManagerService</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_manager.py#L47">ResolvedVideoInfo</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/library_service.py#L11">LibraryService</a> — <code>animan/services/library_service.py</code></li><li><a href="../../animan/services/verification_service.py#L47">DownloadVerificationService</a> — <code>animan/services/verification_service.py</code></li><li><a href="../../animan/services/verification_service.py#L30">VerificationResult</a> — <code>animan/services/verification_service.py</code></li><li><a href="../../animan/services/watchdog_service.py#L12">WatchdogService</a> — <code>animan/services/watchdog_service.py</code></li><li><a href="../../animan/media_tools.py#L30">run</a> — <code>animan/media_tools.py</code></li><li><a href="../../animan/platform_events.py#L13">completed</a> — <code>animan/platform_events.py</code></li><li><a href="../../animan/services/download_stages/transfer.py#L39">TransferWorker</a> — <code>animan/services/download_stages/transfer.py</code></li><li><a href="../../animan/services/download_stages/media.py#L38">MediaPipeline</a> — <code>animan/services/download_stages/media.py</code></li><li><a href="../../animan/services/download_stages/export.py#L22">ExportCoordinator</a> — <code>animan/services/download_stages/export.py</code></li><li><a href="../../animan/services/download_stages/scheduler.py#L21">DownloadScheduler</a> — <code>animan/services/download_stages/scheduler.py</code></li><li><a href="../../animan/services/download_stages/budget.py#L8">StageBudget</a> — <code>animan/services/download_stages/budget.py</code></li><li><a href="../../animan/services/download_stages/state.py#L19">transition</a> — <code>animan/services/download_stages/state.py</code></li></ul></details>
 </article>
 <article data-category="classes" id="03-classes-sources">
-<h2>Animan — sources, recettes importées et extracteurs</h2><p class="kind">Classes
+<h2>AnimeLab — sources, recettes importées et extracteurs</h2><p class="kind">Classes
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/03-classes-sources.svg"
-data-title="Animan — sources, recettes importées et extracteurs" data-width="2550">Agrandir</button>
+data-title="AnimeLab — sources, recettes importées et extracteurs" data-width="2394">Agrandir</button>
 <a href="svg/03-classes-sources.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/03-classes-sources.puml">Source PlantUML</a><a href="#03-classes-sources">Lien direct</a></div>
-<figure><img src="svg/03-classes-sources.svg" width="2550" height="1421"
-loading="lazy" alt="Animan — sources, recettes importées et extracteurs"><figcaption>Animan — sources, recettes importées et extracteurs</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/source_catalogue.py#L22">SourceCatalogueService</a> — <code>animan/services/source_catalogue.py</code></li><li><a href="../../animan/services/scraping_service.py#L28">ScrapingService</a> — <code>animan/services/scraping_service.py</code></li><li><a href="../../animan/services/voiranime_service.py#L26">VoirAnimeScrapingService</a> — <code>animan/services/voiranime_service.py</code></li><li><a href="../../animan/services/animepahe_service.py#L25">AnimepaheService</a> — <code>animan/services/animepahe_service.py</code></li><li><a href="../../animan/services/extension_service.py#L29">ExtensionService</a> — <code>animan/services/extension_service.py</code></li><li><a href="../../animan/services/aniyomi_dex_parser.py#L13">SourceRecipe</a> — <code>animan/services/aniyomi_dex_parser.py</code></li><li><a href="../../animan/services/aniyomi_dex_parser.py#L64">AniyomiDexParser</a> — <code>animan/services/aniyomi_dex_parser.py</code></li><li><a href="../../animan/services/aniyomi_container.py#L101">AniyomiContainerSource</a> — <code>animan/services/aniyomi_container.py</code></li><li><a href="../../animan/services/container_adapters/base.py#L9">BaseSourceAdapter</a> — <code>animan/services/container_adapters/base.py</code></li><li><a href="../../animan/services/container_adapters/registry.py#L12">AdapterRegistry</a> — <code>animan/services/container_adapters/registry.py</code></li><li><a href="../../animan/services/extractors/base.py#L46">BaseVideoExtractor</a> — <code>animan/services/extractors/base.py</code></li><li><a href="../../animan/services/extractors/base.py#L16">ExtractorResult</a> — <code>animan/services/extractors/base.py</code></li><li><a href="../../animan/services/extractors/registry.py#L24">ExtractorRegistry</a> — <code>animan/services/extractors/registry.py</code></li><li><a href="../../animan/services/extractors/ytdlp_fallback.py#L21">YtDlpFallbackExtractor</a> — <code>animan/services/extractors/ytdlp_fallback.py</code></li></ul></details>
+<figure><img src="svg/03-classes-sources.svg" width="2394" height="1421"
+loading="lazy" alt="AnimeLab — sources, recettes importées et extracteurs"><figcaption>AnimeLab — sources, recettes importées et extracteurs</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/source_catalogue.py#L23">SourceCatalogueService</a> — <code>animan/services/source_catalogue.py</code></li><li><a href="../../animan/services/scraping_service.py#L28">ScrapingService</a> — <code>animan/services/scraping_service.py</code></li><li><a href="../../animan/services/voiranime_service.py#L26">VoirAnimeScrapingService</a> — <code>animan/services/voiranime_service.py</code></li><li><a href="../../animan/services/animepahe_service.py#L25">AnimepaheService</a> — <code>animan/services/animepahe_service.py</code></li><li><a href="../../animan/services/extension_service.py#L29">ExtensionService</a> — <code>animan/services/extension_service.py</code></li><li><a href="../../animan/services/aniyomi_dex_parser.py#L17">SourceRecipe</a> — <code>animan/services/aniyomi_dex_parser.py</code></li><li><a href="../../animan/services/aniyomi_dex_parser.py#L71">AniyomiDexParser</a> — <code>animan/services/aniyomi_dex_parser.py</code></li><li><a href="../../animan/services/aniyomi_container.py#L89">AniyomiContainerSource</a> — <code>animan/services/aniyomi_container.py</code></li><li><a href="../../animan/services/container_adapters/base.py#L9">BaseSourceAdapter</a> — <code>animan/services/container_adapters/base.py</code></li><li><a href="../../animan/services/container_adapters/registry.py#L13">AdapterRegistry</a> — <code>animan/services/container_adapters/registry.py</code></li><li><a href="../../animan/services/extractors/base.py#L46">BaseVideoExtractor</a> — <code>animan/services/extractors/base.py</code></li><li><a href="../../animan/services/extractors/base.py#L16">ExtractorResult</a> — <code>animan/services/extractors/base.py</code></li><li><a href="../../animan/services/extractors/registry.py#L24">ExtractorRegistry</a> — <code>animan/services/extractors/registry.py</code></li><li><a href="../../animan/services/extractors/ytdlp_fallback.py#L21">YtDlpFallbackExtractor</a> — <code>animan/services/extractors/ytdlp_fallback.py</code></li><li><a href="../../animan/services/source_registry.py#L110">SourceRegistry</a> — <code>animan/services/source_registry.py</code></li><li><a href="../../animan/services/source_registry.py#L41">RegisteredSource</a> — <code>animan/services/source_registry.py</code></li><li><a href="../../animan/services/source_registry.py#L17">SourceProvider</a> — <code>animan/services/source_registry.py</code></li><li><a href="../../animan/services/source_registry.py#L25">SourceCapabilities</a> — <code>animan/services/source_registry.py</code></li><li><a href="../../animan/services/extension_observability.py#L63">ExtensionObservability</a> — <code>animan/services/extension_observability.py</code></li></ul></details>
 </article>
 <article data-category="classes" id="04-classes-reseau">
-<h2>Animan — sessions HTTP, protection des sites et proxies</h2><p class="kind">Classes
+<h2>AnimeLab — sessions HTTP, protection des sites et proxies</h2><p class="kind">Classes
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/04-classes-reseau.svg"
-data-title="Animan — sessions HTTP, protection des sites et proxies" data-width="1661">Agrandir</button>
+data-title="AnimeLab — sessions HTTP, protection des sites et proxies" data-width="1661">Agrandir</button>
 <a href="svg/04-classes-reseau.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/04-classes-reseau.puml">Source PlantUML</a><a href="#04-classes-reseau">Lien direct</a></div>
 <figure><img src="svg/04-classes-reseau.svg" width="1661" height="1166"
-loading="lazy" alt="Animan — sessions HTTP, protection des sites et proxies"><figcaption>Animan — sessions HTTP, protection des sites et proxies</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/source_http.py#L95">SourceHTTPService</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L78">DomainSession</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L501">SourceClient</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L533">AsyncSourceClient</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L683">SourceStreamResponse</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L34">VerificationRequired</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L51">RateLimited</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L44">SourceNetworkError</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/proxy_pool.py#L79">ProxyPool</a> — <code>animan/services/proxy_pool.py</code></li><li><a href="../../animan/services/proxy_service.py#L27">ProxyService</a> — <code>animan/services/proxy_service.py</code></li><li><a href="../../animan/services/browser_verification.py#L22">BrowserVerificationService</a> — <code>animan/services/browser_verification.py</code></li></ul></details>
+loading="lazy" alt="AnimeLab — sessions HTTP, protection des sites et proxies"><figcaption>AnimeLab — sessions HTTP, protection des sites et proxies</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/source_http.py#L96">SourceHTTPService</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L79">DomainSession</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L508">SourceClient</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L540">AsyncSourceClient</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L690">SourceStreamResponse</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L35">VerificationRequired</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L52">RateLimited</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/source_http.py#L45">SourceNetworkError</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/proxy_pool.py#L79">ProxyPool</a> — <code>animan/services/proxy_pool.py</code></li><li><a href="../../animan/services/proxy_service.py#L26">ProxyService</a> — <code>animan/services/proxy_service.py</code></li><li><a href="../../animan/services/browser_verification.py#L20">BrowserVerificationService</a> — <code>animan/services/browser_verification.py</code></li></ul></details>
 </article>
 <article data-category="classes" id="05-classes-android">
-<h2>Animan — classes et objets de l&#x27;hôte Android</h2><p class="kind">Classes
+<h2>AnimeLab — classes et objets de l&#x27;hôte Android</h2><p class="kind">Classes
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/05-classes-android.svg"
-data-title="Animan — classes et objets de l&#x27;hôte Android" data-width="2460">Agrandir</button>
+data-title="AnimeLab — classes et objets de l&#x27;hôte Android" data-width="2460">Agrandir</button>
 <a href="svg/05-classes-android.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/05-classes-android.puml">Source PlantUML</a><a href="#05-classes-android">Lien direct</a></div>
 <figure><img src="svg/05-classes-android.svg" width="2460" height="855"
-loading="lazy" alt="Animan — classes et objets de l&#x27;hôte Android"><figcaption>Animan — classes et objets de l&#x27;hôte Android</figcaption></figure>
+loading="lazy" alt="AnimeLab — classes et objets de l&#x27;hôte Android"><figcaption>AnimeLab — classes et objets de l&#x27;hôte Android</figcaption></figure>
 <details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../android/app/src/main/java/com/animan/app/MainActivity.kt#L29">MainActivity</a> — <code>android/app/src/main/java/com/animan/app/MainActivity.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/EngineHost.kt#L14">EngineHost</a> — <code>android/app/src/main/java/com/animan/app/EngineHost.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/DownloadService.kt#L15">DownloadService</a> — <code>android/app/src/main/java/com/animan/app/DownloadService.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/StorageAccess.kt#L16">StorageAccess</a> — <code>android/app/src/main/java/com/animan/app/StorageAccess.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/NativeHooks.kt#L11">NativeHooks</a> — <code>android/app/src/main/java/com/animan/app/NativeHooks.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/MediaBridge.kt#L15">MediaBridge</a> — <code>android/app/src/main/java/com/animan/app/MediaBridge.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/CryptoBridge.kt#L8">CryptoBridge</a> — <code>android/app/src/main/java/com/animan/app/CryptoBridge.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/VerificationBridge.kt#L8">VerificationBridge</a> — <code>android/app/src/main/java/com/animan/app/VerificationBridge.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/VerificationActivity.kt#L16">VerificationActivity</a> — <code>android/app/src/main/java/com/animan/app/VerificationActivity.kt</code></li><li><a href="../../android_runtime.py#L37">start</a> — <code>android_runtime.py</code></li><li><a href="../../animan/android_security.py#L6">AndroidSessionMiddleware</a> — <code>animan/android_security.py</code></li></ul></details>
 </article>
 <article data-category="cas" id="06-cas-utilisation">
-<h2>Animan — cas d&#x27;utilisation fonctionnels</h2><p class="kind">Cas d’utilisation
+<h2>AnimeLab — cas d&#x27;utilisation fonctionnels</h2><p class="kind">Cas d’utilisation
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/06-cas-utilisation.svg"
-data-title="Animan — cas d&#x27;utilisation fonctionnels" data-width="1598">Agrandir</button>
+data-title="AnimeLab — cas d&#x27;utilisation fonctionnels" data-width="1604">Agrandir</button>
 <a href="svg/06-cas-utilisation.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/06-cas-utilisation.puml">Source PlantUML</a><a href="#06-cas-utilisation">Lien direct</a></div>
-<figure><img src="svg/06-cas-utilisation.svg" width="1598" height="1491"
-loading="lazy" alt="Animan — cas d&#x27;utilisation fonctionnels"><figcaption>Animan — cas d&#x27;utilisation fonctionnels</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/anime.py#L186">search_api</a> — <code>animan/routers/anime.py</code></li><li><a href="../../animan/routers/download.py#L44">start_download</a> — <code>animan/routers/download.py</code></li><li><a href="../../animan/routers/library.py#L161">mark_watched</a> — <code>animan/routers/library.py</code></li></ul></details>
+<figure><img src="svg/06-cas-utilisation.svg" width="1604" height="1492"
+loading="lazy" alt="AnimeLab — cas d&#x27;utilisation fonctionnels"><figcaption>AnimeLab — cas d&#x27;utilisation fonctionnels</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/anime.py#L94">search_api</a> — <code>animan/routers/anime.py</code></li><li><a href="../../animan/routers/download.py#L45">start_download</a> — <code>animan/routers/download.py</code></li><li><a href="../../animan/routers/library.py#L162">mark_watched</a> — <code>animan/routers/library.py</code></li></ul></details>
 </article>
 <article data-category="cas" id="07-cas-utilisation-reseau-stockage">
-<h2>Animan — cas d&#x27;utilisation réseau et stockage Android</h2><p class="kind">Cas d’utilisation
+<h2>AnimeLab — cas d&#x27;utilisation réseau et stockage Android</h2><p class="kind">Cas d’utilisation
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/07-cas-utilisation-reseau-stockage.svg"
-data-title="Animan — cas d&#x27;utilisation réseau et stockage Android" data-width="1815">Agrandir</button>
+data-title="AnimeLab — cas d&#x27;utilisation réseau et stockage Android" data-width="1819">Agrandir</button>
 <a href="svg/07-cas-utilisation-reseau-stockage.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/07-cas-utilisation-reseau-stockage.puml">Source PlantUML</a><a href="#07-cas-utilisation-reseau-stockage">Lien direct</a></div>
-<figure><img src="svg/07-cas-utilisation-reseau-stockage.svg" width="1815" height="1017"
-loading="lazy" alt="Animan — cas d&#x27;utilisation réseau et stockage Android"><figcaption>Animan — cas d&#x27;utilisation réseau et stockage Android</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/network.py#L77">rotate_proxy</a> — <code>animan/routers/network.py</code></li><li><a href="../../animan/routers/network.py#L124">complete</a> — <code>animan/routers/network.py</code></li><li><a href="../../animan/routers/library.py#L277">android_storage_action</a> — <code>animan/routers/library.py</code></li></ul></details>
+<figure><img src="svg/07-cas-utilisation-reseau-stockage.svg" width="1819" height="1017"
+loading="lazy" alt="AnimeLab — cas d&#x27;utilisation réseau et stockage Android"><figcaption>AnimeLab — cas d&#x27;utilisation réseau et stockage Android</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/network.py#L78">rotate_proxy</a> — <code>animan/routers/network.py</code></li><li><a href="../../animan/routers/network.py#L129">complete</a> — <code>animan/routers/network.py</code></li><li><a href="../../animan/routers/library.py#L278">android_storage_action</a> — <code>animan/routers/library.py</code></li></ul></details>
 </article>
 <article data-category="sequence" id="08-sequence-recherche-verification">
-<h2>Animan — recherche multisource et vérification assistée</h2><p class="kind">Séquences
+<h2>AnimeLab — recherche multisource et vérification assistée</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/08-sequence-recherche-verification.svg"
-data-title="Animan — recherche multisource et vérification assistée" data-width="2218">Agrandir</button>
+data-title="AnimeLab — recherche multisource et vérification assistée" data-width="2218">Agrandir</button>
 <a href="svg/08-sequence-recherche-verification.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/08-sequence-recherche-verification.puml">Source PlantUML</a><a href="#08-sequence-recherche-verification">Lien direct</a></div>
 <figure><img src="svg/08-sequence-recherche-verification.svg" width="2218" height="1541"
-loading="lazy" alt="Animan — recherche multisource et vérification assistée"><figcaption>Animan — recherche multisource et vérification assistée</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/anime.py#L186">search_api</a> — <code>animan/routers/anime.py</code></li><li><a href="../../animan/services/browser_verification.py#L135">BrowserVerificationService.complete</a> — <code>animan/services/browser_verification.py</code></li><li><a href="../../animan/routers/network.py#L124">complete</a> — <code>animan/routers/network.py</code></li></ul></details>
+loading="lazy" alt="AnimeLab — recherche multisource et vérification assistée"><figcaption>AnimeLab — recherche multisource et vérification assistée</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/anime.py#L94">search_api</a> — <code>animan/routers/anime.py</code></li><li><a href="../../animan/services/browser_verification.py#L133">BrowserVerificationService.complete</a> — <code>animan/services/browser_verification.py</code></li><li><a href="../../animan/routers/network.py#L129">complete</a> — <code>animan/routers/network.py</code></li></ul></details>
 </article>
 <article data-category="sequence" id="09-sequence-telechargement">
-<h2>Animan — téléchargement, HLS, sous-titres et finalisation</h2><p class="kind">Séquences
+<h2>AnimeLab — téléchargement, HLS, sous-titres et finalisation</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/09-sequence-telechargement.svg"
-data-title="Animan — téléchargement, HLS, sous-titres et finalisation" data-width="2628">Agrandir</button>
+data-title="AnimeLab — téléchargement, HLS, sous-titres et finalisation" data-width="2628">Agrandir</button>
 <a href="svg/09-sequence-telechargement.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/09-sequence-telechargement.puml">Source PlantUML</a><a href="#09-sequence-telechargement">Lien direct</a></div>
 <figure><img src="svg/09-sequence-telechargement.svg" width="2628" height="1549"
-loading="lazy" alt="Animan — téléchargement, HLS, sous-titres et finalisation"><figcaption>Animan — téléchargement, HLS, sous-titres et finalisation</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/download_manager.py#L1537">DownloadManagerService._execute_download</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_manager.py#L2745">DownloadManagerService._finalize_task</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_manager.py#L3098">DownloadManagerService._publish_mux_file</a> — <code>animan/services/download_manager.py</code></li></ul></details>
+loading="lazy" alt="AnimeLab — téléchargement, HLS, sous-titres et finalisation"><figcaption>AnimeLab — téléchargement, HLS, sous-titres et finalisation</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/download_manager.py#L1532">DownloadManagerService._execute_download</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_manager.py#L1553">DownloadManagerService._finalize_task</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_manager.py#L1581">DownloadManagerService._publish_mux_file</a> — <code>animan/services/download_manager.py</code></li></ul></details>
 </article>
 <article data-category="sequence" id="10-sequence-reprise-proxy">
-<h2>Animan — rotation de proxy et reprise sans mélanger les représentations</h2><p class="kind">Séquences
+<h2>AnimeLab — rotation de proxy et reprise sans mélanger les représentations</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/10-sequence-reprise-proxy.svg"
-data-title="Animan — rotation de proxy et reprise sans mélanger les représentations" data-width="1768">Agrandir</button>
+data-title="AnimeLab — rotation de proxy et reprise sans mélanger les représentations" data-width="1768">Agrandir</button>
 <a href="svg/10-sequence-reprise-proxy.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/10-sequence-reprise-proxy.puml">Source PlantUML</a><a href="#10-sequence-reprise-proxy">Lien direct</a></div>
 <figure><img src="svg/10-sequence-reprise-proxy.svg" width="1768" height="1264"
-loading="lazy" alt="Animan — rotation de proxy et reprise sans mélanger les représentations"><figcaption>Animan — rotation de proxy et reprise sans mélanger les représentations</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/source_http.py#L241">SourceHTTPService.rotate_proxy</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/download_manager.py#L1929">DownloadManagerService._download_single_file</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_resume.py#L53">prepare_hls_cache</a> — <code>animan/services/download_resume.py</code></li></ul></details>
+loading="lazy" alt="AnimeLab — rotation de proxy et reprise sans mélanger les représentations"><figcaption>AnimeLab — rotation de proxy et reprise sans mélanger les représentations</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/source_http.py#L244">SourceHTTPService.rotate_proxy</a> — <code>animan/services/source_http.py</code></li><li><a href="../../animan/services/download_manager.py#L1535">DownloadManagerService._download_single_file</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../animan/services/download_resume.py#L53">prepare_hls_cache</a> — <code>animan/services/download_resume.py</code></li></ul></details>
 </article>
 <article data-category="sequence" id="11-sequence-extensions">
-<h2>Animan — import d&#x27;un dépôt et activation d&#x27;une source</h2><p class="kind">Séquences
+<h2>AnimeLab — import d&#x27;un dépôt et activation d&#x27;une source</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/11-sequence-extensions.svg"
-data-title="Animan — import d&#x27;un dépôt et activation d&#x27;une source" data-width="1796">Agrandir</button>
+data-title="AnimeLab — import d&#x27;un dépôt et activation d&#x27;une source" data-width="1972">Agrandir</button>
 <a href="svg/11-sequence-extensions.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/11-sequence-extensions.puml">Source PlantUML</a><a href="#11-sequence-extensions">Lien direct</a></div>
-<figure><img src="svg/11-sequence-extensions.svg" width="1796" height="1166"
-loading="lazy" alt="Animan — import d&#x27;un dépôt et activation d&#x27;une source"><figcaption>Animan — import d&#x27;un dépôt et activation d&#x27;une source</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/extension_service.py#L86">ExtensionService.import_repository</a> — <code>animan/services/extension_service.py</code></li><li><a href="../../animan/services/extension_service.py#L262">ExtensionService.toggle_extension</a> — <code>animan/services/extension_service.py</code></li><li><a href="../../animan/services/aniyomi_dex_parser.py#L68">AniyomiDexParser.parse_apk</a> — <code>animan/services/aniyomi_dex_parser.py</code></li></ul></details>
+<figure><img src="svg/11-sequence-extensions.svg" width="1972" height="1430"
+loading="lazy" alt="AnimeLab — import d&#x27;un dépôt et activation d&#x27;une source"><figcaption>AnimeLab — import d&#x27;un dépôt et activation d&#x27;une source</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/extension_service.py#L48">ExtensionService.import_repository</a> — <code>animan/services/extension_service.py</code></li><li><a href="../../animan/services/extension_service.py#L227">ExtensionService.toggle_extension</a> — <code>animan/services/extension_service.py</code></li><li><a href="../../animan/services/aniyomi_dex_parser.py#L75">AniyomiDexParser.parse_apk</a> — <code>animan/services/aniyomi_dex_parser.py</code></li><li><a href="../../animan/services/extension_service.py#L457">ExtensionService.restore_recipe</a> — <code>animan/services/extension_service.py</code></li></ul></details>
 </article>
 <article data-category="sequence" id="12-sequence-stockage-android">
-<h2>Animan Android — autoriser une destination et publier un média</h2><p class="kind">Séquences
+<h2>AnimeLab Android — autoriser une destination et publier un média</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/12-sequence-stockage-android.svg"
-data-title="Animan Android — autoriser une destination et publier un média" data-width="2424">Agrandir</button>
+data-title="AnimeLab Android — autoriser une destination et publier un média" data-width="2424">Agrandir</button>
 <a href="svg/12-sequence-stockage-android.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/12-sequence-stockage-android.puml">Source PlantUML</a><a href="#12-sequence-stockage-android">Lien direct</a></div>
 <figure><img src="svg/12-sequence-stockage-android.svg" width="2424" height="1540"
-loading="lazy" alt="Animan Android — autoriser une destination et publier un média"><figcaption>Animan Android — autoriser une destination et publier un média</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../android_runtime.py#L37">start</a> — <code>android_runtime.py</code></li><li><a href="../../animan/routers/library.py#L293">android_export_download</a> — <code>animan/routers/library.py</code></li><li><a href="../../animan/services/download_manager.py#L2677">DownloadManagerService.export_task</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../android/app/src/main/java/com/animan/app/StorageAccess.kt#L16">StorageAccess</a> — <code>android/app/src/main/java/com/animan/app/StorageAccess.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/NativeHooks.kt#L11">NativeHooks</a> — <code>android/app/src/main/java/com/animan/app/NativeHooks.kt</code></li></ul></details>
+loading="lazy" alt="AnimeLab Android — autoriser une destination et publier un média"><figcaption>AnimeLab Android — autoriser une destination et publier un média</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../android_runtime.py#L37">start</a> — <code>android_runtime.py</code></li><li><a href="../../animan/routers/library.py#L294">android_export_download</a> — <code>animan/routers/library.py</code></li><li><a href="../../animan/services/download_manager.py#L1550">DownloadManagerService.export_task</a> — <code>animan/services/download_manager.py</code></li><li><a href="../../android/app/src/main/java/com/animan/app/StorageAccess.kt#L16">StorageAccess</a> — <code>android/app/src/main/java/com/animan/app/StorageAccess.kt</code></li><li><a href="../../android/app/src/main/java/com/animan/app/NativeHooks.kt#L11">NativeHooks</a> — <code>android/app/src/main/java/com/animan/app/NativeHooks.kt</code></li></ul></details>
 </article>
 <article data-category="sequence" id="13-sequence-auto-telechargement">
-<h2>Animan — suivi automatique persistant par source et version</h2><p class="kind">Séquences
+<h2>AnimeLab — suivi automatique persistant par source et version</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/13-sequence-auto-telechargement.svg"
-data-title="Animan — suivi automatique persistant par source et version" data-width="2225">Agrandir</button>
+data-title="AnimeLab — suivi automatique persistant par source et version" data-width="2225">Agrandir</button>
 <a href="svg/13-sequence-auto-telechargement.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/13-sequence-auto-telechargement.puml">Source PlantUML</a><a href="#13-sequence-auto-telechargement">Lien direct</a></div>
 <figure><img src="svg/13-sequence-auto-telechargement.svg" width="2225" height="1310"
-loading="lazy" alt="Animan — suivi automatique persistant par source et version"><figcaption>Animan — suivi automatique persistant par source et version</figcaption></figure>
+loading="lazy" alt="AnimeLab — suivi automatique persistant par source et version"><figcaption>AnimeLab — suivi automatique persistant par source et version</figcaption></figure>
 <details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/services/watchdog_service.py#L30">WatchdogService._run_loop</a> — <code>animan/services/watchdog_service.py</code></li><li><a href="../../animan/services/watchdog_service.py#L72">WatchdogService._check_anime</a> — <code>animan/services/watchdog_service.py</code></li><li><a href="../../animan/services/library_service.py#L80">LibraryService.discover_auto_episodes</a> — <code>animan/services/library_service.py</code></li><li><a href="../../animan/models/auto_download.py#L13">AutoDownloadEpisode</a> — <code>animan/models/auto_download.py</code></li></ul></details>
 </article>
 <article data-category="sequence" id="14-sequence-lecture">
-<h2>Animan — lecture locale ou distante et progression</h2><p class="kind">Séquences
+<h2>AnimeLab — lecture locale ou distante et progression</h2><p class="kind">Séquences
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/14-sequence-lecture.svg"
-data-title="Animan — lecture locale ou distante et progression" data-width="1998">Agrandir</button>
+data-title="AnimeLab — lecture locale ou distante et progression" data-width="2449">Agrandir</button>
 <a href="svg/14-sequence-lecture.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/14-sequence-lecture.puml">Source PlantUML</a><a href="#14-sequence-lecture">Lien direct</a></div>
-<figure><img src="svg/14-sequence-lecture.svg" width="1998" height="1199"
-loading="lazy" alt="Animan — lecture locale ou distante et progression"><figcaption>Animan — lecture locale ou distante et progression</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/media.py#L208">resolve_stream</a> — <code>animan/routers/media.py</code></li><li><a href="../../animan/routers/media.py#L494">stream_video</a> — <code>animan/routers/media.py</code></li><li><a href="../../animan/routers/media.py#L670">hls_proxy_playlist</a> — <code>animan/routers/media.py</code></li><li><a href="../../animan/routers/library.py#L161">mark_watched</a> — <code>animan/routers/library.py</code></li></ul></details>
+<figure><img src="svg/14-sequence-lecture.svg" width="2449" height="1551"
+loading="lazy" alt="AnimeLab — lecture locale ou distante et progression"><figcaption>AnimeLab — lecture locale ou distante et progression</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../animan/routers/media.py#L210">resolve_stream</a> — <code>animan/routers/media.py</code></li><li><a href="../../animan/routers/media.py#L496">stream_video</a> — <code>animan/routers/media.py</code></li><li><a href="../../animan/routers/media.py#L678">hls_proxy_playlist</a> — <code>animan/routers/media.py</code></li><li><a href="../../animan/routers/library.py#L162">mark_watched</a> — <code>animan/routers/library.py</code></li><li><a href="../../animan/services/playback_service.py#L51">PlaybackService.open</a> — <code>animan/services/playback_service.py</code></li><li><a href="../../animan/services/playback_service.py#L74">PlaybackService.save</a> — <code>animan/services/playback_service.py</code></li></ul></details>
 </article>
 <article data-category="deploiement" id="15-deploiement-bureau-web">
-<h2>Animan — déploiements actuels bureau et navigateur / PWA</h2><p class="kind">Déploiement
+<h2>AnimeLab — déploiements actuels bureau et navigateur / PWA</h2><p class="kind">Déploiement
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/15-deploiement-bureau-web.svg"
-data-title="Animan — déploiements actuels bureau et navigateur / PWA" data-width="2277">Agrandir</button>
+data-title="AnimeLab — déploiements actuels bureau et navigateur / PWA" data-width="2277">Agrandir</button>
 <a href="svg/15-deploiement-bureau-web.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/15-deploiement-bureau-web.puml">Source PlantUML</a><a href="#15-deploiement-bureau-web">Lien direct</a></div>
 <figure><img src="svg/15-deploiement-bureau-web.svg" width="2277" height="1091"
-loading="lazy" alt="Animan — déploiements actuels bureau et navigateur / PWA"><figcaption>Animan — déploiements actuels bureau et navigateur / PWA</figcaption></figure>
-<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../desktop.py#L58">start_server</a> — <code>desktop.py</code></li><li><a href="../../run.py#L42">lifespan</a> — <code>run.py</code></li><li><a href="../../animan/services/tmdb_service.py#L184">TmdbService.enrich_anime_detail</a> — <code>animan/services/tmdb_service.py</code></li></ul></details>
+loading="lazy" alt="AnimeLab — déploiements actuels bureau et navigateur / PWA"><figcaption>AnimeLab — déploiements actuels bureau et navigateur / PWA</figcaption></figure>
+<details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../desktop.py#L58">start_server</a> — <code>desktop.py</code></li><li><a href="../../run.py#L45">lifespan</a> — <code>run.py</code></li><li><a href="../../animan/services/tmdb_service.py#L184">TmdbService.enrich_anime_detail</a> — <code>animan/services/tmdb_service.py</code></li></ul></details>
 </article>
 <article data-category="deploiement" id="16-deploiement-android">
-<h2>Animan — déploiement Android autonome actuel</h2><p class="kind">Déploiement
+<h2>AnimeLab — déploiement Android autonome actuel</h2><p class="kind">Déploiement
  · Architecture observée</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/16-deploiement-android.svg"
-data-title="Animan — déploiement Android autonome actuel" data-width="3137">Agrandir</button>
+data-title="AnimeLab — déploiement Android autonome actuel" data-width="3137">Agrandir</button>
 <a href="svg/16-deploiement-android.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/16-deploiement-android.puml">Source PlantUML</a><a href="#16-deploiement-android">Lien direct</a></div>
 <figure><img src="svg/16-deploiement-android.svg" width="3137" height="1199"
-loading="lazy" alt="Animan — déploiement Android autonome actuel"><figcaption>Animan — déploiement Android autonome actuel</figcaption></figure>
+loading="lazy" alt="AnimeLab — déploiement Android autonome actuel"><figcaption>AnimeLab — déploiement Android autonome actuel</figcaption></figure>
 <details><summary>Références vérifiées dans le code</summary><ul><li><a href="../../android_runtime.py#L37">start</a> — <code>android_runtime.py</code></li><li><a href="../../android/app/src/main/java/com/animan/app/EngineHost.kt#L14">EngineHost</a> — <code>android/app/src/main/java/com/animan/app/EngineHost.kt</code></li><li><a href="../../animan/android_security.py#L6">AndroidSessionMiddleware</a> — <code>animan/android_security.py</code></li></ul></details>
 </article>
 <article data-category="cible" id="17-cible-amelioree">
-<h2>Animan — architecture cible proposée (non implémentée)</h2><p class="kind">Proposition
- · Architecture proposée, non implémentée</p>
+<h2>AnimeLab — cible modulaire partiellement réalisée (A03–A08)</h2><p class="kind">Proposition
+ · Cible partiellement réalisée ; découplages restants proposés</p>
 <div class="actions"><button type="button" class="zoom" data-svg="svg/17-cible-amelioree.svg"
-data-title="Animan — architecture cible proposée (non implémentée)" data-width="1977">Agrandir</button>
+data-title="AnimeLab — cible modulaire partiellement réalisée (A03–A08)" data-width="2003">Agrandir</button>
 <a href="svg/17-cible-amelioree.svg" target="_blank" rel="noopener">SVG original</a>
 <a href="plantuml/17-cible-amelioree.puml">Source PlantUML</a><a href="#17-cible-amelioree">Lien direct</a></div>
-<figure><img src="svg/17-cible-amelioree.svg" width="1977" height="1120"
-loading="lazy" alt="Animan — architecture cible proposée (non implémentée)"><figcaption>Animan — architecture cible proposée (non implémentée)</figcaption></figure>
+<figure><img src="svg/17-cible-amelioree.svg" width="2003" height="1116"
+loading="lazy" alt="AnimeLab — cible modulaire partiellement réalisée (A03–A08)"><figcaption>AnimeLab — cible modulaire partiellement réalisée (A03–A08)</figcaption></figure>
 
 </article><p class="empty" id="empty" hidden>Aucun diagramme ne correspond à ce filtre.</p></main>
 <dialog id="viewer" aria-labelledby="viewer-title"><div class="dialog-bar"><strong id="viewer-title"></strong>

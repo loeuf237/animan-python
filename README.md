@@ -1,13 +1,18 @@
-# Animan (Python Edition) 🎬
+# AnimeLab 🎬
 
-[![GitHub Release](https://img.shields.io/github/v/release/loeuf237/animan-python?color=9d6fff&label=Release)](https://github.com/loeuf237/animan-python/releases/latest)
+[![CI](https://github.com/loeuf237/animelab/actions/workflows/ci.yml/badge.svg)](https://github.com/loeuf237/animelab/actions/workflows/ci.yml)
+
+<img src="docs/branding/animelab-wordmark.png" alt="AnimeLab" width="420" />
+
+
+[![GitHub Release](https://img.shields.io/github/v/release/loeuf237/animelab?color=9d6fff&label=Release)](https://github.com/loeuf237/animelab/releases/latest)
 [![Python tests](https://img.shields.io/badge/Python-regression_tests-34d399.svg)](tests/)
 [![Frontend tests](https://img.shields.io/badge/Frontend-regression_tests-34d399.svg)](frontend/tests/)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.12%20%7C%203.14-38bdf8.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-38bdf8.svg)](https://www.python.org/)
 [![PWA](https://img.shields.io/badge/PWA-Ready-f59e0b.svg)](animan/static/manifest.json)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Web-a855f7.svg)](#downloads-and-applications)
 
-**Animan** is an anime streaming and download application built with **FastAPI**, **Python 3**, and a **Vue 3 / TypeScript** interface. It supports dubbed and subtitled episodes, a personal library, imported sources, and local video playback.
+**AnimeLab** is an anime streaming and download application built with **FastAPI**, **Python 3**, and a **Vue 3 / TypeScript** interface. It supports dubbed and subtitled episodes, a personal library, imported sources, and local video playback.
 
 The [architecture and UML dossier](docs/architecture/README.md) includes class,
 use-case, sequence and deployment diagrams, detailed scenarios and a prioritized
@@ -16,38 +21,56 @@ provides the SVG views and editable PlantUML sources.
 
 Use the packaged **Python + Vue desktop application** on Windows, Linux or macOS, or the cross-platform **Progressive Web App (PWA)**. The desktop release series starts at **0.1.0**; macOS builds are explicitly **UNTESTED on real Mac hardware**.
 
+AnimeLab was previously named **Animan**. The selected identity is the violet and mint A; [all three logo concepts and the asset guide](docs/branding/README.md) are available in the repository. Previously published downloads below still carry their original Animan filenames. New builds use **AnimeLab**.
+
+To preserve existing libraries and Android upgrades, the Python package `animan`, `ANIMAN_*` settings, `.animan` data directory, `Downloads/Animan`, Android application ID `com.animan.app`, and existing signing identity remain compatible. The local checkout folder does not need to be renamed.
+
 ## Downloads and applications
 
-Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/animan-python/releases/latest).
+Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/animelab/releases/latest).
 
 | Platform | Format | Access | Description |
 | :--- | :---: | :--- | :--- |
-| Windows x64 | `.zip` / `.exe` | [Download](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip) | Python engine, Vue interface and media tools included; WebView2 or installed-browser fallback. |
-| Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
-| macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
-| macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
-| Android ARM64 | `.apk` | [Download beta](https://github.com/loeuf237/animan-python/releases/download/android-v0.1.0-beta.1/Animan-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
+| Windows x64 | `.zip` / `.exe` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip) | Python engine, Vue interface and media tools included; WebView2 or installed-browser fallback. |
+| Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
+| macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
+| macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
+| Android ARM64 | `.apk` | [Download beta](https://github.com/loeuf237/animelab/releases/download/android-v0.1.0-beta.1/Animan-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
 | Web / Mobile | PWA | [Browser installation](#pwa-installation) | Standalone browser installation on Chrome, Edge, Safari iOS and Android. |
 
 Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
 
-The [**Android 0.1.0 beta**](https://github.com/loeuf237/animan-python/releases/tag/android-v0.1.0-beta.1)
+The [**Android 0.1.0 beta**](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.1)
 runs independently of a desktop server. Install the APK on an **Android 10+ / ARM64**
 device; Android may ask you to allow installation from your browser. Verified
 downloads are exported to `Downloads/Animan`, with a private library copy retained.
 The APK uses a dedicated release signing identity kept locally, outside GitHub.
 
-Android 11 and 15 emulator checks cover the signed ARM64 Python/Vue runtime through
-native translation. Encode, remux, subtitle mux and decode checks run separately
-with the same media bridge on x86_64. **The complete ARM64 media pipeline and
-physical-phone behavior remain untested.** The beta includes build provenance
+For the published beta, Android 11 and 15 emulator checks cover the signed
+ARM64 Python/Vue runtime through native translation. Encode, remux, subtitle mux and decode checks run separately
+with the same media bridge on x86_64. **That published beta
+has no full ARM64 physical-phone validation.** The beta includes build provenance
 and SHA-256 checksums. See [Android distribution](docs/android-distribution.md),
 [release notes](docs/releases/android-v0.1.0-beta.1.md) and the
 [technical roadmap](docs/android-embedded-roadmap.md).
 
+The A11 build reduces the ARM64 test APK from **77.76 MB to 61.31 MB
+(21.16%)**; the normal signed deliverable is **61.36 MB**. On an Android 10 ARM64
+phone, installed application and data after first render fell from **137.52 MB
+to 97.37 MB (29.20%)** with clean test data.
+It keeps the complete Python engine, FFmpeg and yt-dlp extractors. Release builds
+now shrink Android code/resources, strip generated native copies and remove
+duplicate public assets and the unused Android XML stack. Original native
+binaries and R8 maps remain available outside the APK for diagnostics. The
+complete direct/HLS/subtitle/export probe passed on an isolated test app.
+Its DEX, Python engine and native libraries match the normal deliverable exactly.
+Installed storage is measured separately from APK bytes. See [A11 validation](docs/architecture/a11-validation.md)
+for exact measurements and device coverage. These source changes do not replace
+the APK already published on GitHub.
+
 ## Language and default source
 
-Animan supports **English and French**, including navigation, search, settings, download states, dialogs, notifications and accessibility labels. Translation catalogs are bundled with the Vue application, so interface translation does not require an additional network request to succeed.
+AnimeLab supports **English and French**, including navigation, search, settings, download states, dialogs, notifications and accessibility labels. Translation catalogs are bundled with the Vue application, so interface translation does not require an additional network request to succeed.
 
 On first use, the interface follows the browser's preferred language: French browsers use French; English and other unsupported languages use English. A valid `?lang=fr` or `?lang=en` override takes priority, followed by the saved language cookie, local preference and browser detection. The language button and Settings let users change this choice. Explicit choices are saved per browser, rather than changing the language for everyone using the server.
 
@@ -78,7 +101,7 @@ Selecting a source saves the user's preference. A later language change preserve
 
 FRAnime uses its JSON catalogue (including its original French field names), with a shared five-minute cache. Anime-Sama supports its current release cards and keeps VF/VOSTFR distinct. AniWorld uses a dedicated JSON search and season/player adapter. Known incomplete paths from older JetAnime and Vostfree imports are repaired when loaded; reinstalling these extensions is not required.
 
-Animan does not run Aniyomi APKs as Android does. It extracts a recipe and uses Python adapters. Sources with custom logic may need an additional adapter. Closed domains, certificate errors and Cloudflare challenges can prevent access even with a correct recipe.
+AnimeLab does not run Aniyomi APKs as Android does. It extracts a recipe and uses Python adapters. Sources with custom logic may need an additional adapter. Closed domains, certificate errors and Cloudflare challenges can prevent access even with a correct recipe.
 
 ### Network sessions and site verification
 
@@ -87,9 +110,9 @@ Animan does not run Aniyomi APKs as Android does. It extracts a recipe and uses 
 - Small GET responses have a short-lived cache; identical requests are coalesced. Per-domain connection limits, pacing and `Retry-After` reduce unnecessary requests. HLS streams, Range requests and private responses are not cached.
 - Cloudflare challenges, explicit Cloudflare access blocks and DDoS-Guard verification pages are distinguished from rate limits and network errors. Blocked downloads enter **Verification required** instead of repeatedly retrying.
 
-Verification controls appear with a failed search or catalog request, or a blocked download. Background feed checks do not display a global verification panel on Home. **Open in a new tab** uses the browser currently displaying Animan, including on a remote device. Browser detection supplies a hint for the label and the default installed browser.
+Verification controls appear with a failed search or catalog request, or a blocked download. Background feed checks do not display a global verification panel on Home. **Open in a new tab** uses the browser currently displaying AnimeLab, including on a remote device. Browser detection supplies a hint for the label and the default installed browser.
 
-The optional **Capture cookies using a verification window** section opens an installed Chrome, Chromium, Edge or Brave browser on the **server machine**. Animan does not download a browser. Complete the CAPTCHA manually, then choose **I have completed verification**. Animan imports cookies for the relevant domain, checks access and resumes pending requests or downloads. A system WebView option is experimental. A normal tab cannot automatically transfer its cookies to the Python application; use the dedicated window for cookie capture. **I’m back, retry** checks access before clearing a blocked session.
+The optional **Capture cookies using a verification window** section opens an installed Chrome, Chromium, Edge or Brave browser on the **server machine**. AnimeLab does not download a browser. Complete the CAPTCHA manually, then choose **I have completed verification**. AnimeLab imports cookies for the relevant domain, checks access and resumes pending requests or downloads. A system WebView option is experimental. A normal tab cannot automatically transfer its cookies to the Python application; use the dedicated window for cookie capture. **I’m back, retry** checks access before clearing a blocked session.
 
 Verification modes now report their availability for the current platform, client and source proxy. Remote clients use the manual link; Android uses its native WebView without a proxy. WebView capture is disabled for proxied sources, and managed Chromium capture is disabled for authenticated proxies. Changing a session's route while verification is open requires reopening verification before importing cookies.
 
@@ -106,7 +129,7 @@ Global search keeps partial results from accessible sources. After verification,
 
 Public lists are a catalog, not a promise of connectivity. The catalog holds up to 3,000 unique public IP addresses and displays the first 100, with available proxies first. Up to 24 addresses are tested concurrently in batches of six against a fixed HTTPS endpoint, with certificate validation enabled. A successful check expires after 30 minutes. Results vary by network and time; the [provider comparison](docs/proxy-providers.md) records the observed limitations.
 
-While automatic rotation is enabled, Animan tests another bounded sample when fewer than three fresh candidates remain, at most once every five minutes. This keeps long sessions supplied with fresh candidates without repeatedly fetching provider lists.
+While automatic rotation is enabled, AnimeLab tests another bounded sample when fewer than three fresh candidates remain, at most once every five minutes. This keeps long sessions supplied with fresh candidates without repeatedly fetching provider lists.
 
 **Import JSON** accepts an array of proxy URLs, an object containing `proxies`/`data`, or entries with `ip`, `port` and `protocol`. Imports are atomic, limited to 1 MB and 1,000 entries, persisted across restarts and removable separately. Lists accept public IPs only; configure local proxies and hostnames in Manual. Credentials from an imported URL are masked in API responses. Imported proxies also need a successful HTTPS check before use.
 
@@ -154,6 +177,14 @@ API JSON responses expose `X-Animan-API-Version: 1`. Typed request/response cont
 
 The A06/A07/A08 changes are available in the source checkout. They require a rebuilt Android application; Python tests and Kotlin compilation do not replace device tests. See the [implementation and manual validation guide](docs/architecture/a06-a08-validation.md) for coverage and remaining limits.
 
+### Modular engine, source registry and database upgrades
+
+The download coordinator delegates transfers to `TransferWorker`, assembly/muxing/integrity checks to `MediaPipeline`, native publication to `ExportCoordinator`, and queue admission to `DownloadScheduler`. Network slots are released before finalization. Media and export each have a separate worker budget, defaulting to one; configure them with `ANIMAN_MEDIA_WORKERS` and `ANIMAN_EXPORT_WORKERS`. A cancelled native worker retains its permit until it actually finishes. Shutdown pauses interrupted transfers and saves their state for restart.
+
+`SourceRegistry` supplies the typed provider and capabilities used by search, details, feeds, catalog browsing and automatic tracking. Unknown or disabled sources no longer silently fall back to another site. Unsupported popular/latest/catalog views are not advertised; the home feed selector excludes extensions without a latest-release capability. Site availability still depends on the source and its protection.
+
+SQLite connections share WAL, a five-second busy timeout, foreign-key enforcement and explicit closure. Numbered migrations are recorded in `schema_migrations` and run under an explicit transaction, including DDL rollback on failure. A database from an unknown future schema is refused. Completed task, progress, automatic-tracking outcome and export metadata are saved atomically. Existing rows are preserved; take a SQLite backup before downgrading or manually editing a database. See the [A03–A05 validation guide](docs/architecture/a03-a05-validation.md).
+
 ### Subtitles and muxing
 
 - JavaScript and HTML subtitle extraction with relative URL resolution.
@@ -176,10 +207,10 @@ Enable subtitles for the episode or batch. Tracks must be available from the sou
 
 ## Windows
 
-1. Download [Animan-v0.1.0-Windows-x64.zip](https://github.com/loeuf237/animan-python/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip).
-2. Extract the archive into a directory such as `C:\Animan`.
+1. Download [Animan-v0.1.0-Windows-x64.zip](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip).
+2. Extract the archive into a directory such as `C:\AnimeLab`.
 3. Run `Animan.exe`.
-4. Animan starts the local server and opens a native Microsoft Edge WebView2 window.
+4. AnimeLab starts the local server and opens a native Microsoft Edge WebView2 window.
 
 ## Linux and macOS
 
@@ -206,7 +237,7 @@ Open `http://localhost:8080`. Use the host setting below to restrict access to t
 
 ## PWA installation
 
-1. Start Animan and open `http://localhost:8080`.
+1. Start AnimeLab and open `http://localhost:8080`.
 2. On Chrome/Edge desktop, use the install icon in the address bar when available.
 3. On Android, add the application to the home screen.
 4. On iOS Safari, use **Share → Add to Home Screen**.
@@ -217,7 +248,7 @@ The application opens in its own window and uses a service worker for static cac
 
 ### Requirements
 
-- Python **3.10 or later**.
+- Python **3.12 or later**.
 - **FFmpeg and ffprobe** for verified subtitle muxing; optional for video downloads with separate subtitle files.
 - **Node.js 20.19+ on the 20.x branch, or 22.12+**, and npm to develop or build the Vue frontend.
 
@@ -231,8 +262,8 @@ ffprobe -version
 ### Installation
 
 ```bash
-git clone https://github.com/loeuf237/animan-python.git
-cd animan-python
+git clone https://github.com/loeuf237/animelab.git
+cd animelab
 python3 -m pip install -r requirements.txt
 ```
 
@@ -281,7 +312,7 @@ Vite serves **http://localhost:5173** and proxies `/api` to port **8080**. Updat
 ## Project structure
 
 ```text
-animan-python/
+animelab/
 ├── .github/workflows/        # CI and release builds
 ├── android/                  # Experimental Android project
 ├── animan/
@@ -303,6 +334,47 @@ animan-python/
 ├── run.py                    # Uvicorn server entry point
 └── README.md
 ```
+
+## Diagnostics, playback resume and extension health
+
+In **Settings → System & Storage**, **Export diagnostics** downloads a JSON report
+with recent structured events, task counts and operation timings. The in-memory
+buffer retains at most 2,000 events and resets when the engine restarts. Export is
+available on the server device (including Android loopback). The report excludes
+raw errors, file paths, video URLs, cookies, proxy credentials and the Android
+loopback token. Structured task/source/domain fields help locate extraction,
+transfer, muxing or export failures; log messages and tracebacks are redacted too.
+
+The Vue player saves position and selected quality, server, subtitle and available
+audio track by **source + series URL + episode + version**. Local playback uses the
+download's original identity, so VF and VOSTFR have separate positions. Playback
+resumes after metadata loads; changing quality keeps the current position. Saves
+are throttled during playback and flushed on pause, close, episode change and page
+exit. Out-of-order requests and an older playback window cannot overwrite a newer
+session. Finishing an episode resets its next start to zero. A failed progress
+request does not prevent video playback. A forced OS kill can lose the last few
+seconds. Audio selection depends on the tracks exposed by HLS or the browser;
+this does not add codec support. The existing watched/downloaded marks are kept.
+
+**Extensions** shows the latest observed health, check time, duration and recipe
+revision. Searches, source browsing, details and **Test** distinguish protection,
+rate limiting, network errors, malformed responses and missing/invalid selectors.
+Opening the list does not probe websites. A changed recipe requires a new test to
+refresh its health. **Configure → Recipe history** retains the last 20 immutable
+revisions; restoring one creates another revision. Unsupported recipe schema
+versions are reported. Invalid selector syntax or an observed incompatibility in
+the current recipe prevents batch queueing until it is corrected or a successful
+test clears the affected operation. This does not guarantee that a site cannot
+change after testing. The hand-authored HTML/JSON contract corpus lives in
+`tests/fixtures/extensions`; it contains no user sessions or captured private data.
+Imported APKs still provide recipes/adapters, not an Android extension runtime.
+
+SQLite migrations 5 and 6 add playback history, recipe revisions and extension
+health without deleting the existing library. The implementation and manual
+validation steps are documented in
+[the A10/A12/A13 validation guide](docs/architecture/a10-a12-a13-validation.md).
+These source changes require a rebuilt package before they are available in an
+already-installed desktop build or Android APK.
 
 ## Regression tests
 
@@ -340,3 +412,7 @@ npm run build
 ## License
 
 This project is intended for personal and educational use. See the repository's license information before redistributing it.
+
+## Continuous integration
+
+[CI](.github/workflows/ci.yml) runs on every branch push and pull request, and can also be started manually. It runs the Python test suite on Python 3.12 and 3.13 with FFmpeg and LLVM, and runs the frontend tests, TypeScript checks and Vite production build on Node 22. A separate job compiles the Android manifest and launcher resources without signing an APK or rebuilding native libraries. Tests use temporary storage. Jobs have read-only repository access and require no signing secrets. Test reports and the built interface are retained for seven days. Android and desktop release workflows remain separate.

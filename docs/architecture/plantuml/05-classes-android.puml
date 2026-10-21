@@ -1,6 +1,6 @@
 @startuml
 !include theme.iuml
-title Animan — classes et objets de l'hôte Android
+title AnimeLab — classes et objets de l'hôte Android
 ' @source android/app/src/main/java/com/animan/app/MainActivity.kt:MainActivity
 ' @source android/app/src/main/java/com/animan/app/EngineHost.kt:EngineHost
 ' @source android/app/src/main/java/com/animan/app/DownloadService.kt:DownloadService

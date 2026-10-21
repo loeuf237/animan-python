@@ -69,46 +69,11 @@ requirements:
   build:
     - rust
 ''')
-    # The old lxml wheels depend on 2018 XML libraries with 4 KB ELF alignment.
-    # Rebuild the entire chain rather than allowing it through the release gate.
-    xml_versions = {"chaquopy-libxml2": "2.15.4", "chaquopy-libxslt": "1.1.45"}
-    for package, version in xml_versions.items():
-        directory = pypi / "packages" / package
-        name = package.removeprefix("chaquopy-")
-        series = ".".join(version.split(".")[:2])
-        host = '\nrequirements:\n  host:\n    - chaquopy-libxml2 2.15.4\n' if name == "libxslt" else ""
-        (directory / "meta.yaml").write_text(f'''package:
-  name: {package}
-  version: "{version}"
-build:
-  number: 0
-source:
-  url: https://download.gnome.org/sources/{name}/{series}/{name}-{version}.tar.xz
-{host}''')
-        flags = "--without-iconv --without-zlib --without-lzma" if name == "libxml2" else "--without-crypto"
-        (directory / "build.sh").write_text(f'''#!/bin/bash
-set -eu
-./configure --host="$HOST" --prefix="$PREFIX" --without-python {flags}
-make -j "$CPU_COUNT"
-make install
-mkdir -p "$PREFIX/licenses/{name}"
-cp Copyright* COPYING* "$PREFIX/licenses/{name}/" 2>/dev/null || true
-rm -rf "$PREFIX/bin" "$PREFIX/share"
-rm -f "$PREFIX"/lib/*.a "$PREFIX"/lib/*.la "$PREFIX"/lib/*.sh
-''')
-    (pypi / "packages/lxml/meta.yaml").write_text('''package:
-  name: lxml
-  version: "6.1.3"
-requirements:
-  host:
-    - chaquopy-libxml2 2.15.4
-    - chaquopy-libxslt 1.1.45
-''')
-    for package in ("cffi", "pydantic-core", "chaquopy-libxml2", "chaquopy-libxslt", "lxml"):
+    for package in ("cffi", "pydantic-core"):
         run(sys.executable, "build-wheel.py", "--python", "3.13", "--abi", "arm64-v8a", package, cwd=pypi)
     output = root / "android/wheels"
     output.mkdir(parents=True, exist_ok=True)
-    for package in ("cffi", "pydantic-core", "chaquopy-libxml2", "chaquopy-libxslt", "lxml"):
+    for package in ("cffi", "pydantic-core"):
         wheels = list((pypi / "dist" / package).glob("*arm64_v8a.whl"))
         if len(wheels) != 1:
             raise RuntimeError(f"Expected one ARM64 CPython 3.13 wheel for {package}: {wheels}")

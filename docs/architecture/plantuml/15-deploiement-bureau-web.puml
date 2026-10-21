@@ -3,7 +3,7 @@
 ' @source desktop.py:start_server
 ' @source run.py:lifespan
 ' @source animan/services/tmdb_service.py:TmdbService.enrich_anime_detail
-title Animan — déploiements actuels bureau et navigateur / PWA
+title AnimeLab — déploiements actuels bureau et navigateur / PWA
 left to right direction
 node "Poste utilisateur — Windows / Linux / macOS" as Desktop {
   node "Processus de l'application Python empaquetée" {

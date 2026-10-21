@@ -3,7 +3,7 @@
 ' @source animan/routers/anime.py:search_api
 ' @source animan/services/browser_verification.py:BrowserVerificationService.complete
 ' @source animan/routers/network.py:complete
-title Animan — recherche multisource et vérification assistée
+title AnimeLab — recherche multisource et vérification assistée
 autonumber
 actor Utilisateur as U
 boundary "Vue / recherche globale" as UI

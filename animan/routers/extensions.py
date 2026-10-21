@@ -112,3 +112,20 @@ async def diagnose_extension_api(ext_id: int):
         return await extension_service.diagnose_extension(ext_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get('/api/extensions/{ext_id}/recipe-history')
+async def extension_recipe_history(ext_id: int):
+    try: return extension_service.recipe_history(ext_id)
+    except ValueError as exc: raise HTTPException(404,str(exc)) from exc
+
+
+from pydantic import BaseModel,Field
+class RestoreRecipeRequest(BaseModel):
+    revision: int = Field(ge=1)
+
+
+@router.post('/api/extensions/{ext_id}/recipe-restore')
+async def restore_extension_recipe(ext_id: int, body: RestoreRecipeRequest):
+    try: return await extension_service.restore_recipe(ext_id,body.revision)
+    except ValueError as exc: raise HTTPException(400,str(exc)) from exc

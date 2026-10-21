@@ -3,7 +3,7 @@
 ' @source animan/services/extension_service.py:ExtensionService.import_repository
 ' @source animan/services/extension_service.py:ExtensionService.toggle_extension
 ' @source animan/services/aniyomi_dex_parser.py:AniyomiDexParser.parse_apk
-title Animan — import d'un dépôt et activation d'une source
+title AnimeLab — import d'un dépôt et activation d'une source
 autonumber
 actor Utilisateur as U
 boundary "ExtensionsView" as UI
@@ -53,4 +53,15 @@ SQL sqlite3 explicite pour les extensions ; les autres
 entités de bibliothèque passent par SQLAlchemy.
 Une recette modifiée doit invalider le conteneur en mémoire.
 end note
+opt observation, historique et restauration
+  Runtime -> DB : santé par opération, durée, cause et révision
+  UI -> API : GET /{id}/recipe-history
+  API -> Ext : recipe_history(id)
+  Ext -> DB : 20 révisions au maximum, métadonnées
+  Ext --> UI : historique sans contenu HTTP ni cookies
+  UI -> API : POST /{id}/recipe-restore (revision)
+  API -> Ext : restore_recipe(id, revision)
+  Ext -> DB : nouvelle révision, historique préservé
+end
+' @source animan/services/extension_service.py:ExtensionService.restore_recipe
 @enduml

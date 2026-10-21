@@ -9,9 +9,14 @@ from typing import Dict, List, Optional, Any
 logger = logging.getLogger("animan.dex_parser")
 
 
+class RecipeVersionError(ValueError):
+    pass
+
+
 @dataclass
 class SourceRecipe:
     """Recette de scraping extraite depuis le bytecode Dalvik d'une extension Aniyomi."""
+    schema_version: int = 1
     name: str = ""
     pkg: str = ""
     base_url: str = ""
@@ -58,6 +63,8 @@ class SourceRecipe:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SourceRecipe":
+        if not isinstance(data,dict) or type(data.get('schema_version',1)) is not int or data.get('schema_version',1) != 1:
+            raise RecipeVersionError('Unsupported recipe schema version')
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 

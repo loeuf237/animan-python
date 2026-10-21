@@ -1,6 +1,6 @@
 @startuml
 !include theme.iuml
-title Animan — sources, recettes importées et extracteurs
+title AnimeLab — sources, recettes importées et extracteurs
 ' @source animan/services/source_catalogue.py:SourceCatalogueService
 ' @source animan/services/scraping_service.py:ScrapingService
 ' @source animan/services/voiranime_service.py:VoirAnimeScrapingService
@@ -123,8 +123,52 @@ DEX est analysé pour extraire une recette ; les logiques
 personnalisées nécessitent un adaptateur Python compatible.
 end note
 note bottom of SourceCatalogueService
-Les capacités sont calculées par source ; aucun
-héritage commun aux trois services natifs aujourd'hui.
+Le registre partage un Protocol structurel,
+sans imposer un héritage aux services existants.
 Les requêtes de sources utilisent SourceHTTPService.
 end note
+class SourceRegistry {
+  +all(): List[RegisteredSource]
+  +get(source_id): RegisteredSource
+  +detect(url, fallback): str
+}
+interface SourceProvider <<Protocol>> {
+  +search_anime(query)
+  +get_anime_detail(url)
+  +get_latest_releases()
+}
+class SourceCapabilities <<dataclass>> {
+  search / detail / latest: bool
+  popular / catalogue / featured: bool
+  multi_tags: bool
+}
+class RegisteredSource {
+  id: str
+  service: SourceProvider
+  capabilities: SourceCapabilities
+  +require(operation)
+}
+SourceRegistry ..> RegisteredSource : sélection activée
+RegisteredSource --> SourceProvider : délègue
+RegisteredSource *-- SourceCapabilities
+SourceCatalogueService ..> SourceRegistry
+' @source animan/services/source_registry.py:SourceRegistry
+' @source animan/services/source_registry.py:RegisteredSource
+' @source animan/services/source_registry.py:SourceProvider
+' @source animan/services/source_registry.py:SourceCapabilities
+class ExtensionObservability {
+  +record(pkg, operation, ...)
+  +health(conn, ext_id)
+  +history(conn, ext_id)
+}
+class extension_health <<table>>
+class extension_recipe_versions <<table>>
+ExtensionService ..> ExtensionObservability
+ExtensionObservability ..> extension_health : dernier état par opération
+ExtensionObservability ..> extension_recipe_versions : 20 révisions conservées
+note right of extension_recipe_versions
+Schéma de recette v1 et empreinte SHA-256.
+Restaurer crée une nouvelle révision.
+end note
+' @source animan/services/extension_observability.py:ExtensionObservability
 @enduml

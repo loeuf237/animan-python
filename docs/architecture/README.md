@@ -1,6 +1,6 @@
-# Architecture et dossier UML d’Animan
+# Architecture et dossier UML d’AnimeLab
 
-Ce dossier décrit le code présent dans le dépôt au **15 octobre 2026**. Il contient
+Ce dossier décrit le code présent dans le dépôt au **20 octobre 2026**. Il contient
 **17 diagrammes** : 5 vues de classes, 2 de cas d’utilisation, 7 de séquence,
 2 de déploiement et 1 proposition d’architecture cible. Les modèles sont des vues
 de conception sélectionnées pour expliquer le fonctionnement ; ils ne reproduisent
@@ -15,14 +15,16 @@ représentent l’implémentation observée. Le diagramme 17, en vert, représen
 évolution proposée. Les scénarios décrivent des branches du code, sans constituer
 une preuve de test de toutes les sources ou de tous les appareils.
 
-**A01 et A02 sont maintenant implémentés dans le code source.** Les vues ci-dessous
-incluent le suivi par épisode/version et l’export Android indépendant. La séparation
-en nouveaux services du diagramme 17 reste proposée. Ces changements ne modifient
+**A01 à A08, A10, A12 et A13 sont maintenant implémentés dans le code source.** Les vues ci-dessous
+incluent le suivi par épisode/version, l’export Android indépendant, les étapes
+de téléchargement séparées, le registre typé des sources et les migrations SQLite.
+Le diagramme 17 distingue ces éléments des ports et événements encore proposés.
+Ces changements ne modifient
 pas l’APK bêta déjà publié et nécessitent une nouvelle compilation.
 
 ## 1. Périmètre et lecture
 
-Animan comprend une interface Vue 3/TypeScript avec Pinia, une API FastAPI, un moteur
+AnimeLab comprend une interface Vue 3/TypeScript avec Pinia, une API FastAPI, un moteur
 Python de catalogue/extraction/téléchargement, une bibliothèque SQLite et des
 adaptations de plateforme. Le même moteur sert le bureau, le navigateur/PWA et
 l’application Android autonome. Les anciennes pages Jinja et leurs fichiers
@@ -32,7 +34,7 @@ Trois familles de sources sont à distinguer : les services intégrés French-Ma
 VoirAnime et AnimePahe ; les conteneurs d’extensions fondés sur une recette ; les
 adaptateurs Python spécifiques. Les extracteurs de lecteurs vidéo forment encore
 un autre registre. **Importer un APK Aniyomi ne signifie pas exécuter son code
-Kotlin/DEX** : Animan en déduit une recette, complétée par des adaptateurs connus.
+Kotlin/DEX** : AnimeLab en déduit une recette, complétée par des adaptateurs connus.
 
 Le moteur garde en mémoire sa file de tâches et ses sessions HTTP. SQLite conserve
 les tâches, favoris, progressions et paramètres ; certains services utilisent
@@ -117,7 +119,8 @@ actions réseau et toutes les fonctions Android ont des préconditions spécifiq
 - **Exceptions :** URL expirée, challenge, fichier absent ou codec non pris en
   charge ; afficher l’erreur et le parcours de vérification approprié.
 - **Résultat :** lecture locale ou distante. Le modèle persiste « vu/téléchargé » ;
-  il ne contient pas de position de lecture en secondes. Séquence 14.
+  la position en secondes et les pistes sont conservées séparément dans `PlaybackProgress`,
+  par source/série/épisode/version. Sauvegarde bornée et reprise après métadonnées. Séquence 14.
 
 ### UC05 — Télécharger un épisode ou un lot
 
@@ -262,7 +265,7 @@ actions réseau et toutes les fonctions Android ont des préconditions spécifiq
   et les sous-titres non fusionnés ; contrôler la taille ; publier ; retenir les URI.
 - **Exceptions :** permission perdue, pause/annulation, espace insuffisant ; nettoyer
   la copie incomplète et garder la copie privée. Certains fournisseurs imposent
-  `Movies/Animan` pour les sous-titres annexes.
+  `Movies/AnimeLab` pour les sous-titres annexes.
 - **Résultat :** `COMPLETED` pour la vidéo privée vérifiée ; export distinct
   `PENDING`, `EXPORTING`, `EXPORTED` ou `EXPORT_FAILED`, avec URI, destination,
   tentatives, date et diagnostic persistés. Une interruption revient à `PENDING`.
@@ -324,14 +327,21 @@ actions réseau et toutes les fonctions Android ont des préconditions spécifiq
 - **Sources importées.** Une recette extraite d’un APK n’est pas l’équivalent de son
   programme d’origine. Les capacités et la compatibilité doivent être explicites.
 - **Progression de lecture.** Le modèle conserve des indicateurs vu/téléchargé,
-  sans position temporelle persistée.
+  avec position temporelle persistée dans `PlaybackProgress`. Les pistes audio
+  dépendent de ce que HLS ou le navigateur expose ; aucun codec supplémentaire n’est ajouté.
 - **HTTP métier et métadonnées.** Les requêtes sources/médias passent par le transport
   partagé ; `TmdbService` crée encore son propre client HTTPX.
 
 ## 5. Axes d’amélioration priorisés
 
-Les changements A01, A02, A06, A07 et A08 sont implémentés dans le code source ;
-A03 à A05 et A09 à A14 restent des propositions.
+Les changements A01 à A08 et A10 à A13 sont implémentés dans le code source ;
+A09 et A14 restent des propositions.
+Le [bilan A11](a11-validation.md) décrit la réduction mesurée de l'APK,
+les contrôles natifs et la validation séparée du stockage installé.
+Le [bilan A10/A12/A13](a10-a12-a13-validation.md) décrit les diagnostics,
+la reprise de lecture et les recettes observables et versionnées.
+Le [bilan A03–A05](a03-a05-validation.md) décrit l’extraction progressive,
+les capacités communes et les migrations transactionnelles.
 Le [bilan et la procédure de validation A06–A08](a06-a08-validation.md) décrivent
 les contrats ajoutés et les limites de validation sur appareil.
 Les tests de contrat utilisent des fournisseurs simulés et ne
@@ -343,24 +353,22 @@ L = évolution transversale avec migration/validation. Ce ne sont pas des délai
 | --- | --- | --- | --- |
 | A01 | Implémenté / P0 / M | Registre commun, identité persistante par source/URL/épisode/version et options de suivi en bibliothèque | Contrats simulés pour les 3 sources et une extension ; VF/VOSTFR séparées ; découverte conservée après échec de mise en file |
 | A02 | Implémenté / P0 / M | État d’export, URI, tentatives et erreur séparés ; interface de réexport local | Refus, interruption, copie concurrente, migration et réexport sans réseau couverts ; contrôle Android natif à revalider sur appareil |
-| A03 | P1 / L | Extraire progressivement TransferWorker, MediaPipeline, ExportCoordinator et Scheduler de DownloadManagerService ; formaliser les transitions | Même résultat sur pause, annulation, crash, retries et finalisation ; budgets distincts réseau/média/export |
-| A04 | P1 / M | Introduire un `SourceProvider` typé et un registre de capacités commun aux sources intégrées/importées | Recherche, fiche, flux et watchdog utilisent la même sélection ; tests de contrat par source ; capacités non inventées |
-| A05 | P1 / M | Centraliser l’accès SQLite et introduire des migrations versionnées ; transactions explicites pour tâche/progression/export | Mise à niveau depuis une ancienne base sans perte ; migrations rejouables et rollback testé sur copie |
+| A03 | Implémenté / P1 / L | TransferWorker, MediaPipeline, ExportCoordinator et DownloadScheduler composés par la façade ; transitions contrôlées ; budgets distincts | Tests de concurrence réseau/média/export, annulation conservant le permis natif et reprise après arrêt ; API historique conservée |
+| A04 | Implémenté / P1 / M | SourceProvider structurel, RegisteredSource et SourceRegistry ; capacités calculées selon recettes et adaptateurs | Recherche, fiche, flux, catalogue et watchdog partagent le registre ; source inconnue/désactivée refusée ; aucune popularité inventée |
+| A05 | Implémenté / P1 / M | Connexions communes, migrations 1–6 avec journal et BEGIN IMMEDIATE ; tâche/progression/export/suivi dans la même transaction | Copie réelle conservée, migration répétée, échec DDL+données annulé, version future refusée et rollback des états liés testés |
 | A06 | Implémenté / P1 / M | Contrats Pydantic et TypeScript aux frontières API ; erreurs structurées, traduites et versionnées ; schéma OpenAPI | Entrées invalides refusées avant mise en file ; anciens champs conservés ; JSON variable des recettes explicitement borné au type JSON |
 | A07 | Implémenté / P1 / M | Interface de vérification avec mécanismes Chromium installé et WebView ; capacités par plateforme, client et proxy | Matrice bureau/Android/client distant/proxy testée ; changement de route détecté ; recherches actives conservées ; capture non promise pour un onglet manuel |
 | A08 | Implémenté / P1 / M | Tests à fautes et protections de reprise/publication : URL renouvelée, cache HLS altéré, arrêt durant assemblage/mux/export | Cache vérifié par empreinte ; assemblage temporaire ; destination concurrente préservée ; finalisation et export sans duplication dans les scénarios couverts |
 | A09 | P1 si accès réseau / L | Définir le mode serveur partagé : authentification, autorisation des médias/actions, périmètre des bibliothèques et sessions | Un utilisateur ne consulte pas les cookies, téléchargements ou médias d’un autre ; exposition explicite et testée |
-| A10 | P2 / M | Ajouter logs structurés avec taskId/source/domain, durées par phase et diagnostics exportables expurgés | Identifier extraction/transfert/mux/export ; ne journaliser ni cookies, ni secret loopback, ni identifiants proxy |
-| A11 | P2 / M | Mesurer et réduire la taille Android : symboles natifs, R8, doublons et dépendances inutilisées | APK et stockage installé mesurés séparément ; mêmes tests moteur/JNI/SAF ; voir étude dédiée |
-| A12 | P2 / M | Ajouter une position de lecture et un modèle de piste/version explicite, avec sauvegarde bornée et migration | Reprise au bon instant pour la bonne version ; changement de qualité sans perdre le suivi |
-| A13 | P2 / M | Rendre la santé des extensions observable et leurs recettes versionnées ; conserver un corpus HTML/JSON de référence | Différencier incompatibilité de sélecteur, protection et panne ; détecter une dérive avant une série de téléchargements |
+| A10 | Implémenté / P2 / M | Événements structurés bornés, transitions/durées, journaux expurgés et export JSON local dans les paramètres | Liste blanche des champs exportés ; cookies, secrets, URL signées et identifiants proxy exclus ; tests de confidentialité |
+| A11 | Implémenté / P2 / M | Symboles natifs retirés des copies générées, R8 et ressources réduits, assets dédupliqués, XML natif inutilisé supprimé | APK testé de 77,76 à 61,31 Mo (−21,16 %) ; stockage au premier affichage de 137,52 à 97,37 Mo (−29,20 %) ; moteur/JNI/HLS/sous-titres/export validés sur Android 10 ARM64 ; APK normal signé de 61,36 Mo |
+| A12 | Implémenté / P2 / M | Table de positions par source/série/épisode/version, session et séquence ; choix qualité/serveur/pistes ; lecteur Vue intégré | Reprise après métadonnées, local/distant unifiés, VF/VOSTFR séparées, écriture bornée et anciennes fenêtres exclues |
+| A13 | Implémenté / P2 / M | Santé par opération, codes distincts et durées, schéma de recette v1, 20 révisions/restauration et corpus HTML/JSON | Dérive de sélecteur distinguée de protection/réseau ; précontrôle des lots ; observations associées à une révision |
 | A14 | P2 / M | Réduire progressivement le double front Jinja/Vue et clarifier les préférences locales/moteur | Une source de vérité pour les libellés et parcours ; suppression des ressources seulement après audit des routes |
 
-**Prochaine étape recommandée :** valider A06/A07/A08 sur appareil Android, puis
-A03/A04/A05 par extractions successives ; A10 pour le diagnostic et A11 pour la
-distribution. A09 devient préalable à un usage
-multiutilisateur exposé. Les améliorations de lecture et d’extensions peuvent
-ensuite s’appuyer sur ces contrats. La [cible proposée](svg/17-cible-amelioree.svg)
+**Prochaine étape recommandée :** valider A01–A08 et A10/A12/A13 sur appareil Android ;
+poursuivre le découplage des étapes vis-à-vis de la façade et revalider la distribution Android à chaque évolution du moteur.
+A09 devient préalable à un usage multiutilisateur exposé. La [cible proposée](svg/17-cible-amelioree.svg)
 conserve Python et décrit un monolithe modulaire.
 
 Voir aussi l’[étude de taille APK](../android-apk-size-study.md), la

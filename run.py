@@ -4,6 +4,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import os
+from animan.diagnostics import install_logging
+install_logging()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
@@ -32,15 +39,11 @@ from animan.routers import (
     i18n_router,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
 logger = logging.getLogger("animan")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Animan Python v%s...", __version__)
+    logger.info("Starting AnimeLab Python v%s...", __version__)
     source_http.start()
     # 1. Initialize SQLite database
     init_db()
@@ -73,9 +76,10 @@ async def lifespan(app: FastAPI):
     logger.info("Application ready at http://localhost:%d and http://%s:%d (LAN / Mobile)", settings.PORT, lan_ip, settings.PORT)
     yield
 
-    logger.info("Stopping Animan...")
+    logger.info("Stopping AnimeLab...")
     source_http.rotation_callback = None
     watchdog_service.stop()
+    await download_manager.shutdown()
     for t in bg_tasks:
         if not t.done():
             t.cancel()
@@ -85,7 +89,7 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(source_http.close)
 
 app = FastAPI(
-    title="Animan",
+    title="AnimeLab",
     description="Anime Downloader - High performance anime streaming & downloads",
     version=__version__,
     lifespan=lifespan
@@ -193,13 +197,17 @@ app.mount("/css", StaticFiles(directory=str(static_dir / "css")), name="css")
 app.mount("/js", StaticFiles(directory=str(static_dir / "js")), name="js")
 app.mount("/img", StaticFiles(directory=str(static_dir / "img")), name="img")
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def get_favicon():
+    return FileResponse(static_dir / "favicon.ico", media_type="image/x-icon")
+
 # Points d'accès PWA (Progressive Web App)
 @app.get("/manifest.json", include_in_schema=False)
 async def get_manifest():
     return FileResponse(
         static_dir / "manifest.json",
         media_type="application/manifest+json",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "no-cache"},
     )
 
 @app.get("/sw.js", include_in_schema=False)
@@ -222,6 +230,10 @@ async def get_offline_page():
     )
 
 # Enregistrement des routeurs
+from animan.routers.playback import router as playback_router
+app.include_router(playback_router)
+from animan.routers.diagnostics import router as diagnostics_router
+app.include_router(diagnostics_router)
 from animan.api_errors import ErrorContractMiddleware, install_error_handlers
 install_error_handlers(app)
 from animan.api_contracts import install_contract_schema
@@ -270,7 +282,7 @@ def start_embedded_server(host: str = "0.0.0.0", port: int = 8080, data_dir: str
         except Exception:
             pass
     import uvicorn
-    logger.info("Démarrage du serveur embarqué Animan sur %s:%d...", host, port)
+    logger.info("Démarrage du serveur embarqué AnimeLab sur %s:%d...", host, port)
     config = uvicorn.Config(
         app,
         host=host,
@@ -278,6 +290,7 @@ def start_embedded_server(host: str = "0.0.0.0", port: int = 8080, data_dir: str
         log_level="info",
         loop="asyncio",
         timeout_keep_alive=30,
+        timeout_graceful_shutdown=10,
     )
     _embedded_server = uvicorn.Server(config)
     _embedded_server.run()
@@ -300,4 +313,5 @@ if __name__ == "__main__":
         reload=reload_enabled,
         reload_dirs=["animan", "."] if reload_enabled else None,
         timeout_keep_alive=30,
+        timeout_graceful_shutdown=10,
     )

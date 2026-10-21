@@ -4,7 +4,9 @@
 ' @source animan/routers/media.py:stream_video
 ' @source animan/routers/media.py:hls_proxy_playlist
 ' @source animan/routers/library.py:mark_watched
-title Animan — lecture locale ou distante et progression
+' @source animan/services/playback_service.py:PlaybackService.open
+' @source animan/services/playback_service.py:PlaybackService.save
+title AnimeLab — lecture locale ou distante et progression
 autonumber
 actor Utilisateur as U
 boundary "Vue / store player\nVideoPlayerModal" as UI
@@ -15,7 +17,12 @@ participant "Lecteur / CDN source" as CDN
 database "Fichier local vérifié" as Local
 control LibraryService as Library
 database SQLite as DB
+control PlaybackService as Progress
 U -> UI : lire l'épisode et sa version
+UI -> API : POST /api/playback/session\nidentité source/série/épisode/version ou taskId
+API -> Progress : open(identity)
+Progress -> DB : session active + position + choix des pistes
+Progress --> UI : sessionId + position + sélection
 alt une tâche locale correspond à cet épisode / version
   UI -> API : GET /api/media/stream/{task_id}\nRange si demandé par le lecteur
   API -> Local : accès contrôlé au fichier
@@ -50,9 +57,17 @@ opt marquer l'épisode comme vu
   API -> Library : mark_as_watched(animeUrl, épisode, version, ...)
   Library -> DB : WatchProgress
 end
-note over UI,Library
-La progression persistée indique vu / téléchargé.
-Ce diagramme n'affirme pas la persistance d'une position
-de lecture en secondes : aucun champ de ce type dans WatchProgress.
+UI -> UI : métadonnées disponibles : appliquer position et pistes
+loop au plus toutes les 5 secondes ; pause/fermeture/changement = final
+  UI -> API : POST /api/playback/checkpoint\nsessionId, sequence, secondes et sélection
+  API -> Progress : save(checkpoint)
+  Progress -> DB : transaction : session courante et séquence croissante
+  Progress --> UI : accepted / superseded / throttled
+end
+note over UI,Progress
+Position propre à la source, série, épisode et version.
+Une qualité ou URL signée différente ne crée pas une autre identité.
+Une ancienne fenêtre ne remplace pas la session la plus récente.
+WatchProgress conserve séparément les états vu / téléchargé.
 end note
 @enduml

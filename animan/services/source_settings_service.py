@@ -1,7 +1,6 @@
-from contextlib import contextmanager
+from animan.database import init_db, sqlite_connection
 import json
 import logging
-import sqlite3
 from typing import Dict, Any, Optional, List
 from animan.config import settings
 
@@ -15,31 +14,11 @@ class SourceSettingsService:
         self.db_path = db_path or settings.DATABASE_PATH
         self._init_db()
 
-    @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        return sqlite_connection(self.db_path)
 
     def _init_db(self):
-        """Crée la table source_settings si elle n'existe pas encore."""
-        try:
-            with self._get_conn() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS source_settings (
-                        source_id TEXT PRIMARY KEY,
-                        settings_json TEXT NOT NULL,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                conn.commit()
-        except Exception as e:
-            logger.error("[source_settings] Erreur initialisation table: %s", e)
+        init_db(self.db_path)
 
     def _get_default_settings(self, source_id: str) -> Dict[str, Any]:
         """Retourne les paramètres par défaut pour une source donnée."""

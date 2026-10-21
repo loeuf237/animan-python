@@ -32,6 +32,8 @@ else:
     DEFAULT_CACHE_DIR = HOME_DIR / ".animan" / "cache"
 
 class Settings:
+    MAX_MEDIA_WORKERS: int = max(1, int(os.getenv("ANIMAN_MEDIA_WORKERS", "1")))
+    MAX_EXPORT_WORKERS: int = max(1, int(os.getenv("ANIMAN_EXPORT_WORKERS", "1")))
     PORT: int = int(os.getenv("ANIMAN_PORT", "8080"))
     HOST: str = os.getenv("ANIMAN_HOST", "127.0.0.1")
     SSL_VERIFY: bool = os.getenv("ANIMAN_SSL_VERIFY", "true").lower() in ("1", "true", "yes")

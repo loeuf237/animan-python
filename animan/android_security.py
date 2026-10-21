@@ -7,6 +7,8 @@ class AndroidSessionMiddleware:
     def __init__(self, app, token):
         if len(token) < 32:
             raise ValueError("Android session token is too short")
+        from animan.diagnostics import remember_secret
+        remember_secret(token)
         self.app, self.token = app, token
 
     async def __call__(self, scope, receive, send):

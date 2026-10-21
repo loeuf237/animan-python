@@ -19,7 +19,7 @@ def test_html_pages(client):
     # Home
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "Animan" in resp.text
+    assert "AnimeLab" in resp.text
 
     # Downloads
     resp = client.get("/downloads")

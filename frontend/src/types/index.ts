@@ -176,6 +176,9 @@ export interface HistoryItem {
 }
 
 export interface ExtensionSource {
+  health?: import('./api').ExtensionHealth[];
+  recipe_revision?: number;
+  supportsLatest?: boolean;
   recipe_json?: string | null;
   id: number | string;
   pkg: string;

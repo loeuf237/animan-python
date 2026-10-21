@@ -90,3 +90,6 @@ verification_profiles/
 # Android release signing identity and generated dependencies
 android/keystore/
 android/wheels/
+
+# Local IDE workspace
+.idea/

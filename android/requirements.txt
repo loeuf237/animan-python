@@ -13,7 +13,5 @@ curl_cffi==0.16.3
 websockets==15.0.1
 socksio==1.0.0
 beautifulsoup4==4.15.0
-lxml==6.1.3
-chaquopy-libxml2==2.15.4
-chaquopy-libxslt==1.1.45
+# Source adapters use BeautifulSoup's stdlib html.parser; no native XML stack.
 yt-dlp==2026.3.17

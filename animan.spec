@@ -10,7 +10,7 @@ sys.path.insert(0, str(project))
 from animan import __version__
 frontend = project / 'frontend' / 'dist'
 if not (frontend / 'index.html').is_file():
-    raise RuntimeError('Build the Vue frontend before packaging Animan')
+    raise RuntimeError('Build the Vue frontend before packaging AnimeLab')
 datas = [(str(project / 'animan' / 'templates'), 'animan/templates'),
          (str(project / 'animan' / 'static'), 'animan/static'),
          (str(frontend), 'frontend/dist'),
@@ -39,11 +39,12 @@ a = Analysis([str(project / 'desktop.py')], pathex=[str(project)], binaries=bina
     excludes=['pytest', 'tkinter', 'matplotlib', 'numpy', 'pandas', 'scipy',
               'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'cefpython3'], noarchive=False)
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Animan',
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='AnimeLab',
+    icon=str(project / 'docs/branding/animelab.ico') if sys.platform == 'win32' else None,
     console=sys.platform not in ('win32', 'darwin'), upx=False,
     target_arch=None, codesign_identity=None, entitlements_file=None)
-coll = COLLECT(exe, a.binaries, a.datas, name='Animan', strip=False, upx=False)
+coll = COLLECT(exe, a.binaries, a.datas, name='AnimeLab', strip=False, upx=False)
 if sys.platform == 'darwin':
-    app = BUNDLE(coll, name='Animan.app', bundle_identifier='com.animan.desktop',
+    app = BUNDLE(coll, name='AnimeLab.app', icon=str(project / 'docs/branding/animelab.icns'), bundle_identifier='com.animan.desktop',
         info_plist={'CFBundleShortVersionString':__version__, 'CFBundleVersion':__version__,
                     'NSHighResolutionCapable':True})

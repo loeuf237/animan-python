@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Interface tests and build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: animelab-frontend
+          path: frontend/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  python:
+    name: Python ${{ matrix.python }} tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13']
+    env:
+      ANIMAN_STARTUP_REFRESH: 'false'
+      ANIMAN_HOST: '127.0.0.1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install media and binary inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg llvm
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Test backend and packaging tools with isolated storage
+        env:
+          ANIMAN_DB_PATH: ${{ runner.temp }}/animelab-tests/library.sqlite3
+          ANIMAN_DOWNLOAD_DIR: ${{ runner.temp }}/animelab-tests/downloads
+          ANIMAN_CACHE_DIR: ${{ runner.temp }}/animelab-tests/cache
+        run: python -m pytest tests -q --junitxml=test-results/python.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: python-${{ matrix.python }}-results
+          path: test-results/python.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  android-resources:
+    name: Android manifest and launcher resources
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compile Android resources without signing or building native wheels
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:processDebugResources --no-daemon --max-workers=2

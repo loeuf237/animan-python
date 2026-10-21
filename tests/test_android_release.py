@@ -1,6 +1,8 @@
 """Regression for native libraries which align correctly but cannot load."""
 import struct
 import zipfile
+import json
+import hashlib
 
 import pytest
 from scripts.android_release import inspect_apk
@@ -39,3 +41,14 @@ def test_accepts_valid_load_ending_mid_page(tmp_path):
 def test_rejects_old_page_alignment(tmp_path):
     with pytest.raises(ValueError, match='not 16 KB aligned'):
         inspect_apk(apk_fixture(tmp_path, mapped_end=0x8000, alignment=4096))
+
+
+def test_rejects_archive_changed_after_chaquopy_hashing(tmp_path):
+    apk = apk_fixture(tmp_path, mapped_end=0x8000)
+    with zipfile.ZipFile(apk, "a") as archive:
+        archive.writestr("assets/chaquopy/requirements-common.imy", b"optimized")
+        archive.writestr("assets/chaquopy/build.json", json.dumps({
+            "assets": {"requirements-common.imy": hashlib.sha1(b"original").hexdigest()}
+        }))
+    with pytest.raises(ValueError, match="asset hash mismatch"):
+        inspect_apk(apk)

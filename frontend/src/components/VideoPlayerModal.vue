@@ -35,6 +35,12 @@
             </select>
           </div>
 
+          <div v-if="playerStore.audioTracks.length > 1" class="select-group">
+            <label>{{ tx("Audio :") }}</label>
+            <select class="header-select" :value="playerStore.selectedAudio || ''" @change="onAudioChange">
+              <option v-for="track in playerStore.audioTracks" :key="playbackTrackKey(track)" :value="playbackTrackKey(track)">{{ track.label || track.srclang }}</option>
+            </select>
+          </div>
           <!-- Server Selector -->
           <div v-if="playerStore.availableServers.length > 1" class="select-group">
             <label>{{ tx("Serveur :") }}</label>
@@ -79,6 +85,8 @@
           crossorigin="anonymous"
           @timeupdate="onTimeUpdate"
           @loadedmetadata="onMetadataLoaded"
+          @pause="checkpoint"
+          @ended="onEnded"
           @error="onMediaError"
         >
           <track
@@ -111,6 +119,7 @@
         </div>
       </div>
 
+      <p v-if="playerStore.progressNotice" role="status" class="playback-notice">{{ tx(playerStore.progressNotice) }}</p>
       <!-- Player Footer (Episode Navigation) -->
       <div class="player-footer">
         <button
@@ -136,7 +145,7 @@
 import { tx } from '@/utils/locale';
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
 import Hls from 'hls.js';
-import { usePlayerStore } from '@/stores/player';
+import { usePlayerStore, playbackTrackKey } from '@/stores/player';
 import { useLibraryStore } from '@/stores/library';
 
 const playerStore = usePlayerStore();
@@ -146,6 +155,9 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 let hlsInstance: Hls | null = null;
 let attachedVideo: HTMLVideoElement | null = null;
 let markedWatched = false;
+let attachedEpoch=-1;
+let attachedUrl: string | null=null;
+function ownsMedia(){return !!attachedVideo && attachedVideo===videoRef.value && attachedEpoch===playerStore.mediaEpoch && attachedUrl===playerStore.videoUrl;}
 
 const hasQualities = computed(() => {
   return Object.keys(playerStore.availableQualities || {}).length > 1;
@@ -177,11 +189,67 @@ function onSubtitleChange(e: Event) {
   syncSubtitleTracks();
 }
 
+type NativeAudioTrack = {language: string; label: string; enabled: boolean};
+function nativeAudio(): NativeAudioTrack[] {
+  const tracks=(videoRef.value as (HTMLVideoElement & {audioTracks?: ArrayLike<NativeAudioTrack>}) | null)?.audioTracks;
+  return tracks ? Array.from(tracks) : [];
+}
+function syncAudio() {
+  if (hlsInstance?.audioTracks.length) {
+    const index=hlsInstance.audioTracks.findIndex(track=>playbackTrackKey({kind:'audio',srclang:track.lang || '',label:track.name})===playerStore.selectedAudio);
+    if (index>=0) hlsInstance.audioTrack=index;
+    return;
+  }
+  const tracks=nativeAudio();
+  if (!tracks.some(track=>playbackTrackKey({kind:'audio',srclang:track.language,label:track.label})===playerStore.selectedAudio)) return;
+  for (const track of tracks) track.enabled=playbackTrackKey({kind:'audio',srclang:track.language,label:track.label})===playerStore.selectedAudio;
+}
+function onAudioChange(event: Event) {
+  playerStore.selectedAudio=(event.target as HTMLSelectElement).value || null;
+  syncAudio();void playerStore.savePlayback(true);
+}
+function applyResume() {
+  const video=videoRef.value,position=playerStore.resumePosition;
+  if (!ownsMedia() || !video || position===null || !Number.isFinite(video.duration) || video.duration<=0) return;
+  if (position>0 && position<video.duration-5) video.currentTime=position;
+  playerStore.resumePosition=null;
+}
 function onMetadataLoaded() {
+  if (!ownsMedia()) return;
+  applyResume();
+  refreshAudioTracks();
   syncSubtitleTracks();
 }
+function refreshAudioTracks() {
+  const tracks=nativeAudio();
+  playerStore.audioTracks=hlsInstance?.audioTracks.length
+    ? hlsInstance.audioTracks.map(track=>({kind:'audio',srclang:track.lang || '',label:track.name}))
+    : tracks.map(track=>({kind:'audio',srclang:track.language,label:track.label}));
+  if (playerStore.audioTracks.some(track=>playbackTrackKey(track)===playerStore.selectedAudio)) syncAudio();
+  else {
+    const active=tracks.find(track=>track.enabled);
+    const selected=hlsInstance && hlsInstance.audioTrack>=0 ? playerStore.audioTracks[hlsInstance.audioTrack]
+      : active ? {kind:'audio',srclang:active.language,label:active.label} : undefined;
+    playerStore.selectedAudio=selected ? playbackTrackKey(selected) : null;
+  }
+}
+function checkpoint() {
+  if (!videoRef.value || !ownsMedia()) return;
+  playerStore.recordTime(videoRef.value.currentTime,videoRef.value.duration);
+  void playerStore.savePlayback(true);
+}
+function onEnded() {
+  if (!ownsMedia()) return;
+  if (videoRef.value) playerStore.recordTime(videoRef.value.currentTime,videoRef.value.duration);
+  void playerStore.savePlayback(true,true);
+}
+watch(()=>playerStore.resumePosition,()=>{
+  if ((videoRef.value?.readyState || 0)>=1) applyResume();
+});
 
 function releaseVideo() {
+  attachedUrl=null;
+  attachedEpoch=-1;
   if (hlsInstance) {
     hlsInstance.destroy();
     hlsInstance = null;
@@ -200,6 +268,8 @@ function setupVideo(url: string | null) {
   markedWatched = false;
   playerStore.error = null;
   attachedVideo = videoRef.value;
+  attachedUrl=url;attachedEpoch=playerStore.mediaEpoch;
+  const owner=attachedVideo,epoch=attachedEpoch;
 
   const isHls = url.includes('.m3u8');
 
@@ -211,11 +281,13 @@ function setupVideo(url: string | null) {
     hlsInstance.loadSource(url);
     hlsInstance.attachMedia(videoRef.value);
     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+      if (owner!==attachedVideo || epoch!==attachedEpoch || url!==attachedUrl) return;
       videoRef.value?.play().catch(() => {});
       syncSubtitleTracks();
+      refreshAudioTracks();
     });
     hlsInstance.on(Hls.Events.ERROR, (_event, data) => {
-      if (data.fatal) {
+      if (data.fatal && owner===attachedVideo && epoch===attachedEpoch && url===attachedUrl) {
         playerStore.error = 'Impossible de lire ce flux vidéo. Réessayez ou choisissez un autre serveur.';
       }
     });
@@ -247,7 +319,7 @@ watch(
 
 function onMediaError() {
   const error = videoRef.value?.error;
-  if (!playerStore.videoUrl || !error || error.code === 1) return;
+  if (!ownsMedia() || !playerStore.videoUrl || !error || error.code === 1) return;
   playerStore.error = error.code === 2
     ? 'Impossible de charger la vidéo. Vérifiez que le fichier existe et que le serveur est accessible.'
     : error.code === 3
@@ -274,7 +346,10 @@ function onQualityChange(e: Event) {
 }
 
 function onTimeUpdate() {
-  if (!videoRef.value || markedWatched) return;
+  if (!videoRef.value || !ownsMedia()) return;
+  playerStore.recordTime(videoRef.value.currentTime,videoRef.value.duration);
+  void playerStore.savePlayback();
+  if (markedWatched) return;
   const current = videoRef.value.currentTime;
   const total = videoRef.value.duration;
   if (total > 0 && current / total >= 0.85) {
@@ -300,15 +375,19 @@ function onKeyDown(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('pagehide', checkpoint);
 });
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
+  window.removeEventListener('pagehide', checkpoint);
+  checkpoint();
   releaseVideo();
 });
 </script>
 
 <style scoped>
+.playback-notice { margin:0; padding:8px 16px; color:var(--muted); font-size:.85rem; }
 .player-overlay {
   position: fixed;
   inset: 0;

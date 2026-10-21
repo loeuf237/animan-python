@@ -1,3 +1,4 @@
+import type { PlaybackOpen, PlaybackState, PlaybackCheckpoint, RecipeRevision } from '@/types/api';
 import type { ErrorResponse, DownloadPreferences, ProxySettings, WatchProgress, ExtensionRepository, SourceSettingsResponse, SourcePreferences, NetworkOptions, VerificationMode, VerificationJob, VerificationResult } from '@/types/api';
 import { language, tx } from '@/utils/locale';
 
@@ -84,6 +85,16 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  openPlaybackSession(body: PlaybackOpen, signal?: AbortSignal) {
+    return request<PlaybackState>('/api/playback/session', {method:'POST', body:JSON.stringify(body), signal});
+  },
+  savePlaybackCheckpoint(body: PlaybackCheckpoint) {
+    return request<{success: boolean; accepted: boolean; reason?: string}>('/api/playback/checkpoint', {method:'POST', body:JSON.stringify(body), keepalive:true});
+  },
+  getRecipeHistory(id: string | number) {return request<{revisions: RecipeRevision[]}>(`/api/extensions/${encodeURIComponent(id)}/recipe-history`);},
+  restoreRecipe(id: string | number, revision: number) {return request<{success: boolean}>(`/api/extensions/${encodeURIComponent(id)}/recipe-restore`,{method:'POST',body:JSON.stringify({revision})});},
+  getDiagnostics() {return request<Record<string, unknown>>('/api/diagnostics/export');},
+
   getProxyPool() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool'); },
   refreshProxyPool() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/refresh', {method: 'POST'}); },
   checkProxyPool() { return request<ProxyPoolSnapshot>('/api/network/proxy-pool/check', {method: 'POST'}); },

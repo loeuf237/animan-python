@@ -13,8 +13,8 @@ if __name__ == '__main__':
     root, reports = args.packages, args.reports
     script = str(Path(__file__).with_name('android_instrumentation.py'))
     commands = [
-        [sys.executable, script, str(root/'Animan-Android-under-test.apk'), str(root/'Animan-instrumentation.apk'), str(reports/'runtime'), '--skip-native-media'],
-        [sys.executable, script, str(root/'Animan-native-media-probe.apk'), str(root/'Animan-native-media-tests.apk'), str(reports/'media'), '--package', 'com.animan.nativeprobe'],
+        [sys.executable, script, str(root/'AnimeLab-Android-under-test.apk'), str(root/'AnimeLab-instrumentation.apk'), str(reports/'runtime'), '--skip-native-media'],
+        [sys.executable, script, str(root/'AnimeLab-native-media-probe.apk'), str(root/'AnimeLab-native-media-tests.apk'), str(reports/'media'), '--package', 'com.animan.nativeprobe'],
     ]
     api = int(subprocess.check_output(['adb', 'shell', 'getprop', 'ro.build.version.sdk'], text=True).strip())
     if api == 29:

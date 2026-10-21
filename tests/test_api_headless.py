@@ -148,7 +148,7 @@ def test_spa_serving(client):
     resp = client.get("/spa")
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
-    assert "Animan" in resp.text
+    assert "AnimeLab" in resp.text
 
     resp_sub = client.get("/spa/favorites")
     assert resp_sub.status_code == 200

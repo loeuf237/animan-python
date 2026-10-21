@@ -1,4 +1,4 @@
-"""Animan - Anime Downloader in Python (FastAPI)."""
+"""AnimeLab - Anime Downloader in Python (FastAPI)."""
 import os
 
 __version__ = "0.1.0"

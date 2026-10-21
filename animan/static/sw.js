@@ -1,5 +1,5 @@
-// Animan Service Worker - PWA Offline & Caching Engine
-const CACHE_NAME = 'animan-cache-v0.1.0';
+// AnimeLab Service Worker - PWA Offline & Caching Engine
+const CACHE_NAME = 'animelab-cache-v0.1.0-brand1';
 
 const PRECACHE_ASSETS = [
   '/',
@@ -20,7 +20,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(PRECACHE_ASSETS).catch((err) => {
-        console.warn('[Animan SW] Pre-caching partial error:', err);
+        console.warn('[AnimeLab SW] Pre-caching partial error:', err);
       });
     }).then(() => self.skipWaiting())
   );
@@ -85,7 +85,7 @@ self.addEventListener('fetch', (event) => {
           if (offlinePage) {
             return offlinePage;
           }
-          return new Response('Animan - Hors ligne', {
+          return new Response('AnimeLab - Hors ligne', {
             status: 503,
             statusText: 'Service Unavailable',
             headers: { 'Content-Type': 'text/plain; charset=utf-8' }

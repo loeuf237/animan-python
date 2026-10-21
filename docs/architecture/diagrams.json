@@ -1,11 +1,12 @@
 {
-  "analysis_date": "2026-10-15",
-  "analyzed_commit": "20ab9cd3856c51b714c8ae7769ace759a60ff3a1",
+  "analysis_date": "2026-10-21",
+  "analyzed_commit": "9d596c1b6ba00859b5d51dd0408484be05a97fbd",
   "scope": "repository source analysis; not runtime validation",
+  "working_tree_changes": true,
   "diagrams": [
     {
       "id": "01-classes-domaine",
-      "title": "Animan — classes du domaine et persistance actuelle",
+      "title": "AnimeLab — classes du domaine et persistance actuelle",
       "category": "classes",
       "proposed": false,
       "references": [
@@ -63,28 +64,53 @@
           "path": "animan/models/watch_progress.py",
           "symbol": "WatchProgress",
           "line": 4
+        },
+        {
+          "path": "animan/models/playback.py",
+          "symbol": "PlaybackProgress",
+          "line": 7
+        },
+        {
+          "path": "animan/migrations.py",
+          "symbol": "Migration",
+          "line": 8
+        },
+        {
+          "path": "animan/migrations.py",
+          "symbol": "migrate",
+          "line": 151
+        },
+        {
+          "path": "animan/database.py",
+          "symbol": "transaction",
+          "line": 51
+        },
+        {
+          "path": "animan/database.py",
+          "symbol": "sqlite_connection",
+          "line": 35
         }
       ],
       "source": "plantuml/01-classes-domaine.puml",
       "svg": "svg/01-classes-domaine.svg",
-      "width": 1598,
+      "width": 1895,
       "height": 1634
     },
     {
       "id": "02-classes-services",
-      "title": "Animan — orchestration des téléchargements et bibliothèque",
+      "title": "AnimeLab — orchestration des téléchargements et bibliothèque",
       "category": "classes",
       "proposed": false,
       "references": [
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService",
-          "line": 61
+          "line": 62
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "ResolvedVideoInfo",
-          "line": 46
+          "line": 47
         },
         {
           "path": "animan/services/library_service.py",
@@ -115,23 +141,53 @@
           "path": "animan/platform_events.py",
           "symbol": "completed",
           "line": 13
+        },
+        {
+          "path": "animan/services/download_stages/transfer.py",
+          "symbol": "TransferWorker",
+          "line": 39
+        },
+        {
+          "path": "animan/services/download_stages/media.py",
+          "symbol": "MediaPipeline",
+          "line": 38
+        },
+        {
+          "path": "animan/services/download_stages/export.py",
+          "symbol": "ExportCoordinator",
+          "line": 22
+        },
+        {
+          "path": "animan/services/download_stages/scheduler.py",
+          "symbol": "DownloadScheduler",
+          "line": 21
+        },
+        {
+          "path": "animan/services/download_stages/budget.py",
+          "symbol": "StageBudget",
+          "line": 8
+        },
+        {
+          "path": "animan/services/download_stages/state.py",
+          "symbol": "transition",
+          "line": 19
         }
       ],
       "source": "plantuml/02-classes-services.puml",
       "svg": "svg/02-classes-services.svg",
-      "width": 1776,
-      "height": 1124
+      "width": 2509,
+      "height": 1477
     },
     {
       "id": "03-classes-sources",
-      "title": "Animan — sources, recettes importées et extracteurs",
+      "title": "AnimeLab — sources, recettes importées et extracteurs",
       "category": "classes",
       "proposed": false,
       "references": [
         {
           "path": "animan/services/source_catalogue.py",
           "symbol": "SourceCatalogueService",
-          "line": 22
+          "line": 23
         },
         {
           "path": "animan/services/scraping_service.py",
@@ -156,17 +212,17 @@
         {
           "path": "animan/services/aniyomi_dex_parser.py",
           "symbol": "SourceRecipe",
-          "line": 13
+          "line": 17
         },
         {
           "path": "animan/services/aniyomi_dex_parser.py",
           "symbol": "AniyomiDexParser",
-          "line": 64
+          "line": 71
         },
         {
           "path": "animan/services/aniyomi_container.py",
           "symbol": "AniyomiContainerSource",
-          "line": 101
+          "line": 89
         },
         {
           "path": "animan/services/container_adapters/base.py",
@@ -176,7 +232,7 @@
         {
           "path": "animan/services/container_adapters/registry.py",
           "symbol": "AdapterRegistry",
-          "line": 12
+          "line": 13
         },
         {
           "path": "animan/services/extractors/base.py",
@@ -197,58 +253,83 @@
           "path": "animan/services/extractors/ytdlp_fallback.py",
           "symbol": "YtDlpFallbackExtractor",
           "line": 21
+        },
+        {
+          "path": "animan/services/source_registry.py",
+          "symbol": "SourceRegistry",
+          "line": 110
+        },
+        {
+          "path": "animan/services/source_registry.py",
+          "symbol": "RegisteredSource",
+          "line": 41
+        },
+        {
+          "path": "animan/services/source_registry.py",
+          "symbol": "SourceProvider",
+          "line": 17
+        },
+        {
+          "path": "animan/services/source_registry.py",
+          "symbol": "SourceCapabilities",
+          "line": 25
+        },
+        {
+          "path": "animan/services/extension_observability.py",
+          "symbol": "ExtensionObservability",
+          "line": 63
         }
       ],
       "source": "plantuml/03-classes-sources.puml",
       "svg": "svg/03-classes-sources.svg",
-      "width": 2550,
+      "width": 2394,
       "height": 1421
     },
     {
       "id": "04-classes-reseau",
-      "title": "Animan — sessions HTTP, protection des sites et proxies",
+      "title": "AnimeLab — sessions HTTP, protection des sites et proxies",
       "category": "classes",
       "proposed": false,
       "references": [
         {
           "path": "animan/services/source_http.py",
           "symbol": "SourceHTTPService",
-          "line": 95
+          "line": 96
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "DomainSession",
-          "line": 78
+          "line": 79
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "SourceClient",
-          "line": 501
+          "line": 508
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "AsyncSourceClient",
-          "line": 533
+          "line": 540
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "SourceStreamResponse",
-          "line": 683
+          "line": 690
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "VerificationRequired",
-          "line": 34
+          "line": 35
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "RateLimited",
-          "line": 51
+          "line": 52
         },
         {
           "path": "animan/services/source_http.py",
           "symbol": "SourceNetworkError",
-          "line": 44
+          "line": 45
         },
         {
           "path": "animan/services/proxy_pool.py",
@@ -258,12 +339,12 @@
         {
           "path": "animan/services/proxy_service.py",
           "symbol": "ProxyService",
-          "line": 27
+          "line": 26
         },
         {
           "path": "animan/services/browser_verification.py",
           "symbol": "BrowserVerificationService",
-          "line": 22
+          "line": 20
         }
       ],
       "source": "plantuml/04-classes-reseau.puml",
@@ -273,7 +354,7 @@
     },
     {
       "id": "05-classes-android",
-      "title": "Animan — classes et objets de l'hôte Android",
+      "title": "AnimeLab — classes et objets de l'hôte Android",
       "category": "classes",
       "proposed": false,
       "references": [
@@ -340,78 +421,78 @@
     },
     {
       "id": "06-cas-utilisation",
-      "title": "Animan — cas d'utilisation fonctionnels",
+      "title": "AnimeLab — cas d'utilisation fonctionnels",
       "category": "cas",
       "proposed": false,
       "references": [
         {
           "path": "animan/routers/anime.py",
           "symbol": "search_api",
-          "line": 186
+          "line": 94
         },
         {
           "path": "animan/routers/download.py",
           "symbol": "start_download",
-          "line": 44
+          "line": 45
         },
         {
           "path": "animan/routers/library.py",
           "symbol": "mark_watched",
-          "line": 161
+          "line": 162
         }
       ],
       "source": "plantuml/06-cas-utilisation.puml",
       "svg": "svg/06-cas-utilisation.svg",
-      "width": 1598,
-      "height": 1491
+      "width": 1604,
+      "height": 1492
     },
     {
       "id": "07-cas-utilisation-reseau-stockage",
-      "title": "Animan — cas d'utilisation réseau et stockage Android",
+      "title": "AnimeLab — cas d'utilisation réseau et stockage Android",
       "category": "cas",
       "proposed": false,
       "references": [
         {
           "path": "animan/routers/network.py",
           "symbol": "rotate_proxy",
-          "line": 77
+          "line": 78
         },
         {
           "path": "animan/routers/network.py",
           "symbol": "complete",
-          "line": 124
+          "line": 129
         },
         {
           "path": "animan/routers/library.py",
           "symbol": "android_storage_action",
-          "line": 277
+          "line": 278
         }
       ],
       "source": "plantuml/07-cas-utilisation-reseau-stockage.puml",
       "svg": "svg/07-cas-utilisation-reseau-stockage.svg",
-      "width": 1815,
+      "width": 1819,
       "height": 1017
     },
     {
       "id": "08-sequence-recherche-verification",
-      "title": "Animan — recherche multisource et vérification assistée",
+      "title": "AnimeLab — recherche multisource et vérification assistée",
       "category": "sequence",
       "proposed": false,
       "references": [
         {
           "path": "animan/routers/anime.py",
           "symbol": "search_api",
-          "line": 186
+          "line": 94
         },
         {
           "path": "animan/services/browser_verification.py",
           "symbol": "BrowserVerificationService.complete",
-          "line": 135
+          "line": 133
         },
         {
           "path": "animan/routers/network.py",
           "symbol": "complete",
-          "line": 124
+          "line": 129
         }
       ],
       "source": "plantuml/08-sequence-recherche-verification.puml",
@@ -421,24 +502,24 @@
     },
     {
       "id": "09-sequence-telechargement",
-      "title": "Animan — téléchargement, HLS, sous-titres et finalisation",
+      "title": "AnimeLab — téléchargement, HLS, sous-titres et finalisation",
       "category": "sequence",
       "proposed": false,
       "references": [
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._execute_download",
-          "line": 1537
+          "line": 1532
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._finalize_task",
-          "line": 2745
+          "line": 1553
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._publish_mux_file",
-          "line": 3098
+          "line": 1581
         }
       ],
       "source": "plantuml/09-sequence-telechargement.puml",
@@ -448,19 +529,19 @@
     },
     {
       "id": "10-sequence-reprise-proxy",
-      "title": "Animan — rotation de proxy et reprise sans mélanger les représentations",
+      "title": "AnimeLab — rotation de proxy et reprise sans mélanger les représentations",
       "category": "sequence",
       "proposed": false,
       "references": [
         {
           "path": "animan/services/source_http.py",
           "symbol": "SourceHTTPService.rotate_proxy",
-          "line": 241
+          "line": 244
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._download_single_file",
-          "line": 1929
+          "line": 1535
         },
         {
           "path": "animan/services/download_resume.py",
@@ -475,34 +556,39 @@
     },
     {
       "id": "11-sequence-extensions",
-      "title": "Animan — import d'un dépôt et activation d'une source",
+      "title": "AnimeLab — import d'un dépôt et activation d'une source",
       "category": "sequence",
       "proposed": false,
       "references": [
         {
           "path": "animan/services/extension_service.py",
           "symbol": "ExtensionService.import_repository",
-          "line": 86
+          "line": 48
         },
         {
           "path": "animan/services/extension_service.py",
           "symbol": "ExtensionService.toggle_extension",
-          "line": 262
+          "line": 227
         },
         {
           "path": "animan/services/aniyomi_dex_parser.py",
           "symbol": "AniyomiDexParser.parse_apk",
-          "line": 68
+          "line": 75
+        },
+        {
+          "path": "animan/services/extension_service.py",
+          "symbol": "ExtensionService.restore_recipe",
+          "line": 457
         }
       ],
       "source": "plantuml/11-sequence-extensions.puml",
       "svg": "svg/11-sequence-extensions.svg",
-      "width": 1796,
-      "height": 1166
+      "width": 1972,
+      "height": 1430
     },
     {
       "id": "12-sequence-stockage-android",
-      "title": "Animan Android — autoriser une destination et publier un média",
+      "title": "AnimeLab Android — autoriser une destination et publier un média",
       "category": "sequence",
       "proposed": false,
       "references": [
@@ -514,12 +600,12 @@
         {
           "path": "animan/routers/library.py",
           "symbol": "android_export_download",
-          "line": 293
+          "line": 294
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService.export_task",
-          "line": 2677
+          "line": 1550
         },
         {
           "path": "android/app/src/main/java/com/animan/app/StorageAccess.kt",
@@ -539,7 +625,7 @@
     },
     {
       "id": "13-sequence-auto-telechargement",
-      "title": "Animan — suivi automatique persistant par source et version",
+      "title": "AnimeLab — suivi automatique persistant par source et version",
       "category": "sequence",
       "proposed": false,
       "references": [
@@ -571,39 +657,49 @@
     },
     {
       "id": "14-sequence-lecture",
-      "title": "Animan — lecture locale ou distante et progression",
+      "title": "AnimeLab — lecture locale ou distante et progression",
       "category": "sequence",
       "proposed": false,
       "references": [
         {
           "path": "animan/routers/media.py",
           "symbol": "resolve_stream",
-          "line": 208
+          "line": 210
         },
         {
           "path": "animan/routers/media.py",
           "symbol": "stream_video",
-          "line": 494
+          "line": 496
         },
         {
           "path": "animan/routers/media.py",
           "symbol": "hls_proxy_playlist",
-          "line": 670
+          "line": 678
         },
         {
           "path": "animan/routers/library.py",
           "symbol": "mark_watched",
-          "line": 161
+          "line": 162
+        },
+        {
+          "path": "animan/services/playback_service.py",
+          "symbol": "PlaybackService.open",
+          "line": 51
+        },
+        {
+          "path": "animan/services/playback_service.py",
+          "symbol": "PlaybackService.save",
+          "line": 74
         }
       ],
       "source": "plantuml/14-sequence-lecture.puml",
       "svg": "svg/14-sequence-lecture.svg",
-      "width": 1998,
-      "height": 1199
+      "width": 2449,
+      "height": 1551
     },
     {
       "id": "15-deploiement-bureau-web",
-      "title": "Animan — déploiements actuels bureau et navigateur / PWA",
+      "title": "AnimeLab — déploiements actuels bureau et navigateur / PWA",
       "category": "deploiement",
       "proposed": false,
       "references": [
@@ -615,7 +711,7 @@
         {
           "path": "run.py",
           "symbol": "lifespan",
-          "line": 42
+          "line": 45
         },
         {
           "path": "animan/services/tmdb_service.py",
@@ -630,7 +726,7 @@
     },
     {
       "id": "16-deploiement-android",
-      "title": "Animan — déploiement Android autonome actuel",
+      "title": "AnimeLab — déploiement Android autonome actuel",
       "category": "deploiement",
       "proposed": false,
       "references": [
@@ -657,14 +753,14 @@
     },
     {
       "id": "17-cible-amelioree",
-      "title": "Animan — architecture cible proposée (non implémentée)",
+      "title": "AnimeLab — cible modulaire partiellement réalisée (A03–A08)",
       "category": "cible",
       "proposed": true,
       "references": [],
       "source": "plantuml/17-cible-amelioree.puml",
       "svg": "svg/17-cible-amelioree.svg",
-      "width": 1977,
-      "height": 1120
+      "width": 2003,
+      "height": 1116
     }
   ]
 }

@@ -89,7 +89,7 @@
         <div class="setting-row-pro">
           <div class="setting-meta-pro">
             <label class="setting-title-pro" style="display:block;cursor:pointer;">{{ tx("Langue de l'interface") }}</label>
-            <div class="setting-desc-pro">{{ tx("Choisissez la langue d'affichage globale d'Animan.") }}</div>
+            <div class="setting-desc-pro">{{ tx("Choisissez la langue d'affichage globale d'AnimeLab.") }}</div>
           </div>
           <div class="setting-ctrl-pro">
             <select
@@ -285,6 +285,7 @@
     <!-- Onglet 4 : Stockage & Système -->
     <div v-show="currentTab === 'storage'" class="settings-tab-pane" :class="{ active: currentTab === 'storage' }">
       <AndroidStorageSettings />
+      <DiagnosticsExport />
       <section class="settings-card-pro">
         <div class="settings-card-header-pro">
           <div class="settings-card-icon-pro">
@@ -534,6 +535,7 @@
 </template>
 
 <script setup lang="ts">
+import DiagnosticsExport from '@/components/DiagnosticsExport.vue';
 import { tx } from '@/utils/locale';
 import { useNotifications } from '@/stores/notifications';
 import { ref, computed, onMounted } from 'vue';

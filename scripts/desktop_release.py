@@ -51,8 +51,8 @@ def prepare():
 
 
 def check():
-    if sys.platform == 'darwin': binary = ROOT / 'dist/Animan.app/Contents/MacOS/Animan'
-    else: binary = ROOT / ('dist/Animan/Animan.exe' if os.name == 'nt' else 'dist/Animan/Animan')
+    if sys.platform == 'darwin': binary = ROOT / 'dist/AnimeLab.app/Contents/MacOS/AnimeLab'
+    else: binary = ROOT / ('dist/AnimeLab/AnimeLab.exe' if os.name == 'nt' else 'dist/AnimeLab/AnimeLab')
     logfile = ROOT / 'build' / 'packaged-self-test.log'
     logfile.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([str(binary), '--self-test'], timeout=90,
@@ -66,19 +66,19 @@ def archive():
     if not re.fullmatch(r'[A-Za-z0-9-]+',label): raise ValueError('Invalid platform label')
     output = ROOT / 'release-assets'
     output.mkdir(exist_ok=True)
-    filename = f'Animan-v{__version__}-{label}'
+    filename = f'AnimeLab-v{__version__}-{label}'
     if sys.platform == 'darwin':
         destination = output / (filename + '-UNTESTED.zip')
-        subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(ROOT / 'dist/Animan.app'),str(destination)],check=True)
+        subprocess.run(['ditto','-c','-k','--sequesterRsrc','--keepParent',str(ROOT / 'dist/AnimeLab.app'),str(destination)],check=True)
     elif os.name == 'nt':
         destination = output / (filename + '.zip')
         with zipfile.ZipFile(destination,'w',zipfile.ZIP_DEFLATED) as handle:
-            for path in (ROOT / 'dist/Animan').rglob('*'):
+            for path in (ROOT / 'dist/AnimeLab').rglob('*'):
                 if path.is_file(): handle.write(path,path.relative_to(ROOT / 'dist'))
     else:
         destination = output / (filename + '.tar.gz')
         with tarfile.open(destination,'w:gz') as handle:
-            handle.add(ROOT / 'dist/Animan',arcname='Animan')
+            handle.add(ROOT / 'dist/AnimeLab',arcname='AnimeLab')
     shutil.copyfile(ROOT / 'build/release-metadata/build-info.json',output / (filename + '-build-info.json'))
     print(destination)
 
@@ -87,7 +87,7 @@ def checksums():
     root = Path(sys.argv[2])
     archives = sorted(p for p in root.iterdir() if p.name.endswith(('.zip','.tar.gz')))
     expected = {'Windows-x64','Linux-x64','macOS-arm64-UNTESTED','macOS-x64-UNTESTED'}
-    if {p.name.removeprefix(f'Animan-v{__version__}-').removesuffix('.tar.gz').removesuffix('.zip') for p in archives} != expected:
+    if {p.name.removeprefix(f'AnimeLab-v{__version__}-').removesuffix('.tar.gz').removesuffix('.zip') for p in archives} != expected:
         raise RuntimeError('Release is incomplete or contains unexpected platform archives')
     with (root / 'SHA256SUMS.txt').open('w') as handle:
         for path in sorted(p for p in root.iterdir() if p.name != 'SHA256SUMS.txt'):

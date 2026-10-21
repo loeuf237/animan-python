@@ -19,7 +19,7 @@ object MediaBridge {
     @JvmStatic @Synchronized fun execute(tool: String, arguments: String, timeoutMs: Int): String {
         require(tool == "ffmpeg" || tool == "ffprobe")
         require(timeoutMs > 0)
-        check(!unresponsive) { "The native media worker did not stop; restart Animan before retrying" }
+        check(!unresponsive) { "The native media worker did not stop; restart AnimeLab before retrying" }
         val values = JSONArray(arguments)
         val args = Array(values.length()) { values.getString(it) }
         if (args.contentEquals(arrayOf("-version"))) {

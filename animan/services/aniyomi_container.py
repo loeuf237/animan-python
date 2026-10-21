@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import httpx
 
 from animan.config import settings
+from animan.services.extension_observability import InvalidSelector, SelectorMismatch
 from animan.models.anime import AnimeResult, AnimeDetail, Episode
 from animan.security import is_safe_url
 from animan.services.aniyomi_dex_parser import SourceRecipe
@@ -62,40 +63,27 @@ def _safe_select(parent: Any, selector: str) -> List[Any]:
     except Exception:
         # Si le sélecteur composé échoue (syntaxe invalide), essayer chaque sous-sélecteur séparé par virgule
         valid: List[Any] = []
+        any_valid = False
         for part in s.split(","):
             p = _clean_selector(part)
             if p:
                 try:
-                    for el in parent.select(p):
+                    elements = parent.select(p)
+                    any_valid = True
+                    for el in elements:
                         if el not in valid:
                             valid.append(el)
                 except VerificationRequired:
                     raise
                 except Exception:
                     pass
+        if not any_valid:
+            raise InvalidSelector("Invalid extension selector")
         return valid
 
 def _safe_select_one(parent: Any, selector: str) -> Optional[Any]:
-    s = _clean_selector(selector)
-    if not s:
-        return None
-    try:
-        return parent.select_one(s)
-    except VerificationRequired:
-        raise
-    except Exception:
-        for part in s.split(","):
-            p = _clean_selector(part)
-            if p:
-                try:
-                    res = parent.select_one(p)
-                    if res:
-                        return res
-                except VerificationRequired:
-                    raise
-                except Exception:
-                    pass
-        return None
+    results=_safe_select(parent,selector)
+    return results[0] if results else None
 
 
 class AniyomiContainerSource:
@@ -300,6 +288,8 @@ class AniyomiContainerSource:
         soup = BeautifulSoup(html, "html.parser")
         selector = self.recipe.latest_selector or self.recipe.popular_selector or ".movie-poster, .c-tabs-item__content, article"
         items = _safe_select(soup, selector)
+        if not items and html.strip() and not re.search(r'(?i)no (?:results|anime)|aucun (?:résultat|anime)',soup.get_text(' ',strip=True)):
+            raise SelectorMismatch('Expected catalogue elements were not found')
 
         results: List[AnimeResult] = []
         for it in items[:18]:

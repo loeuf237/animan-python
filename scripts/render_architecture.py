@@ -1,4 +1,4 @@
-"""Validate Animan UML references and render the offline architecture dossier.
+"""Validate AnimeLab UML references and render the offline architecture dossier.
 
 Requires a local PlantUML JAR, Java and Graphviz for rendering. Does not import
 the application or contact an external diagram service.
@@ -78,7 +78,7 @@ def gallery(diagrams, commit):
                        for ref in item["references"])
         figures.append(f'''<article data-category="{item['category']}" id="{item['id']}">
 <h2>{title}</h2><p class="kind">{CATEGORIES[item['category']]}
-{' · Architecture proposée, non implémentée' if item['proposed'] else ' · Architecture observée'}</p>
+{' · Cible partiellement réalisée ; découplages restants proposés' if item['proposed'] else ' · Architecture observée'}</p>
 <div class="actions"><button type="button" class="zoom" data-svg="{item['svg']}"
 data-title="{title}" data-width="{item['width']}">Agrandir</button>
 <a href="{item['svg']}" target="_blank" rel="noopener">SVG original</a>
@@ -92,7 +92,7 @@ loading="lazy" alt="{title}"><figcaption>{title}</figcaption></figure>
     summary = " · ".join(f"{counts[k]} {v.lower()}" for k, v in summary_labels.items())
     return '''<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Animan — dossier UML et architecture</title>
+<title>AnimeLab — dossier UML et architecture</title>
 <style>
 :root{color-scheme:light dark;--bg:#f5f6fb;--fg:#172033;--surface:#fff;--muted:#536174;--line:#d5d9e4;--accent:#6d28d9}
 @media(prefers-color-scheme:dark){:root{--bg:#101422;--fg:#edf0f6;--surface:#191f31;--muted:#bac3d6;--line:#3b455c;--accent:#c4a7ff}}
@@ -117,7 +117,7 @@ dialog::backdrop{background:#000b}.dialog-bar{display:flex;align-items:center;ga
 main{max-width:none;padding:0}article{break-before:page;break-inside:avoid;background:#fff;padding:0;border-radius:0;margin:0}
 figure img{max-height:220mm;width:100%;height:220mm;object-fit:contain}a{color:#111}.kind{color:#333}}
 </style></head><body><header>
-<h1>Animan — dossier UML</h1>
+<h1>AnimeLab — dossier UML</h1>
 <p>@@SUMMARY@@. Les vues de l’existant sont issues du code ; la vue verte décrit une évolution proposée.</p>
 <p><a href="README.md">Cas d’utilisation détaillés et axes d’amélioration</a> · Révision analysée : <code>@@COMMIT@@</code>.</p>
 <nav aria-label="Familles de diagrammes">@@BUTTONS@@<button type="button" id="print">Imprimer la sélection</button></nav>
@@ -164,6 +164,7 @@ def main():
     for item in diagrams:
         path = DOCS / item["svg"]
         text = path.read_text()
+        path.write_text(text)  # Normalize PlantUML metadata line endings.
         root = ET.fromstring(text)
         if "syntax error" in " ".join(root.itertext()).lower():
             raise ValueError(f"PlantUML error diagram: {path}")
@@ -171,12 +172,13 @@ def main():
         item["height"] = int(root.attrib["height"].removesuffix("px"))
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     manifest = {"analysis_date": date.today().isoformat(), "analyzed_commit": commit,
-                "scope": "repository source analysis; not runtime validation", "diagrams": diagrams}
+                "scope": "repository source analysis; not runtime validation",
+                "working_tree_changes": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()), "diagrams": diagrams}
     (DOCS / "diagrams.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     (DOCS / "index.html").write_text(gallery(diagrams, commit[:12]))
     archive = ROOT / "build/architecture/animan-uml.zip"
     archive.parent.mkdir(parents=True, exist_ok=True)
-    paths = [DOCS / n for n in ("README.md", "index.html", "diagrams.json")]
+    paths = sorted(DOCS.glob("*.md")) + [DOCS / n for n in ("index.html", "diagrams.json")]
     paths += sorted((DOCS / "plantuml").glob("*")) + sorted((DOCS / "svg").glob("*.svg"))
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in paths:

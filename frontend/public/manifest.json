@@ -1,7 +1,7 @@
 {
   "id": "/?source=pwa",
-  "name": "Animan - Anime Downloader & Player",
-  "short_name": "Animan",
+  "name": "AnimeLab - Anime Downloader & Player",
+  "short_name": "AnimeLab",
   "description": "Téléchargement et streaming haute performance d'animés en VF et VOSTFR",
   "start_url": "/?source=pwa",
   "scope": "/",

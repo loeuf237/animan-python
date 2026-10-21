@@ -137,6 +137,22 @@ async def start_batch_download(request: Request):
     if not episodes:
         return JSONResponse(status_code=400, content={"error": "Aucun épisode sélectionné"})
 
+    from bs4 import BeautifulSoup
+    from animan.services.extension_service import extension_service
+    from animan.services.aniyomi_container import _safe_select
+    from animan.services.extension_observability import InvalidSelector,extension_observability
+    for source_id in {ep.get('source') or source for ep in episodes}:
+        container=extension_service.get_container_source_by_id(source_id)
+        if container:
+            visible=next((ext for ext in extension_service.get_visible_extensions() if ext['pkg']==container.pkg),None)
+            if visible and any(check['recipe_revision']==visible['recipe_revision'] and check['status'] in ('selector_error','parse_error','unsupported') for check in visible.get('health',[]) if check['operation'] in ('load','latest','detail')):
+                return JSONResponse(status_code=409,content={'code':'source_recipe_invalid','error':'Testez ou corrigez cette recette avant de télécharger une série.'})
+            try:
+                for key,value in container.recipe.to_dict().items():
+                    if key.endswith('selector') and value: _safe_select(BeautifulSoup('', 'html.parser'),value)
+            except InvalidSelector as exc:
+                extension_observability.record(container.pkg,'detail',error=exc,db_path=extension_service.db_path)
+                return JSONResponse(status_code=409,content={'code':'source_recipe_invalid','error':'La recette de cette source doit être corrigée avant le téléchargement.'})
     for ep in episodes:
         if "source" not in ep:
             ep["source"] = source

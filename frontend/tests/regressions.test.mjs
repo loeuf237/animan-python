@@ -309,7 +309,7 @@ test('verified media and failed exports retain independent display states', asyn
   assert.doesNotMatch(failed,/Exporté vers le stockage/);
   const unknown=await renderToString(createSSRApp(component.default,{task:{status:'completed',exportStatus:'NOT_REQUESTED'},native:true}));
   assert.match(unknown,/Export non renseigné/);
-  const done=await renderToString(createSSRApp(component.default,{task:{status:'completed',exportStatus:'EXPORTED',exportDestination:'Downloads\/Animan'},native:true}));
+  const done=await renderToString(createSSRApp(component.default,{task:{status:'completed',exportStatus:'EXPORTED',exportDestination:'Downloads\/AnimeLab'},native:true}));
   assert.match(done,/Exporté vers le stockage/);
-  assert.match(done,/Downloads\/Animan/);
+  assert.match(done,/Downloads\/AnimeLab/);
 });

@@ -2,7 +2,7 @@
 
 The SDK ships a QEMU ARM backend on Linux. Invoke it directly with software CPU
 emulation: the frontend launcher otherwise rejects an ARM guest on an x86 host.
-This is a CI test harness, not a component distributed with Animan.
+This is a CI test harness, not a component distributed with AnimeLab.
 """
 import argparse
 import os

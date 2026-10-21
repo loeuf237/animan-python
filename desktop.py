@@ -63,12 +63,12 @@ def start_server(port):
     import uvicorn
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
         log_level="warning", log_config=None, access_log=False, timeout_graceful_shutdown=10))
-    worker = threading.Thread(target=server.run, daemon=True, name="AnimanServer")
+    worker = threading.Thread(target=server.run, daemon=True, name="AnimeLabServer")
     worker.start()
     if not wait_for_server(port):
         server.should_exit = True
         worker.join(timeout=15)
-        raise RuntimeError("Animan server did not become ready")
+        raise RuntimeError("AnimeLab server did not become ready")
     return server, worker
 
 
@@ -125,7 +125,7 @@ def self_test():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Animan desktop")
+    parser = argparse.ArgumentParser(description="AnimeLab desktop")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--self-test", action="store_true", help="Offline packaged backend/frontend/media checks")
     parser.add_argument("--headless", action="store_true", help="Run without opening a window")
@@ -136,20 +136,21 @@ def main():
         return
     server, worker = start_server(find_available_port(int(os.getenv("ANIMAN_PORT", "8080"))))
     url = f"http://127.0.0.1:{server.config.port}/spa/"
-    logger.info("Animan %s ready at %s", __version__, url)
+    logger.info("AnimeLab %s ready at %s", __version__, url)
     try:
         if args.headless:
             while worker.is_alive(): time.sleep(.5)
             return
         try:
             import webview
+            from animan.config import settings
             from animan.services.browser_verification import browser_verification
             from animan.services.source_http import USER_AGENT
-            webview.create_window("Animan", url, width=1280, height=820, min_size=(800, 600))
+            webview.create_window("AnimeLab", url, width=1280, height=820, min_size=(800, 600))
             browser_verification.webview_opener = lambda target: webview.create_window(
-                "Animan — Site verification", target, width=900, height=700)
+                "AnimeLab — Site verification", target, width=900, height=700)
             try:
-                webview.start(user_agent=USER_AGENT)
+                webview.start(user_agent=USER_AGENT, icon=str(settings.STATIC_DIR / "img/icon-512.png"))
             finally:
                 browser_verification.webview_opener = None
         except Exception as error:
@@ -172,5 +173,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        logger.exception("Animan failed to start or complete its package checks")
+        logger.exception("AnimeLab failed to start or complete its package checks")
         raise SystemExit(1)

@@ -20,8 +20,8 @@ def test_pwa_manifest(client):
     assert "application/manifest+json" in resp.headers.get("content-type", "")
 
     manifest = resp.json()
-    assert manifest["name"] == "Animan - Anime Downloader & Player"
-    assert manifest["short_name"] == "Animan"
+    assert manifest["name"] == "AnimeLab - Anime Downloader & Player"
+    assert manifest["short_name"] == "AnimeLab"
     assert manifest["start_url"] == "/?source=pwa"
     assert manifest["display"] == "standalone"
     assert manifest["theme_color"] == "#0e121d"
@@ -46,7 +46,7 @@ def test_pwa_service_worker(client):
 
     content = resp.text
     # Ensure cache engine and safety exclusions are present
-    assert "animan-cache" in content
+    assert "animelab-cache" in content
     assert "/api/media/stream" in content
     assert "m3u8" in content
     assert "/offline.html" in content
@@ -65,10 +65,15 @@ def test_pwa_static_assets(client):
     assert "beforeinstallprompt" in resp_pwa_js.text
 
     # Icons
-    for icon_name in ["icon-192.png", "icon-512.png", "icon-maskable.png"]:
+    for icon_name in ["icon-192.png", "icon-512.png", "icon-maskable.png", "apple-touch-icon.png"]:
         resp_icon = client.get(f"/img/{icon_name}")
         assert resp_icon.status_code == 200
         assert resp_icon.headers.get("content-type") == "image/png"
+
+    favicon = client.get("/favicon.ico")
+    assert favicon.status_code == 200
+    assert favicon.headers["content-type"] == "image/x-icon"
+    assert favicon.content.startswith(b"\x00\x00\x01\x00")
 
 def test_pwa_integration_in_html_pages(client):
     pages = ["/", "/downloads", "/library", "/history", "/settings"]

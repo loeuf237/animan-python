@@ -1,11 +1,11 @@
 <resources>
     <string name="retry">Réessayer</string>
-    <string name="starting_engine">Démarrage du moteur Animan embarqué…</string>
+    <string name="starting_engine">Démarrage du moteur AnimeLab embarqué…</string>
     <string name="engine_error">Le moteur embarqué ne peut pas démarrer : %1$s</string>
     <string name="engine_timeout">Le démarrage a dépassé le délai prévu</string>
     <string name="download_channel">Téléchargements des épisodes</string>
     <string name="active_downloads">%1$d téléchargement(s) en cours</string>
     <string name="pause_downloads">Mettre en pause</string>
-    <string name="return_to_animan">Revenir à Animan</string>
+    <string name="return_to_animan">Revenir à AnimeLab</string>
     <string name="storage_permission_error">Accès au stockage impossible. Autorisez un dossier dans Paramètres → Stockage.</string>
 </resources>

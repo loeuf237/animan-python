@@ -1,6 +1,6 @@
 @startuml
 !include theme.iuml
-title Animan — orchestration des téléchargements et bibliothèque
+title AnimeLab — orchestration des téléchargements et bibliothèque
 ' @source animan/services/download_manager.py:DownloadManagerService
 ' @source animan/services/download_manager.py:ResolvedVideoInfo
 ' @source animan/services/library_service.py:LibraryService
@@ -9,6 +9,12 @@ title Animan — orchestration des téléchargements et bibliothèque
 ' @source animan/services/watchdog_service.py:WatchdogService
 ' @source animan/media_tools.py:run
 ' @source animan/platform_events.py:completed
+' @source animan/services/download_stages/transfer.py:TransferWorker
+' @source animan/services/download_stages/media.py:MediaPipeline
+' @source animan/services/download_stages/export.py:ExportCoordinator
+' @source animan/services/download_stages/scheduler.py:DownloadScheduler
+' @source animan/services/download_stages/budget.py:StageBudget
+' @source animan/services/download_stages/state.py:transition
 package "Services partagés Python" {
   class DownloadManagerService {
     tasks: Dict[str, DownloadTask]
@@ -82,6 +88,40 @@ package "Services partagés Python" {
     +completed(task)
   }
 }
+class TransferWorker {
+  +_execute_download(task)
+  +_download_single_file(task, url)
+  +_download_hls_segments_native(task, url)
+}
+class MediaPipeline {
+  +assemble_hls(...)
+  +assemble_chunks(...)
+  +_finalize_task(task)
+}
+class ExportCoordinator {
+  +export_task(task, manual=false)
+}
+class DownloadScheduler {
+  workers: dict
+  network_tasks: set
+  +process_queue()
+  +release_network(task_id)
+  +close()
+}
+class StageBudget {
+  limit: int
+  active: int
+  +run(task, jobs, function, ...)
+}
+DownloadManagerService *-- TransferWorker
+DownloadManagerService *-- MediaPipeline
+DownloadManagerService *-- ExportCoordinator
+DownloadManagerService *-- DownloadScheduler
+MediaPipeline *-- StageBudget : budget média
+ExportCoordinator *-- StageBudget : budget publication
+TransferWorker ..> MediaPipeline : assemblage / finalisation
+MediaPipeline ..> ExportCoordinator : média vérifié
+MediaPipeline ..> DownloadScheduler : libère le réseau
 class DownloadTask
 class DownloadTaskEntity
 class ExtractorRegistry
@@ -102,7 +142,8 @@ WatchdogService ..> LibraryService : favoris autoDownload
 WatchdogService ..> SourceCatalogueService : choisir le fournisseur exact
 WatchdogService ..> DownloadManagerService : planification / nouvelles tâches
 note bottom of WatchdogService
-SourceCatalogueService.provider() sélectionne la source
+SourceCatalogueService.provider() délègue au SourceRegistry
+et sélectionne la source
 intégrée ou l'extension activée. Source, URL, version et
 préférences accompagnent chaque nouvelle tâche.
 Le registre persistant sépare découverte et résultat.

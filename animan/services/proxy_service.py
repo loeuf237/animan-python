@@ -1,10 +1,9 @@
+from animan.database import init_db, sqlite_connection
 import asyncio
-from contextlib import contextmanager
 import logging
 import os
 import random
 import re
-import sqlite3
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
@@ -43,43 +42,11 @@ class ProxyService:
         self._load_from_db()
         self._load_proxies()
 
-    @contextmanager
     def _get_conn(self):
-        db_dir = os.path.dirname(os.path.abspath(self.db_path))
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
-        conn = sqlite3.connect(self.db_path, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA busy_timeout=5000")
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        return sqlite_connection(self.db_path)
 
     def _init_db(self):
-        """Crée la table network_proxy_settings pour persister les réglages de proxy."""
-        try:
-            with self._get_conn() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS network_proxy_settings (
-                        id INTEGER PRIMARY KEY CHECK (id = 1),
-                        enabled INTEGER NOT NULL DEFAULT 0,
-                        proxy_type TEXT NOT NULL DEFAULT 'http',
-                        host TEXT NOT NULL DEFAULT '',
-                        port INTEGER DEFAULT NULL,
-                        username TEXT DEFAULT '',
-                        password TEXT DEFAULT '',
-                        custom_url TEXT DEFAULT '',
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                conn.commit()
-        except Exception as e:
-            logger.error("[proxy_service] Erreur initialisation table SQLite: %s", e)
+        init_db(self.db_path)
 
     def _load_from_db(self):
         """Charge les paramètres de proxy depuis SQLite."""
@@ -96,6 +63,8 @@ class ProxyService:
                     self.proxy_username = str(row["username"] or "").strip()
                     self.proxy_password = str(row["password"] or "")
                     self.custom_proxy_url = str(row["custom_url"] or "").strip()
+                    from animan.diagnostics import remember_secret
+                    remember_secret(self.proxy_password)
         except Exception as e:
             logger.debug("[proxy_service] Impossible de charger les réglages de proxy depuis SQLite: %s", e)
 
@@ -281,6 +250,8 @@ class ProxyService:
             if new_custom != self.mask_url(self.custom_proxy_url) or not new_custom:
                 self.custom_proxy_url = new_custom
 
+        from animan.diagnostics import remember_secret
+        remember_secret(self.proxy_password)
         try:
             with self._get_conn() as conn:
                 cursor = conn.cursor()

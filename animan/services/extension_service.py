@@ -1,11 +1,11 @@
+from animan.services.extension_observability import save_recipe_revision,extension_observability,HEALTH_MESSAGES
+from animan.database import init_db, sqlite_connection
 from animan.services.source_http import source_http, VerificationRequired
 import asyncio
-from contextlib import contextmanager
 import json
 import logging
 import os
 import re
-import sqlite3
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -35,49 +35,11 @@ class ExtensionService:
         self._init_db()
         self._load_enabled_sources()
 
-    @contextmanager
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+        return sqlite_connection(self.db_path)
 
     def _init_db(self):
-        """Initialise les tables de dépôts et d'extensions dans SQLite."""
-        with self._get_conn() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS extension_repos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT UNIQUE NOT NULL,
-                    name TEXT NOT NULL,
-                    is_active INTEGER DEFAULT 1,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS imported_extensions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    repo_id INTEGER NOT NULL,
-                    pkg TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    lang TEXT NOT NULL,
-                    version TEXT,
-                    apk_url TEXT,
-                    base_url TEXT,
-                    icon_url TEXT,
-                    sources_meta TEXT,
-                    is_enabled INTEGER DEFAULT 0,
-                    recipe_json TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (repo_id) REFERENCES extension_repos(id) ON DELETE CASCADE,
-                    UNIQUE(repo_id, pkg)
-                );
-            """)
-            conn.commit()
+        init_db(self.db_path)
 
     # -------------------------------------------------------------------------
     # Gestion des dépôts
@@ -253,7 +215,10 @@ class ExtensionService:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(params))
             rows = cursor.fetchall()
-            return [dict(r) for r in rows]
+            entries=[dict(r) for r in rows]
+            for entry in entries:
+                entry['health']=extension_observability.health(conn,entry['id'])
+            return entries
 
     # -------------------------------------------------------------------------
     # Activation & Compilation de Recette
@@ -294,7 +259,10 @@ class ExtensionService:
                 recipe = SourceRecipe.from_dict(recipe_dict)
                 if not recipe.base_url or not await asyncio.to_thread(is_safe_url, recipe.base_url):
                     raise ValueError("Aucune adresse de source valide : configurez sa recette avant activation.")
-                self._active_container_sources[pkg] = AniyomiContainerSource(recipe)
+                source=AniyomiContainerSource(recipe)
+                source._diagnostics_db_path=self.db_path
+                source._diagnostics_recipe_revision=save_recipe_revision(conn,ext_id,source.recipe.to_dict(),'activate')
+                self._active_container_sources[pkg] = source
                 logger.info("[extensions] Extension enabled: %s (%s)", ext_data["name"], pkg)
             else:
                 cursor.execute("UPDATE imported_extensions SET is_enabled = 0 WHERE id = ?;", (ext_id,))
@@ -352,12 +320,15 @@ class ExtensionService:
 
     def _load_enabled_sources(self):
         """Charge au démarrage toutes les sources activées du magasin actif."""
-        self._active_container_sources.clear()
+        loaded = {}
+        failures = []
         active_repo = self.get_active_repository()
         if not active_repo:
+            self._active_container_sources = loaded
             return
 
         with self._get_conn() as conn:
+            conn.execute('BEGIN IMMEDIATE')
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM imported_extensions WHERE repo_id = ? AND is_enabled = 1;", (active_repo["id"],))
             rows = cursor.fetchall()
@@ -367,7 +338,11 @@ class ExtensionService:
                     recipe = SourceRecipe(pkg=ext["pkg"], name=ext["name"], base_url=ext["base_url"] or "", lang=ext["lang"])
                     AniyomiDexParser._fill_heuristics(recipe)
                     if recipe.base_url:
-                        self._active_container_sources[ext["pkg"]] = AniyomiContainerSource(recipe)
+                        loaded[ext["pkg"]] = AniyomiContainerSource(recipe)
+                        effective=loaded[ext['pkg']].recipe.to_dict()
+                        conn.execute('UPDATE imported_extensions SET recipe_json=? WHERE id=?',(json.dumps(effective),ext['id']))
+                        loaded[ext['pkg']]._diagnostics_recipe_revision=save_recipe_revision(conn,ext['id'],effective,'load')
+                        conn.execute("DELETE FROM extension_health WHERE ext_id=? AND operation='load'",(ext['id'],))
                 if ext.get("recipe_json"):
                     try:
                         recipe_data = json.loads(ext["recipe_json"])
@@ -377,11 +352,21 @@ class ExtensionService:
                         recipe = SourceRecipe.from_dict({**recipe.to_dict(), **{key: value for key, value in recipe_data.items() if value not in ("", None, [])}})
                         updated_dict = recipe.to_dict()
                         if updated_dict != recipe_data:
+                            save_recipe_revision(conn,ext['id'],recipe_data,'legacy')
                             cursor.execute("UPDATE imported_extensions SET recipe_json = ? WHERE id = ?;", (json.dumps(updated_dict), ext["id"]))
-                        self._active_container_sources[ext["pkg"]] = AniyomiContainerSource(recipe)
+                        loaded[ext["pkg"]] = AniyomiContainerSource(recipe)
+                        effective=loaded[ext['pkg']].recipe.to_dict()
+                        cursor.execute('UPDATE imported_extensions SET recipe_json=? WHERE id=?',(json.dumps(effective),ext['id']))
+                        loaded[ext['pkg']]._diagnostics_recipe_revision=save_recipe_revision(conn,ext['id'],effective,'load')
+                        conn.execute("DELETE FROM extension_health WHERE ext_id=? AND operation='load'",(ext['id'],))
                     except Exception as e:
-                        logger.warning("[extensions] Error loading source %s: %s", ext["name"], e)
+                        failures.append((ext, e))
+                        logger.warning("[extensions] Error loading source %s: %s", ext["name"], type(e).__name__)
 
+        for ext,error in failures:
+            extension_observability.record(ext['pkg'],'load',error=error,db_path=self.db_path)
+        for source in loaded.values(): source._diagnostics_db_path = self.db_path
+        self._active_container_sources = loaded
         logger.info("[extensions] %d Aniyomi source(s) enabled in memory", len(self._active_container_sources))
 
     # -------------------------------------------------------------------------
@@ -393,7 +378,7 @@ class ExtensionService:
         if not await asyncio.to_thread(is_safe_url, str(request.url)):
             raise ValueError("URL du dépôt ou de l’APK non autorisée.")
 
-    async def configure_extension(self, ext_id: int, data: Dict[str, Any]):
+    async def configure_extension(self, ext_id: int, data: Dict[str, Any], *, revision_reason='configure', force_revision=False):
         unknown = set(data) - set(SourceRecipe.__dataclass_fields__)
         if unknown:
             raise ValueError("Champs de recette inconnus : " + ", ".join(sorted(unknown)))
@@ -403,6 +388,7 @@ class ExtensionService:
             if not row or not active or row["repo_id"] != active["id"]:
                 raise ValueError("Extension introuvable dans le dépôt actif.")
             existing = json.loads(row["recipe_json"] or "{}")
+            previous = dict(existing)
             existing.update(data)
             existing.update(pkg=row["pkg"], name=row["name"], lang=row["lang"])
             recipe = SourceRecipe.from_dict(existing)
@@ -425,8 +411,11 @@ class ExtensionService:
                 re.compile(recipe.video_iframe_regex)
             except (TypeError, re.error) as exc:
                 raise ValueError("Expression de lecteur invalide.") from exc
+            conn.execute('BEGIN IMMEDIATE')
+            if previous: save_recipe_revision(conn,ext_id,previous,'legacy')
             conn.execute("UPDATE imported_extensions SET recipe_json = ?, base_url = ? WHERE id = ?",
                          (json.dumps(recipe.to_dict()), recipe.base_url, ext_id))
+            save_recipe_revision(conn,ext_id,recipe.to_dict(),revision_reason,force=force_revision)
         self._load_enabled_sources()
         return {"success": True, "id": ext_id}
 
@@ -441,14 +430,37 @@ class ExtensionService:
         if ext.get("recipe_json"):
             recipe = SourceRecipe.from_dict({**recipe.to_dict(), **{k: v for k, v in stored.items() if v not in ("", None, [])}})
         source = AniyomiContainerSource(recipe)
+        from animan.services.source_registry import source_registry
+        from animan.services.extension_observability import classify
+        source._diagnostics_db_path=self.db_path
+        source._diagnostics_recipe_revision=ext['recipe_revision']
+        provider=source_registry.describe(ext['pkg'],source)
         try:
-            results = await asyncio.wait_for(source.get_latest_releases(), timeout=20)
+            results = await asyncio.wait_for(provider.get_latest_releases(), timeout=20)
         except VerificationRequired:
             raise
         except Exception as exc:
-            return {"success": False, "count": 0, "message": f"Échec du catalogue : {exc}"}
-        return {"success": bool(results), "count": len(results), "message":
-                f"{len(results)} titres trouvés." if results else source.last_error or "Catalogue vide : source indisponible ou recette à adapter."}
+            status,code=classify(exc)
+            from animan.api_errors import APIProblem
+            if isinstance(exc,(TimeoutError,APIProblem)):
+                extension_observability.record(ext['pkg'],'latest',error=exc,db_path=self.db_path,base_url=source.base_url,recipe_revision=ext['recipe_revision'])
+            return {'success':False,'count':0,'status':status,'code':code,'message':HEALTH_MESSAGES[status]}
+        return {'success':bool(results),'count':len(results),'status':'healthy' if results else 'empty',
+                'message':HEALTH_MESSAGES['healthy' if results else 'empty']}
+
+    def recipe_history(self,ext_id):
+        if not any(ext['id']==ext_id for ext in self.get_visible_extensions()):
+            raise ValueError('Extension introuvable dans le dépôt actif.')
+        with self._get_conn() as conn:
+            return {'revisions':extension_observability.history(conn,ext_id)}
+
+    async def restore_recipe(self,ext_id,revision):
+        self.recipe_history(ext_id)
+        with self._get_conn() as conn:
+            row=conn.execute('SELECT recipe_json FROM extension_recipe_versions WHERE ext_id=? AND revision=?',(ext_id,revision)).fetchone()
+        if not row: raise ValueError('Révision de recette introuvable.')
+        # Restore creates a new revision; the historical snapshot is immutable.
+        return await self.configure_extension(ext_id,json.loads(row['recipe_json']),revision_reason='restore',force_revision=True)
 
     def get_enabled_container_sources(self) -> List[AniyomiContainerSource]:
         """Retourne la liste des conteneurs de sources actuellement activés."""

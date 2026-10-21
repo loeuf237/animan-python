@@ -108,6 +108,11 @@ def analyze(apk, output, strip_tool=None):
     report["duplicate_app_entries"] = duplicates
     report["compression_candidates"] = compression
     report["native_library_count"] = len(native)
+    report["installed_storage_bytes"] = None
+    report["installed_storage_note"] = (
+        "Not derivable from ZIP size. Run Android instrumentation on a fresh test "
+        "installation and collect footprint.json after first render. Cache is part of data."
+    )
     report["native_sections"] = []
     report["strip_experiments"] = []
     for index, (name, data, compressed) in enumerate(native):
@@ -148,6 +153,7 @@ def analyze(apk, output, strip_tool=None):
     print(f"Report: {target}")
     for item in report["strip_experiments"]:
         print(f"{item['flag']}: {item['simulated_apk_saving_bytes']:,} bytes saved: {item['name']}")
+    return report
 
 
 if __name__ == "__main__":
@@ -155,5 +161,19 @@ if __name__ == "__main__":
     parser.add_argument("apk", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--llvm-strip", type=Path)
+    parser.add_argument("--baseline", type=Path, help="Compare with another real APK, not a projection")
     args = parser.parse_args()
-    analyze(args.apk, args.output, args.llvm_strip)
+    current = analyze(args.apk, args.output, args.llvm_strip)
+    if args.baseline:
+        baseline = analyze(args.baseline, args.output / "baseline")
+        saved = baseline["apk_bytes"] - current["apk_bytes"]
+        comparison = {
+            "baseline_sha256": baseline["sha256"], "optimized_sha256": current["sha256"],
+            "baseline_bytes": baseline["apk_bytes"], "optimized_bytes": current["apk_bytes"],
+            "saved_bytes": saved, "saved_percent": round(saved * 100 / baseline["apk_bytes"], 2),
+            "group_savings_bytes": {key: baseline["groups"].get(key, 0) - current["groups"].get(key, 0)
+                                    for key in baseline["groups"].keys() | current["groups"].keys()},
+            "installed_storage_measured": False,
+        }
+        (args.output / "comparison.json").write_text(json.dumps(comparison, indent=2) + "\n")
+        print(f"Measured APK reduction: {saved:,} bytes ({comparison['saved_percent']}%)")

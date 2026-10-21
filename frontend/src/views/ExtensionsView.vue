@@ -196,6 +196,10 @@
           </div>
         </div>
 
+        <div v-if="ext.health?.length" class="extension-health" role="status">
+          <strong>{{ tx(ext.health[0]!.recipe_revision === ext.recipe_revision ? ext.health[0]!.messageKey : 'Recette modifiée, test nécessaire.') }}</strong>
+          <small>{{ tx('Dernière vérification') }} : {{ new Date(ext.health[0]!.checked_at).toLocaleString() }} · {{ Math.round(ext.health[0]!.duration_ms) }} ms · r{{ ext.health[0]!.recipe_revision }}</small>
+        </div>
         <div class="extension-actions">
           <button class="btn btn-sm" :disabled="busyExtensions.has(ext.id)" @click="diagnose(ext)">{{ tx("Tester") }}</button>
           <button class="btn btn-sm" @click="editRecipe(ext)">{{ tx("Configurer") }}</button>
@@ -239,6 +243,7 @@
       <textarea v-model="recipeText" class="input-premium" style="width:100%;min-height:240px" :aria-label="tx('Recette JSON')"></textarea>
       <button class="btn btn-primary" :disabled="busyExtensions.has(editingExtension.id)" @click="saveRecipe">{{ tx("Enregistrer") }}</button>
       <button class="btn" @click="editingExtension = null">{{ tx("Fermer") }}</button>
+      <RecipeHistory :key="editingExtension.id" :extension-id="editingExtension.id" @restored="recipeRestored" />
     </section>
     <!-- Notification Toast -->
 
@@ -246,6 +251,7 @@
 </template>
 
 <script setup lang="ts">
+import RecipeHistory from '@/components/RecipeHistory.vue';
 import VerificationPrompt from '@/components/VerificationPrompt.vue';
 import ProxyRotationButton from '@/components/ProxyRotationButton.vue';
 import { useVerificationStore, challengeFromError } from '@/stores/verification';
@@ -266,6 +272,12 @@ const recipeText = ref('');
 function editRecipe(ext: ExtensionSource) {
   editingExtension.value = ext;
   recipeText.value = JSON.stringify(ext.recipe_json ? JSON.parse(ext.recipe_json) : {base_url: ext.base_url || '', search_request_path: '/?s={query}', search_selector: 'article', episode_list_selector: '.episodes a'}, null, 2);
+}
+async function recipeRestored() {
+  animeStore.homeFeed=null;
+  await fetchExtensions();
+  const updated=extensions.value.find(ext=>ext.id===editingExtension.value?.id);
+  if (updated) editRecipe(updated);
 }
 async function saveRecipe() {
   const ext = editingExtension.value;
@@ -295,7 +307,7 @@ async function diagnose(ext: ExtensionSource) {
   try {
     const result = await api.diagnoseExtension(ext.id);
     if (!result.success) showDiagnoseFailure(ext, result.message);
-    showToast(`${ext.name} : ${result.message}`, result.success ? 'success' : 'error');
+    showToast(`${ext.name} : ${tx(result.message)}`, result.success ? 'success' : 'error');
   } catch (e: any) {
     const challenge = challengeFromError(e);
     if (challenge) {
@@ -303,7 +315,7 @@ async function diagnose(ext: ExtensionSource) {
       useVerificationStore().waitForVerification('extension-diagnose', [challenge], async () => { await diagnose(ext); });
     } else { showDiagnoseFailure(ext, e.message); showToast(e.message, 'error'); }
   }
-  finally { busyExtensions.value.delete(ext.id); }
+  finally { await fetchExtensions(); busyExtensions.value.delete(ext.id); }
 }
 async function refreshRepo() {
   isImporting.value = true;
@@ -413,6 +425,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.extension-health {min-width:0;display:grid;gap:4px;font-size:.78rem;overflow-wrap:anywhere;}
+.extension-health small {color:var(--text-secondary);}
 .toast-notification {
   position: fixed;
   bottom: 24px;

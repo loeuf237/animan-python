@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Animan"
+rootProject.name = "AnimeLab"
 include(":app")
 include(":media-probe")

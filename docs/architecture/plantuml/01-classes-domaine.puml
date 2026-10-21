@@ -1,6 +1,6 @@
 @startuml
 !include theme.iuml
-title Animan — classes du domaine et persistance actuelle
+title AnimeLab — classes du domaine et persistance actuelle
 top to bottom direction
 ' @source animan/models/anime.py:AnimeDetail
 ' @source animan/models/anime.py:AnimeResult
@@ -13,6 +13,7 @@ top to bottom direction
 ' @source animan/models/auto_download.py:AutoDownloadEpisode
 ' @source animan/models/favorite.py:FavoriteAnime
 ' @source animan/models/watch_progress.py:WatchProgress
+' @source animan/models/playback.py:PlaybackProgress
 package "DTO Pydantic — catalogue" {
   class AnimeResult {
     id: str
@@ -154,5 +155,41 @@ note bottom of DownloadTaskEntity
 Ne pas confondre le DTO mutable DownloadTask
 et son instantané persistant DownloadTaskEntity.
 Les attributs sont une sélection, pas l'inventaire complet.
+end note
+class Migration <<dataclass>> {
+  version: int
+  name: str
+  +apply(connection)
+}
+class "schema_migrations" as MigrationHistory <<table SQLite>> {
+  version: PK int
+  name: str
+  applied_at: timestamp
+}
+Migration ..> MigrationHistory : applique puis enregistre\ndans la même transaction
+note bottom of MigrationHistory
+BEGIN IMMEDIATE ; retour arrière DDL + données sur échec.
+Transactions ORM : tâche, progression, export et suivi.
+Connexions partagées : WAL, busy_timeout, foreign_keys.
+end note
+' @source animan/migrations.py:Migration
+' @source animan/migrations.py:migrate
+' @source animan/database.py:transaction
+' @source animan/database.py:sqlite_connection
+class PlaybackProgress <<table>> {
+  source: str
+  animeUrl: str
+  episodeNumber: int
+  version: str
+  positionSeconds: float
+  durationSeconds: float
+  selectionJson: str
+  sessionId: str
+  lastSequence: int
+  updatedAt: datetime
+}
+note right of PlaybackProgress
+UNIQUE(source, animeUrl, episodeNumber, version)
+Position indépendante des marques WatchProgress.
 end note
 @enduml

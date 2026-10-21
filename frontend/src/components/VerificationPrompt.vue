@@ -1,7 +1,7 @@
 <template>
   <section v-if="challenges.length" class="verification-prompt" :aria-label="tx('Accès au site bloqué')">
     <strong>{{ tx("Le site demande une vérification ou bloque l’accès") }}</strong>
-    <p>{{ tx("Ouvrez le site, effectuez la vérification si elle est proposée, puis revenez dans Animan pour réessayer. Une visite manuelle ne transfère pas automatiquement les cookies à l’application.") }}</p>
+    <p>{{ tx("Ouvrez le site, effectuez la vérification si elle est proposée, puis revenez dans AnimeLab pour réessayer. Une visite manuelle ne transfère pas automatiquement les cookies à l’application.") }}</p>
     <div v-for="challenge in unique" :key="challenge.domain" class="verification-actions">
       <a class="verification-site-link" :href="siteUrl(challenge)" target="_blank" rel="noopener noreferrer">{{ tx("Ouvrir dans un nouvel onglet") }}<template v-if="currentBrowser.name"> ({{ currentBrowser.name }})</template> : {{ siteUrl(challenge) }}</a>
       <button class="btn btn-secondary" :disabled="verification.busy" @click="verification.retry(challenge.domain)">{{ tx("Je suis revenu, réessayer") }}</button>

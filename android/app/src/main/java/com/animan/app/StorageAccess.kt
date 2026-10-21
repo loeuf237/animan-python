@@ -77,7 +77,7 @@ object StorageAccess {
         require(action in listOf("choose_directory", "use_downloads", "notifications", "app_settings", "open_downloads")) { "Unknown permission action" }
         if (action == "use_downloads") useDownloads()
         else {
-            val handler = actionHandler ?: throw IllegalStateException("Open Animan before changing permissions")
+            val handler = actionHandler ?: throw IllegalStateException("Open AnimeLab before changing permissions")
             if (action == "choose_directory") {
                 check(!selectionPending) { "A folder selection is already open" }
                 selectionPending = true

@@ -4,7 +4,7 @@
 ' @source animan/services/watchdog_service.py:WatchdogService._check_anime
 ' @source animan/services/library_service.py:LibraryService.discover_auto_episodes
 ' @source animan/models/auto_download.py:AutoDownloadEpisode
-title Animan — suivi automatique persistant par source et version
+title AnimeLab — suivi automatique persistant par source et version
 autonumber
 actor Utilisateur as U
 boundary "Bibliothèque / préférences de suivi" as UI

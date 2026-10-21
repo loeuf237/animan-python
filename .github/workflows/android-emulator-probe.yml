@@ -43,7 +43,7 @@ jobs:
           if [ -z "$APK_RUN_ID" ]; then
             python scripts/android_arm_emulator.py ${{ matrix.api }} unused unused emulator-probe --boot-only
           else
-            python scripts/android_arm_emulator.py ${{ matrix.api }} android-validation/Animan-Android-under-test.apk android-validation/Animan-instrumentation.apk emulator-probe
+            python scripts/android_arm_emulator.py ${{ matrix.api }} android-validation/AnimeLab-Android-under-test.apk android-validation/AnimeLab-instrumentation.apk emulator-probe
           fi
       - uses: actions/upload-artifact@v4
         if: always()

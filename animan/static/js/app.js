@@ -427,7 +427,7 @@ function initDownloadSettingsPanel() {
                 `).join('')}
               </div>
               <div style="margin-top: 14px; font-size: 0.8rem; color: var(--muted); text-align: center;">
-                Ces sources utilisent les paramètres généraux d'Animan. Aucun réglage supplémentaire requis.
+                Ces sources utilisent les paramètres généraux d'AnimeLab. Aucun réglage supplémentaire requis.
               </div>`;
           }
         }
