@@ -11,7 +11,7 @@ on:
         default: false
       tag_name:
         description: Android release tag
-        default: android-v0.1.0-beta.1
+        default: android-v0.1.0-beta.2
         required: true
 
 permissions:
@@ -212,7 +212,8 @@ jobs:
           root = Path('android-validation')
           info = json.loads((root / 'Android-build-info.json').read_text())
           assert info['version'] == '0.1.0' and not info['validation_key_only']
-          assert os.environ['RELEASE_TAG'] == 'android-v0.1.0-beta.1'
+          import re
+          assert re.fullmatch(r'android-v0\.1\.0-beta\.[1-9]\d*', os.environ['RELEASE_TAG'])
           target = Path('release-assets'); target.mkdir()
           apk = target / 'AnimeLab-v0.1.0-Android-arm64.apk'
           shutil.copyfile(root / 'AnimeLab-Android-under-test.apk', apk)
@@ -228,4 +229,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$RELEASE_TAG" release-assets/* --target "$GITHUB_SHA" \
-            --title "AnimeLab 0.1.0 Android beta" --prerelease --notes-file docs/releases/android-v0.1.0-beta.1.md
+            --title "AnimeLab 0.1.0 Android beta" --prerelease --notes-file docs/releases/android-v0.1.0-beta.2.md

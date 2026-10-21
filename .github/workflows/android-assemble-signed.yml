@@ -5,6 +5,10 @@ on:
       draft_release_id:
         required: true
         description: Android draft release containing signed APK chunks
+      staging_tag:
+        required: true
+        default: android-signing-v0.1.0-beta.2
+        description: Exact tag of the private staging draft
 permissions:
   contents: read
 jobs:
@@ -29,7 +33,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
-        run: python scripts/android_assemble_signed.py "$DRAFT_RELEASE_ID" assembled-release
+          STAGING_TAG: ${{ inputs.staging_tag }}
+        run: python scripts/android_assemble_signed.py "$DRAFT_RELEASE_ID" assembled-release --tag "$STAGING_TAG"
       - uses: actions/upload-artifact@v4
         with:
           name: Android-signed-under-test

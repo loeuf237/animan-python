@@ -8,6 +8,14 @@ on:
       signed_run_id:
         description: Assembly run containing the verified locally signed APKs
         required: true
+      publish:
+        type: boolean
+        default: false
+        description: Publish a new prerelease only after all device checks pass
+      tag_name:
+        required: true
+        default: android-v0.1.0-beta.2
+        description: New Android prerelease tag
 permissions:
   contents: read
   actions: read
@@ -60,3 +68,51 @@ jobs:
         with:
           name: Signed-Android-API-${{ matrix.api }}-test-results
           path: signed-test-results/**
+
+  publish:
+    if: inputs.publish
+    needs: signed-tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag_name }}
+      CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+      SIGNED_RUN_ID: ${{ inputs.signed_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools build-tools;35.0.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Android-signed-under-test
+          path: signed-candidate
+          run-id: ${{ inputs.signed_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify source, update signing identity and APK checksums
+        run: |
+          SOURCE_COMMIT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" --jq .head_sha)
+          python scripts/android_publish.py signed-candidate release-assets \
+            --build-tools "$ANDROID_HOME/build-tools/35.0.0" --tag "$RELEASE_TAG" \
+            --source-commit "$SOURCE_COMMIT" --candidate-run-id "$CANDIDATE_RUN_ID" --signed-run-id "$SIGNED_RUN_ID"
+      - name: Publish tested production-signed APK without replacing old releases
+        run: |
+          SOURCE_COMMIT=$(python -c 'import json; print(json.load(open("release-assets/Android-build-info.json"))["commit"])')
+          gh release create "$RELEASE_TAG" release-assets/* --target "$SOURCE_COMMIT" \
+            --title "AnimeLab 0.1.0 Android beta 2" --prerelease \
+            --notes-file docs/releases/android-v0.1.0-beta.2.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-published-release
+          path: release-assets/*
+          if-no-files-found: error

@@ -9,14 +9,14 @@ from android_fetch_signed import SafeRedirect, REPOSITORY
 from urllib.request import Request, build_opener
 
 
-def assemble(release_id, output):
+def assemble(release_id, output, expected_tag='android-v0.1.0-beta.1'):
     output.mkdir(parents=True, exist_ok=True)
     def get(path, accept='application/vnd.github+json'):
         req = Request('https://api.github.com/repos/'+REPOSITORY+path, headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],
             'Accept':accept,'X-GitHub-Api-Version':'2022-11-28','User-Agent':'AnimeLab-APK-assembly'})
         with build_opener(SafeRedirect()).open(req,timeout=60) as r: return r.read()
     release=json.loads(get('/releases/'+str(release_id)))
-    assert release['draft'] and release['tag_name']=='android-v0.1.0-beta.1'
+    assert release['draft'] and release['tag_name']==expected_tag
     assets={a['name']:a for a in json.loads(get('/releases/'+str(release_id)+'/assets?per_page=100'))}
     manifest=json.loads(get('/releases/assets/'+str(assets['Android-apk-parts.json']['id']),'application/octet-stream'))
     assert manifest['filename'] in ('AnimeLab-v0.1.0-Android-arm64.apk', 'Animan-v0.1.0-Android-arm64.apk')
@@ -36,7 +36,7 @@ def assemble(release_id, output):
     subprocess.run([str(tools/'zipalign'),'-c','-P','16','4',str(target)],check=True)
     asset=assets.get(manifest['filename'])
     if asset is None or asset.get('state')!='uploaded' or asset.get('digest')!='sha256:'+manifest['sha256']:
-        subprocess.run(['gh','release','upload','android-v0.1.0-beta.1',str(target),'--clobber','--repo',REPOSITORY],check=True)
+        subprocess.run(['gh','release','upload',expected_tag,str(target),'--clobber','--repo',REPOSITORY],check=True)
     # Publish only verified signing outputs as a test artifact. The tester can
     # read this with actions:read; unpublished release assets require writers.
     for name in ('AnimeLab-instrumentation.apk','Android-build-info.json','SHA256SUMS.txt'):
@@ -46,4 +46,5 @@ def assemble(release_id, output):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('release_id',type=int);parser.add_argument('output',type=Path)
-    args=parser.parse_args();assemble(args.release_id,args.output)
+    parser.add_argument('--tag', default='android-v0.1.0-beta.1')
+    args=parser.parse_args();assemble(args.release_id,args.output,args.tag)
