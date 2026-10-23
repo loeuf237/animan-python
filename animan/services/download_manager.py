@@ -31,6 +31,7 @@ import httpx
 from animan.config import settings
 from animan.models.download_task import DownloadTask, DownloadStatus, ExportStatus, format_bytes, ensure_utc
 from animan.services.library_service import library_service
+from animan.services import download_preferences
 from animan.services.proxy_service import proxy_service
 from animan.services.scraping_service import scraping_service
 from animan.services.voiranime_service import voiranime_service
@@ -140,6 +141,7 @@ class DownloadManagerService:
 
     def init_from_db(self):
         self.scheduler.closing = False
+        self._load_preferences()
         try:
             library_service.recover_interrupted_exports()
             unfinished = library_service.get_unfinished_tasks()
@@ -213,6 +215,21 @@ class DownloadManagerService:
     async def shutdown(self):
         await self.scheduler.close()
 
+    def _preferences(self):
+        return dict(max_concurrent=self.max_concurrent_downloads, global_limit=self.global_speed_limit,
+                    plex_org=self.plex_organization, user_agent=proxy_service.get_selected_user_agent(),
+                    default_server=self.voiranime_default_server)
+
+    def _load_preferences(self):
+        saved = download_preferences.load()
+        if saved is not None:
+            self.max_concurrent_downloads = saved['max_concurrent']
+            self.global_speed_limit = saved['global_limit']
+            self.plex_organization = bool(saved['plex_org'])
+            self.voiranime_default_server = saved['default_server']
+            voiranime_service.default_server = self.voiranime_default_server
+            proxy_service.set_selected_user_agent(saved['user_agent'])
+
     def get_settings(self) -> Dict[str, Any]:
         return {
             "maxConcurrentDownloads": self.max_concurrent_downloads,
@@ -235,8 +252,17 @@ class DownloadManagerService:
         user_agent: Optional[str] = None,
         voiranime_default_server: Optional[str] = None,
     ):
-        self.max_concurrent_downloads = max(1, max_concurrent)
-        self.set_global_speed_limit(global_limit)
+        # Commit first: a failed write must not appear as a successful setting
+        # change, and a single transaction preserves all preferences together.
+        values = self._preferences()
+        values.update(max_concurrent=max(1, max_concurrent), global_limit=max(0, global_limit), plex_org=plex_org)
+        if user_agent:
+            values['user_agent'] = user_agent.strip() or 'Random (Rotator)'
+        if voiranime_default_server:
+            values['default_server'] = voiranime_default_server
+        download_preferences.save(values)
+        self.max_concurrent_downloads = values['max_concurrent']
+        self.set_global_speed_limit(values['global_limit'], persist=False)
         self.plex_organization = plex_org
         if user_agent:
             proxy_service.set_selected_user_agent(user_agent)
@@ -245,8 +271,13 @@ class DownloadManagerService:
             voiranime_service.default_server = voiranime_default_server
         self._trigger_process_queue()
 
-    def set_global_speed_limit(self, limit_bytes_per_sec: int):
-        self.global_speed_limit = max(0, limit_bytes_per_sec)
+    def set_global_speed_limit(self, limit_bytes_per_sec: int, *, persist=True):
+        limit_bytes_per_sec = max(0, limit_bytes_per_sec)
+        if persist:
+            values = self._preferences()
+            values['global_limit'] = limit_bytes_per_sec
+            download_preferences.save(values)
+        self.global_speed_limit = limit_bytes_per_sec
         for t in self.tasks.values():
             if t.status in [DownloadStatus.DOWNLOADING, DownloadStatus.PENDING]:
                 t.maxSpeedLimit = self.global_speed_limit

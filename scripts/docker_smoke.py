@@ -52,7 +52,9 @@ def main():
             raise RuntimeError('The server cannot find FFmpeg')
         api(base, '/api/favorites', {'url': 'https://example.invalid/docker-smoke',
                                    'title': 'Docker persistence check', 'autoDownload': False})
-        api(base, '/api/download/settings', {'maxConcurrentDownloads': 2, 'globalSpeedLimit': 4096})
+        preferences = {'maxConcurrentDownloads': 2, 'globalSpeedLimit': 4096, 'plexOrganization': True,
+                       'selectedUserAgent': 'Chrome', 'voiranimeDefaultServer': 'sibnet'}
+        api(base, '/api/download/settings', preferences)
         fixture = command('exec', '-T', 'animelab', 'python', '-c', '''
 import json, os, subprocess
 from pathlib import Path
@@ -96,7 +98,8 @@ print(json.dumps({'prefix':p.read_bytes()[:64].hex(), 'size':p.stat().st_size}))
         favorites = api(base, '/api/favorites')
         if not any(f['title'] == 'Docker persistence check' for f in favorites):
             raise RuntimeError('Library did not survive container replacement')
-        if api(base, '/api/download/settings')['globalSpeedLimit'] != 4096:
+        restored = api(base, '/api/download/settings')
+        if any(restored[key] != value for key, value in preferences.items()):
             raise RuntimeError('Settings did not survive container replacement')
         command('exec', '-T', 'animelab', 'python', '-c', '''
 from pathlib import Path

@@ -44,6 +44,8 @@ The default Compose project is named `animelab`, regardless of the checkout fold
 
 The writable home directory is `/data`. All generated user data stays outside
 the application image. Existing desktop data is **not imported automatically**.
+Download concurrency, speed limits, library organization, selected user agent
+and default VoirAnime server are saved in SQLite and restored at startup.
 Keep one server per data volume; do not run multiple replicas against the same
 SQLite database and download queue.
 

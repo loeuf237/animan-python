@@ -138,6 +138,15 @@ def extension_observability(conn):
         'recipe_revision INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(ext_id,operation))')
 
 
+def download_preferences(conn):
+    conn.exec_driver_sql('CREATE TABLE IF NOT EXISTS download_preferences ('
+        'id INTEGER PRIMARY KEY CHECK(id=1), '
+        'max_concurrent INTEGER NOT NULL CHECK(max_concurrent>=1), '
+        'global_limit INTEGER NOT NULL CHECK(global_limit>=0), '
+        'plex_org INTEGER NOT NULL CHECK(plex_org IN (0,1)), '
+        'user_agent TEXT NOT NULL, default_server TEXT NOT NULL)')
+
+
 MIGRATIONS = (
     Migration(1, 'core_tables', bootstrap),
     Migration(2, 'download_identity_and_verification', download_identity),
@@ -145,6 +154,7 @@ MIGRATIONS = (
     Migration(4, 'source_extension_and_network_settings', configuration_tables),
     Migration(5, 'playback_positions_and_selection', playback_tracking),
     Migration(6, 'extension_recipe_history_and_health', extension_observability),
+    Migration(7, 'persistent_download_preferences', download_preferences),
 )
 
 
