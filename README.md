@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/loeuf237/animelab/actions/workflows/ci.yml/badge.svg)](https://github.com/loeuf237/animelab/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/loeuf237/animelab)](https://github.com/loeuf237/animelab/releases/latest)
+[![License: GPLv3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 
 **AnimeLab** lets you discover, watch, download and organize anime episodes from supported sources. It combines a **Python / FastAPI** engine with a **Vue 3 / TypeScript** interface, available on desktop, Android and in a browser.
 
@@ -145,4 +146,6 @@ For backend checks, follow the isolated storage setup in [the CI workflow](.gith
 
 ## License
 
-A project license has not yet been selected. Third-party components retain their own licenses; see the [Android third-party notices](android/app/src/main/assets/THIRD-PARTY-NOTICES.txt) and the notices included in release packages.
+AnimeLab is free software licensed under the **GNU General Public License, version 3 only** (`GPL-3.0-only`). You may use, modify and redistribute it under those terms. Redistributed versions based on AnimeLab must comply with GPLv3, including its corresponding-source requirements. The software is provided without warranty.
+
+See [LICENSE](LICENSE) for the full terms and [NOTICE](NOTICE) for the project notice and source location. Third-party components retain their own licenses; see the [Android third-party notices](android/app/src/main/assets/THIRD-PARTY-NOTICES.txt) and the notices included in release packages.

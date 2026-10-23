@@ -1,3 +1,12 @@
+AnimeLab is licensed under GNU GPL version 3 only (GPL-3.0-only).
+Copyright (C) 2026 AnimeLab contributors.
+AnimeLab is distributed WITHOUT ANY WARRANTY, including MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE.
+Full license: assets/licenses/GPL-3.0.txt
+Source code and build instructions: https://github.com/loeuf237/animelab
+Use the source commit recorded in the release's Android-build-info.json.
+Third-party components below retain their own licenses.
+
 AnimeLab Android includes dynamically loaded FFmpeg/FFprobe libraries.
 Package: dev.ffmpegkit-maintained:ffmpeg-kit-min:6.0.4 (LGPL-3.0).
 Corresponding source and build instructions:

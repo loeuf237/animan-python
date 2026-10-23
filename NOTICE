@@ -1,0 +1,20 @@
+AnimeLab
+Copyright (C) 2026 AnimeLab contributors
+SPDX-License-Identifier: GPL-3.0-only
+
+AnimeLab is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License only.
+
+AnimeLab is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full license is included in LICENSE (assets/licenses/GPL-3.0.txt on Android).
+An official copy is available at https://www.gnu.org/licenses/gpl-3.0.html.
+
+Source code and build instructions: https://github.com/loeuf237/animelab
+For a release, use the source commit recorded in its build-info JSON file.
+
+Third-party components retain their copyright notices and licenses.
+This notice does not replace their licenses or grant rights to third-party media.

@@ -4,6 +4,8 @@
 !Dockerfile
 !requirements.txt
 !run.py
+!LICENSE
+!NOTICE
 !animan/
 !animan/**
 !frontend/

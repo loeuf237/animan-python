@@ -8,6 +8,7 @@ RUN npm run build
 FROM python:3.13-slim-bookworm AS server
 LABEL org.opencontainers.image.title="AnimeLab" \
       org.opencontainers.image.source="https://github.com/loeuf237/animelab" \
+      org.opencontainers.image.licenses="GPL-3.0-only" \
       org.opencontainers.image.description="AnimeLab standalone web server"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -34,6 +35,7 @@ COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY animan/ ./animan/
 COPY run.py ./
+COPY LICENSE NOTICE ./
 COPY --from=frontend /build/dist/ ./frontend/dist/
 
 USER 1000:1000

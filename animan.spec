@@ -14,6 +14,8 @@ if not (frontend / 'index.html').is_file():
 datas = [(str(project / 'animan' / 'templates'), 'animan/templates'),
          (str(project / 'animan' / 'static'), 'animan/static'),
          (str(frontend), 'frontend/dist'),
+         (str(project / 'LICENSE'), '.'),
+         (str(project / 'NOTICE'), '.'),
          (str(project / 'docs' / 'desktop-distribution.md'), '.')]
 datas += collect_data_files('webview') + collect_data_files('curl_cffi')
 metadata = project / 'build' / 'release-metadata'
