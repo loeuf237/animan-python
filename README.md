@@ -35,12 +35,12 @@ Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/a
 | Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
 | macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
 | macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
-| Android ARM64 | `.apk` | [Download beta](https://github.com/loeuf237/animelab/releases/download/android-v0.1.0-beta.1/Animan-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
+| Android ARM64 | `.apk` | [Download beta 2](https://github.com/loeuf237/animelab/releases/download/android-v0.1.0-beta.2/AnimeLab-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
 | Web / Mobile | PWA | [Browser installation](#pwa-installation) | Standalone browser installation on Chrome, Edge, Safari iOS and Android. |
 
 Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
 
-The [**Android 0.1.0 beta**](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.1)
+The [**Android 0.1.0 beta 2**](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.2)
 runs independently of a desktop server. Install the APK on an **Android 10+ / ARM64**
 device; Android may ask you to allow installation from your browser. Verified
 downloads are exported to `Downloads/Animan`, with a private library copy retained.
@@ -53,7 +53,7 @@ ARM64 Python/Vue runtime through native translation. Encode, remux, subtitle mux
 with the same media bridge on x86_64. **That published beta
 has no full ARM64 physical-phone validation.** The beta includes build provenance
 and SHA-256 checksums. See [Android distribution](docs/android-distribution.md),
-[release notes](docs/releases/android-v0.1.0-beta.1.md) and the
+[release notes](docs/releases/android-v0.1.0-beta.2.md) and the
 [technical roadmap](docs/android-embedded-roadmap.md).
 
 The A11 build reduces the ARM64 test APK from **77.76 MB to 61.31 MB
@@ -67,8 +67,9 @@ binaries and R8 maps remain available outside the APK for diagnostics. The
 complete direct/HLS/subtitle/export probe passed on an isolated test app.
 Its DEX, Python engine and native libraries match the normal deliverable exactly.
 Installed storage is measured separately from APK bytes. See [A11 validation](docs/architecture/a11-validation.md)
-for exact measurements and device coverage. These source changes do not replace
-the APK already published on GitHub.
+for exact measurements and device coverage. These packaging optimizations are
+included in beta 2; the earlier physical-phone measurements refer to the separate
+A11 validation build, not the newly published APK.
 
 ## Language and default source
 
@@ -167,7 +168,7 @@ An automatic domain rotation also requeues existing downloads waiting for verifi
 - Explicit preparation, video download, subtitle download, assembly, muxing and verification phases. Unknown total sizes show bytes received instead of a misleading percentage.
 - Android export has a separate persistent state: `NOT_REQUESTED`, `PENDING`, `EXPORTING`, `EXPORTED` or `EXPORT_FAILED`, with destination, confirmed URIs, attempts, timestamp and diagnostic. A verified private video stays completed if shared-storage publication fails or is interrupted. **Retry export** copies the local files without downloading them again; interrupted exports remain visible after restart and survive bulk cleanup.
 
-These tracking/export changes (A01/A02) are included in the current source checkout; they require a rebuilt application and are not part of the previously published beta APK. Database upgrades preserve existing favorites, cursors and tasks. Legacy Android export failures move to the export diagnostic; old tasks without confirmed URI evidence show an unknown export state.
+These tracking/export changes (A01/A02) are included in the source checkout and Android beta 2. Database upgrades preserve existing favorites, cursors and tasks. Legacy Android export failures move to the export diagnostic; old tasks without confirmed URI evidence show an unknown export state.
 
 Retries reuse valid local video and subtitle files before contacting the host. Subtitle requests have bounded retries and explicit errors; expired URLs can be re-extracted once. Partial subtitle success is persisted. Muxing validates a temporary file before publication; existing MKVs are preserved and a conflicting new export receives a distinct filename. Legacy tasks referencing a removed MP4 can recover the corresponding MKV after video and requested-track checks. Verification distinguishes actual decoder failures from timestamp diagnostics produced by FFmpeg's null output.
 
@@ -177,7 +178,7 @@ An active media connection keeps its proxy. If reading fails, the connection is 
 
 API JSON responses expose `X-Animan-API-Version: 1`. Typed request/response contracts are documented in `/openapi.json`; binary video and event streams keep their streaming behavior. JSON failures retain legacy `error`, `detail` and `code` fields and add a `problem` object with a category, translatable message and recovery action. Categories distinguish site protection, network failure, rate limits, media processing, storage permission and export failure. Provider-specific recipes and settings remain typed JSON because their keys vary by extension.
 
-The A06/A07/A08 changes are available in the source checkout. They require a rebuilt Android application; Python tests and Kotlin compilation do not replace device tests. See the [implementation and manual validation guide](docs/architecture/a06-a08-validation.md) for coverage and remaining limits.
+The A06/A07/A08 changes are available in the source checkout and Android beta 2. Automated emulator checks do not replace physical-device validation. See the [implementation and manual validation guide](docs/architecture/a06-a08-validation.md) for coverage and remaining limits.
 
 ### Modular engine, source registry and database upgrades
 
@@ -375,8 +376,8 @@ SQLite migrations 5 and 6 add playback history, recipe revisions and extension
 health without deleting the existing library. The implementation and manual
 validation steps are documented in
 [the A10/A12/A13 validation guide](docs/architecture/a10-a12-a13-validation.md).
-These source changes require a rebuilt package before they are available in an
-already-installed desktop build or Android APK.
+These changes are included in Android beta 2. Older installed Android and desktop
+packages require an update or rebuild before they can use them.
 
 ## Regression tests
 

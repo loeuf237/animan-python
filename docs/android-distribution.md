@@ -1,10 +1,11 @@
 # Android distribution and validation
 
-The [0.1.0 Android beta](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.1)
+The [0.1.0 Android beta 2](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.2)
 ships one signed ARM64 APK, build provenance and checksums. It is a standalone
 application, not a wrapper requiring a running desktop server. Full ARM64
-physical-device validation remains pending for that previously published APK;
-the newer A11 source build is validated separately below.
+physical-device validation remains pending for this APK; earlier A11 device
+validation is documented separately below. The published package was compiled,
+signed and tested by [GitHub Actions](https://github.com/loeuf237/animelab/actions/runs/39996480463).
 
 The current target is Android 10+ / ARM64, Python 3.13 and Chaquopy 17.1.0.
 `android/requirements.txt` pins the runtime. `scripts/android_native_wheels.py`
@@ -91,8 +92,8 @@ passwords only to the Gradle build step, and removes the temporary key even afte
 failure. It verifies the production certificate on both APKs and checks it again
 before publication. The existing identity is retained for in-place updates. The
 `android/keystore/` directory is ignored; never commit or publish its contents.
-Preserve a secure local backup of the release identity for updates. The next
-publication targets `android-v0.1.0-beta.2` and never modifies desktop `v0.1.0`.
+Preserve a secure local backup of the release identity for updates. This
+publication uses `android-v0.1.0-beta.2` and never modifies desktop `v0.1.0`.
 
 Local signing avoids transferring the private identity to GitHub:
 
