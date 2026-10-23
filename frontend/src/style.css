@@ -4603,7 +4603,7 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-colo
 .notification-info { border-left-color: var(--accent); }
 .notification-close { border: 0; background: transparent; color: var(--muted); font-size: 24px; min-width: 44px; min-height: 44px; cursor: pointer; }
 .dialog-overlay { position: fixed; inset: 0; z-index: 1200; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; padding: 16px; }
-.confirmation-dialog { width: min(560px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: 18px; padding: 24px; box-shadow: var(--shadow); }
+.confirmation-dialog { width: min(560px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; background: var(--panel); color: var(--text); border: 1px solid var(--line-strong); border-radius: 18px; padding: 24px; box-shadow: var(--shadow); }
 .confirmation-dialog h2 { font-size: 22px; margin: 0 0 16px; }
 .confirmation-body { line-height: 1.6; overflow-wrap: anywhere; }
 .confirmation-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
@@ -4655,3 +4655,37 @@ input:not([type="checkbox"]):not([type="radio"]), select, textarea { border-colo
 /* The search icon is a flex child of the button, not an absolutely positioned input icon. */
 .app-topbar .search-trigger { align-self: center; margin: 0; height: 44px; }
 .app-topbar .search-trigger .search-icon { position: static; transform: none; }
+
+/* Mobile layout: keep intrinsic text and controls inside the viewport. */
+@media (max-width: 768px) {
+  :root { --mobile-nav-height: 64px; --topbar: calc(60px + env(safe-area-inset-top, 0px)); }
+  .app-topbar { padding-top: env(safe-area-inset-top, 0px); }
+  html { scroll-padding-top: calc(var(--topbar) + 12px); scroll-padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 12px); }
+  .main-content { padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 20px); }
+  .bottom-nav { height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px)); padding: 0 4px env(safe-area-inset-bottom, 0px); }
+  .bottom-nav-link { flex: 1 1 0; height: var(--mobile-nav-height); min-width: 0; font-size: 10px; }
+  .bottom-nav-link > span:not(.bottom-nav-badge) { max-width: 100%; white-space: nowrap; }
+  .bottom-nav-link svg { width: 21px; height: 21px; }
+  .page-header, .dashboard-header { gap: 12px; margin-bottom: 16px; }
+  .page-title { font-size: 24px; line-height: 1.2; }
+  .page-sub { font-size: 13px; line-height: 1.5; }
+  .settings-page-layout { min-width: 0; gap: 16px; }
+  .settings-card-pro { min-width: 0; border-radius: 14px; }
+  .settings-card-header-pro { padding: 14px; gap: 10px; }
+  .settings-card-header-pro > div { min-width: 0; }
+  .settings-card-icon-pro { width: 32px; height: 32px; border-radius: 10px; }
+  .settings-card-title-pro { font-size: 16px; }
+  .settings-card-sub-pro { font-size: 12px; line-height: 1.45; }
+  .setting-row-pro { padding: 14px; gap: 10px; }
+  .setting-meta-pro, .setting-ctrl-pro { min-width: 0; width: 100%; }
+  .setting-title-pro { font-size: 14px; }
+  .setting-desc-pro { font-size: 12px; overflow-wrap: anywhere; }
+  .setting-ctrl-pro { flex-wrap: wrap; gap: 8px; }
+  .setting-select-pro, .setting-ctrl-pro input, .setting-ctrl-pro select { min-width: 0; max-width: 100%; }
+  .setting-ctrl-pro .input-premium { min-height: 44px; }
+  .settings-nav-tab, .source-tab-btn { flex-shrink: 0; }
+  .notification-region { bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 12px); }
+}
+@media (max-width: 359px) {
+  .bottom-nav-link { font-size: 9px; }
+}

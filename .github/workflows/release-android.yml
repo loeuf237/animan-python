@@ -11,7 +11,7 @@ on:
         default: false
       tag_name:
         description: Android release tag
-        default: android-v0.1.0-beta.2
+        default: android-v0.1.1-beta.1
         required: true
 
 permissions:
@@ -250,4 +250,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$RELEASE_TAG" release-assets/* --target "$GITHUB_SHA" \
-            --title "AnimeLab 0.1.0 Android beta 2" --prerelease --notes-file docs/releases/android-v0.1.0-beta.2.md
+            --title "AnimeLab ${RELEASE_TAG#android-v} Android" --prerelease --notes-file "docs/releases/$RELEASE_TAG.md"

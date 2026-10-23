@@ -31,17 +31,17 @@ Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/a
 
 | Platform | Format | Access | Description |
 | :--- | :---: | :--- | :--- |
-| Windows x64 | `.zip` / `.exe` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip) | Python engine, Vue interface and media tools included; WebView2 or installed-browser fallback. |
-| Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
-| macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
-| macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
-| Android ARM64 | `.apk` | [Download beta 2](https://github.com/loeuf237/animelab/releases/download/android-v0.1.0-beta.2/AnimeLab-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
+| Windows x64 | `.zip` / `.exe` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.1/AnimeLab-v0.1.1-Windows-x64.zip) | Python engine, Vue interface and media tools included; WebView2 or installed-browser fallback. |
+| Linux x64 | `.tar.gz` | [Download](https://github.com/loeuf237/animelab/releases/download/v0.1.1/AnimeLab-v0.1.1-Linux-x64.tar.gz) | Ubuntu 22.04 build baseline; GTK/WebKit window or installed-browser fallback. |
+| macOS Apple Silicon | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.1/AnimeLab-v0.1.1-macOS-arm64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
+| macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.1/AnimeLab-v0.1.1-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
+| Android ARM64 | `.apk` | [Download beta 1](https://github.com/loeuf237/animelab/releases/download/android-v0.1.1-beta.1/AnimeLab-v0.1.1-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
 | Web / Mobile | PWA | [Browser installation](#pwa-installation) | Standalone browser installation on Chrome, Edge, Safari iOS and Android. |
 | Docker server | Container | [Docker setup](docs/docker.md) | Python server, compiled Vue interface and FFmpeg; persistent library and downloads. |
 
 Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
 
-The [**Android 0.1.0 beta 2**](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.0-beta.2)
+The [**Android 0.1.1 beta 1**](https://github.com/loeuf237/animelab/releases/tag/android-v0.1.1-beta.1)
 runs independently of a desktop server. Install the APK on an **Android 10+ / ARM64**
 device; Android may ask you to allow installation from your browser. Verified
 downloads are exported to `Downloads/Animan`, with a private library copy retained.
@@ -54,11 +54,11 @@ ARM64 Python/Vue runtime through native translation. Encode, remux, subtitle mux
 with the same media bridge on x86_64. **That published beta
 has no full ARM64 physical-phone validation.** The beta includes build provenance
 and SHA-256 checksums. See [Android distribution](docs/android-distribution.md),
-[release notes](docs/releases/android-v0.1.0-beta.2.md) and the
+[release notes](docs/releases/android-v0.1.1-beta.1.md) and the
 [technical roadmap](docs/android-embedded-roadmap.md).
 
-The A11 build reduces the ARM64 test APK from **77.76 MB to 61.31 MB
-(21.16%)**; the normal signed deliverable is **61.36 MB**. On an Android 10 ARM64
+For reference, the earlier A11 build reduced the ARM64 test APK from **77.76 MB to 61.31 MB
+(21.16%)**; its signed deliverable was **61.36 MB**. On an Android 10 ARM64
 phone, installed application and data after first render fell from **137.52 MB
 to 97.37 MB (29.20%)** with clean test data.
 It keeps the complete Python engine, FFmpeg and yt-dlp extractors. Release builds
@@ -69,7 +69,7 @@ complete direct/HLS/subtitle/export probe passed on an isolated test app.
 Its DEX, Python engine and native libraries match the normal deliverable exactly.
 Installed storage is measured separately from APK bytes. See [A11 validation](docs/architecture/a11-validation.md)
 for exact measurements and device coverage. These packaging optimizations are
-included in beta 2; the earlier physical-phone measurements refer to the separate
+included since 0.1.0 beta 2; the earlier physical-phone measurements refer to the separate
 A11 validation build, not the newly published APK.
 
 ## Language and default source
@@ -169,7 +169,7 @@ An automatic domain rotation also requeues existing downloads waiting for verifi
 - Explicit preparation, video download, subtitle download, assembly, muxing and verification phases. Unknown total sizes show bytes received instead of a misleading percentage.
 - Android export has a separate persistent state: `NOT_REQUESTED`, `PENDING`, `EXPORTING`, `EXPORTED` or `EXPORT_FAILED`, with destination, confirmed URIs, attempts, timestamp and diagnostic. A verified private video stays completed if shared-storage publication fails or is interrupted. **Retry export** copies the local files without downloading them again; interrupted exports remain visible after restart and survive bulk cleanup.
 
-These tracking/export changes (A01/A02) are included in the source checkout and Android beta 2. Database upgrades preserve existing favorites, cursors and tasks. Legacy Android export failures move to the export diagnostic; old tasks without confirmed URI evidence show an unknown export state.
+These tracking/export changes (A01/A02) are included in the source checkout and Android 0.1.1 beta 1. Database upgrades preserve existing favorites, cursors and tasks. Legacy Android export failures move to the export diagnostic; old tasks without confirmed URI evidence show an unknown export state.
 
 Retries reuse valid local video and subtitle files before contacting the host. Subtitle requests have bounded retries and explicit errors; expired URLs can be re-extracted once. Partial subtitle success is persisted. Muxing validates a temporary file before publication; existing MKVs are preserved and a conflicting new export receives a distinct filename. Legacy tasks referencing a removed MP4 can recover the corresponding MKV after video and requested-track checks. Verification distinguishes actual decoder failures from timestamp diagnostics produced by FFmpeg's null output.
 
@@ -179,7 +179,7 @@ An active media connection keeps its proxy. If reading fails, the connection is 
 
 API JSON responses expose `X-Animan-API-Version: 1`. Typed request/response contracts are documented in `/openapi.json`; binary video and event streams keep their streaming behavior. JSON failures retain legacy `error`, `detail` and `code` fields and add a `problem` object with a category, translatable message and recovery action. Categories distinguish site protection, network failure, rate limits, media processing, storage permission and export failure. Provider-specific recipes and settings remain typed JSON because their keys vary by extension.
 
-The A06/A07/A08 changes are available in the source checkout and Android beta 2. Automated emulator checks do not replace physical-device validation. See the [implementation and manual validation guide](docs/architecture/a06-a08-validation.md) for coverage and remaining limits.
+The A06/A07/A08 changes are available in the source checkout and Android 0.1.1 beta 1. Automated emulator checks do not replace physical-device validation. See the [implementation and manual validation guide](docs/architecture/a06-a08-validation.md) for coverage and remaining limits.
 
 ### Modular engine, source registry and database upgrades
 
@@ -211,15 +211,15 @@ Enable subtitles for the episode or batch. Tracks must be available from the sou
 
 ## Windows
 
-1. Download [Animan-v0.1.0-Windows-x64.zip](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-Windows-x64.zip).
+1. Download [AnimeLab-v0.1.1-Windows-x64.zip](https://github.com/loeuf237/animelab/releases/download/v0.1.1/AnimeLab-v0.1.1-Windows-x64.zip).
 2. Extract the archive into a directory such as `C:\AnimeLab`.
-3. Run `Animan.exe`.
+3. Run `AnimeLab.exe`.
 4. AnimeLab starts the local server and opens a native Microsoft Edge WebView2 window.
 
 ## Linux and macOS
 
-For packaged builds, extract the whole archive and run `./Animan` on Linux or open
-`Animan.app` on macOS. Choose the correct Mac architecture. **macOS is UNTESTED on
+For packaged builds, extract the whole archive and run `./AnimeLab` on Linux or open
+`AnimeLab.app` on macOS. Choose the correct Mac architecture. **macOS is UNTESTED on
 real hardware**, unsigned by Developer ID and not notarized. Linux archives need
 a compatible system (glibc 2.35+); they are not universal AppImages.
 
@@ -395,7 +395,7 @@ SQLite migrations 5 and 6 add playback history, recipe revisions and extension
 health without deleting the existing library. The implementation and manual
 validation steps are documented in
 [the A10/A12/A13 validation guide](docs/architecture/a10-a12-a13-validation.md).
-These changes are included in Android beta 2. Older installed Android and desktop
+These changes are included in Android 0.1.1 beta 1. Older installed Android and desktop
 packages require an update or rebuild before they can use them.
 
 ## Regression tests
@@ -428,8 +428,16 @@ Run frontend regressions and the TypeScript/Vue build from `frontend/`:
 ```bash
 npm ci
 npm test
+npx playwright install --with-deps chromium
+npm run test:ui
 npm run build
 ```
+
+Responsive browser tests cover 320–1440 px screens, French/dark and English/light
+interfaces, download states, Android export controls, sources, settings and search.
+They intercept all API calls, so they cannot change your library or start downloads.
+Captures are written to `artifacts/mobile-ui/`; see [mobile UI validation](docs/mobile-ui.md)
+for scope and the device checklist.
 
 ## License
 
@@ -437,4 +445,4 @@ This project is intended for personal and educational use. See the repository's 
 
 ## Continuous integration
 
-[CI](.github/workflows/ci.yml) runs on every branch push and pull request, and can also be started manually. It runs the Python test suite on Python 3.12 and 3.13 with FFmpeg and LLVM, and runs the frontend tests, TypeScript checks and Vite production build on Node 22. A separate job compiles the Android manifest and launcher resources without signing an APK or rebuilding native libraries. Tests use temporary storage. Jobs have read-only repository access and require no signing secrets. Test reports and the built interface are retained for seven days. Android and desktop release workflows remain separate.
+[CI](.github/workflows/ci.yml) runs on every branch push and pull request, and can also be started manually. It runs the Python test suite on Python 3.12 and 3.13 with FFmpeg and LLVM, and runs the frontend tests, TypeScript checks, responsive Chromium browser tests and Vite production build on Node 22. Browser reports and UI captures are uploaded as `animelab-ui-validation`. A separate job compiles the Android manifest and launcher resources without signing an APK or rebuilding native libraries. Tests use temporary storage. Jobs have read-only repository access and require no signing secrets. Test reports and the built interface are retained for seven days. Android and desktop release workflows remain separate.

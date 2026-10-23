@@ -1,5 +1,5 @@
 <template>
-  <div class="settings-page-layout fade-in" style="max-width: 1200px; margin: 0 auto; padding: 24px 20px;">
+  <div class="extensions-view settings-page-layout fade-in">
     <!-- En-tête -->
     <header class="page-header" style="margin-bottom: 28px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
       <div>
@@ -19,7 +19,7 @@
     </header>
 
     <!-- Carte d'importation d'un magasin -->
-    <section class="settings-card-pro" style="margin-bottom: 28px; padding: 24px;">
+    <section class="settings-card-pro extension-repo-card">
       <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
         <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(139, 92, 246, 0.2); display: flex; align-items: center; justify-content: center; color: #a78bfa;">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m8 17 4 4 4-4"/></svg>
@@ -36,8 +36,7 @@
           <input
             v-model="repoUrl"
             type="url"
-            class="input-premium"
-            style="flex: 1; min-width: 320px; padding: 12px 16px; font-size: 0.95rem;"
+            class="input-premium extension-repo-input"
             placeholder="https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json"
             required
           />
@@ -122,7 +121,7 @@
         </button>
       </div>
 
-      <div style="position: relative; min-width: 260px; flex: 1; max-width: 360px;">
+      <div class="extension-filter-field">
         <input
           v-model="searchQuery"
           type="text"
@@ -425,6 +424,18 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.extensions-view { max-width: 1200px; padding: 24px 20px; }
+.extension-repo-card { margin-bottom: 28px; padding: 24px; }
+.extension-repo-input { flex: 1; min-width: min(320px, 100%); padding: 12px 16px; font-size: .95rem; }
+.extension-filter-field { position: relative; min-width: min(260px, 100%); flex: 1; max-width: 360px; }
+@media (max-width: 768px) {
+  .extensions-view { padding: 0; }
+  .extension-repo-card { padding: 14px; margin-bottom: 0; }
+  .extension-repo-input { width: 100%; min-width: 0; flex-basis: 100%; }
+  .extension-filter-field { min-width: 0; width: 100%; flex-basis: 100%; }
+  .extension-actions .btn { min-height: 44px; }
+}
+
 .extension-health {min-width:0;display:grid;gap:4px;font-size:.78rem;overflow-wrap:anywhere;}
 .extension-health small {color:var(--text-secondary);}
 .toast-notification {

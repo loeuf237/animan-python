@@ -880,5 +880,9 @@
   "Recette modifiée, test nécessaire.": "Recipe changed; test required.",
   "Audio": "Audio",
   "Audio :": "Audio:",
-  "Une autre fenêtre a repris la lecture de cet épisode.": "Another window has taken over playback of this episode."
+  "Une autre fenêtre a repris la lecture de cet épisode.": "Another window has taken over playback of this episode.",
+  "Actions et réglages": "Actions and settings",
+  "Section": "Section",
+  "Voir l’emplacement": "View location",
+  "Exporter": "Export"
 }

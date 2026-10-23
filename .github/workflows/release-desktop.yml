@@ -8,7 +8,7 @@ on:
       tag_name:
         description: Existing release tag
         required: true
-        default: v0.1.0
+        default: v0.1.1
 
 permissions:
   contents: read
@@ -118,7 +118,7 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: AnimeLab ${{ env.RELEASE_TAG }} — Python + Vue (macOS UNTESTED)
-          body_path: docs/releases/v0.1.0.md
+          body_path: docs/releases/${{ env.RELEASE_TAG }}.md
           files: release-assets/*
           fail_on_unmatched_files: true
           make_latest: true

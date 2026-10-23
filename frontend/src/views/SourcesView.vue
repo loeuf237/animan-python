@@ -226,3 +226,29 @@ onUnmounted(() => { disposed = true; generation++; verification.clearPending('so
 .source-identity > div { min-width: 0; }
 @media (max-width: 768px) { .source-avatar { display: none; } .sources-view { gap: 16px; } .source-card-actions { margin-top: 12px; gap: 8px; } }
 </style>
+
+<style scoped>
+@media (max-width: 768px) {
+  .sources-view { padding: 0; gap: 16px; }
+  .source-heading { gap: 10px; }
+  .source-heading h1 { font-size: 24px; margin-bottom: 4px; }
+  .source-heading p { margin: 0; font-size: 13px; }
+  .source-heading .btn { min-height: 44px; font-size: 12px; }
+  .source-group h2 { font-size: 16px; margin: 0 0 10px; }
+  .source-list { gap: 10px; }
+  .source-card { padding: 12px; border-radius: 14px; }
+  .source-identity { gap: 10px; }
+  .source-identity h3 { font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; margin-bottom: 2px; }
+  .source-pin { width: 44px; height: 44px; }
+  .source-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+  .source-card-actions .btn { padding: 6px 8px; border-radius: 10px; font-size: 12px; min-height: 44px; white-space: normal; }
+  .catalogue-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 4px; gap: 6px; }
+  .catalogue-tabs .btn { flex-shrink: 0; min-height: 44px; padding: 6px 12px; font-size: 12px; }
+  .catalogue-controls { padding: 12px; }
+  .catalogue-tools { gap: 8px; }
+  .catalogue-tools label { min-width: 0; flex-wrap: wrap; }
+  .catalogue-tools select { max-width: 100%; min-width: 0; }
+  .catalogue-search input { font-size: 16px; }
+  .input[type="search"] { min-width: 0; }
+}
+</style>

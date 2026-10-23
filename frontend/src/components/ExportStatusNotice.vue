@@ -1,7 +1,7 @@
 <template>
   <div v-if="visible" class="export-notice" :class="{ 'export-warning': retryable }" role="status">
     <strong>{{ tx(label) }}</strong>
-    <span v-if="task.exportDestination">{{ task.exportDestination }}</span>
+    <details v-if="task.exportDestination"><summary>{{ tx('Voir l’emplacement') }}</summary><span>{{ task.exportDestination }}</span></details>
     <span v-if="retryable">{{ tx('La vidéo vérifiée reste disponible dans la bibliothèque.') }}</span>
     <details v-if="task.exportError"><summary>{{ tx('Détail de l’export') }}</summary>{{ tx(task.exportError) }}</details>
   </div>
@@ -21,4 +21,5 @@ const label = computed(() => ({ EXPORTING: 'Copie vers le stockage en cours', EX
 .export-notice { display: grid; gap: 4px; padding: 10px; margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: .85rem; overflow-wrap: anywhere; }
 .export-warning { border-color: var(--warning, #d97706); }
 .export-notice span { color: var(--muted); }
+.export-notice summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; text-decoration: underline; }
 </style>

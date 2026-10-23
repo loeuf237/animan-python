@@ -59,6 +59,7 @@ onUnmounted(() => { if (timer) clearInterval(timer); window.removeEventListener(
 </script>
 
 <style scoped>
+.android-storage { padding: 16px; }
 .android-storage h2 { margin: 0 0 12px; font-size: 1.15rem; }
 .android-storage p { color: var(--text-secondary); line-height: 1.55; overflow-wrap: anywhere; }
 .storage-access-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin: 20px 0 12px; }

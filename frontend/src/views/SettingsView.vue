@@ -1,7 +1,7 @@
 <template>
-  <div class="settings-dashboard-pro settings-page-layout fade-in" style="max-width: 960px; margin: 0 auto; padding: 24px 20px;">
+  <div class="settings-dashboard-pro settings-page-layout fade-in">
     <!-- Header principal -->
-    <header class="settings-header-pro" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px; margin-bottom:24px;">
+    <header class="settings-header-pro">
       <div>
         <h1 class="page-title" style="margin: 0;">{{ tx("Paramètres") }}</h1>
         <p class="page-sub" style="margin: 4px 0 0;">{{ tx("Configurez l'interface, les répertoires, les débits et le proxy réseau.") }}</p>
@@ -14,7 +14,17 @@
     </header>
 
     <!-- Sous-onglets horizontaux de paramètres -->
-    <nav class="settings-nav-tabs" role="tablist" style="margin-bottom: 24px;">
+    <label class="settings-section-select">
+      <span>{{ tx('Section') }}</span>
+      <select v-model="currentTab" class="input-premium">
+        <option value="general">{{ tx('Général') }}</option>
+        <option value="downloads">{{ tx('Téléchargements') }}</option>
+        <option value="sources">Sources</option>
+        <option value="storage">{{ tx('Système & Stockage') }}</option>
+        <option value="proxy">{{ tx('Proxy & Réseau') }}</option>
+      </select>
+    </label>
+    <nav class="settings-nav-tabs" :aria-label="tx('Section')">
       <button
         type="button"
         class="settings-nav-tab"
@@ -216,7 +226,7 @@
         </div>
 
         <!-- Sous-onglets sources -->
-        <div class="source-tabs-container" style="padding: 16px 24px; border-bottom: 1px solid var(--line); display:flex; gap:10px;">
+        <div class="source-tabs-container">
           <button
             type="button"
             class="source-tab-btn"
@@ -726,6 +736,22 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.settings-dashboard-pro { padding: 24px 20px; }
+.settings-header-pro { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.settings-section-select { display: none; }
+@media (max-width: 768px) {
+  .settings-dashboard-pro { padding: 0; gap: 16px; }
+  .settings-header-pro { gap: 12px; }
+  .settings-header-pro .page-sub { font-size: 13px; line-height: 1.5; }
+  .settings-header-pro > button { width: 100%; }
+  .settings-nav-tabs { display: none; }
+  .settings-section-select { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+  .settings-section-select select { width: 100%; min-width: 0; min-height: 44px; }
+  .source-tabs-container { flex-wrap: wrap; padding: 12px; gap: 6px; }
+  .source-tab-btn { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 6px 10px; }
+  .source-tab-btn svg { flex-shrink: 0; }
+  .toast-notification { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); left: 12px; right: 12px; }
+}
 .settings-tab-pane.active {
   display: block !important;
 }

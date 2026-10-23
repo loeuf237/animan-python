@@ -96,3 +96,8 @@ android/wheels/
 
 # Local IDE workspace
 .idea/
+
+# Browser regression reports and local UI captures
+frontend/test-results/
+frontend/playwright-report/
+artifacts/mobile-ui/

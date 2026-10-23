@@ -3,7 +3,7 @@
     <!-- Header avec Statistiques -->
     <section class="dashboard-header">
       <div>
-        <h1 class="page-title">{{ tx("Gestionnaire des Téléchargements") }}</h1>
+        <h1 class="page-title">{{ tx("Téléchargements") }}</h1>
         <p class="page-sub">{{ tx("Suivez vos épisodes et reprenez les téléchargements interrompus.") }}</p>
       </div>
 
@@ -42,7 +42,7 @@
           :aria-pressed="tab === 'queue'"
           type="button"
           @click="tab = 'queue'"
-        > {{ tx("En cours & Attente") }} <span class="tab-badge badge-queue">{{ tx(activeAndQueuedCount) }}</span>
+        > <span class="queue-tab-label">{{ tx("En cours & Attente") }}</span><span class="queue-tab-label-mobile">{{ tx("En cours") }}</span> <span class="tab-badge badge-queue">{{ tx(activeAndQueuedCount) }}</span>
         </button>
         <button
           class="tab-btn"
@@ -70,7 +70,10 @@
         </button>
       </div>
 
-      <div class="download-actions">
+      <button type="button" class="btn download-tools-toggle" :aria-expanded="isActionsOpen" aria-controls="download-global-actions" @click="isActionsOpen = !isActionsOpen">
+        {{ tx('Actions et réglages') }} <span aria-hidden="true">{{ isActionsOpen ? '−' : '+' }}</span>
+      </button>
+      <div id="download-global-actions" class="download-actions" :class="{ 'actions-open': isActionsOpen }">
         <span class="connection-status" role="status">{{ tx(downloadStore.isConnected ? 'Suivi en direct' : 'Actualisation périodique') }}</span>
         <!-- Actions globales selon l'onglet -->
         <button
@@ -96,7 +99,7 @@
           class="btn btn-sm"
           type="button"
           :disabled="isVerifyingAll"
-          :title="tx('Vérifier la validité de tous les fichiers vidéo téléchargés')"
+          :aria-label="tx('Vérifier la validité de tous les fichiers vidéo téléchargés')" :title="tx('Vérifier la validité de tous les fichiers vidéo téléchargés')"
           @click="verifyAll"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
@@ -107,7 +110,7 @@
           v-if="tab === 'errors'"
           class="btn btn-warning btn-sm"
           type="button"
-          :title="tx('Relancer tous les téléchargements en échec')"
+          :aria-label="tx('Relancer tous les téléchargements en échec')" :title="tx('Relancer tous les téléchargements en échec')"
           @click="retryAllErrors"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg> {{ tx("Tout relancer") }} </button>
@@ -125,7 +128,7 @@
           v-if="tab === 'done' || tab === 'errors'"
           class="btn btn-danger-outline btn-sm"
           type="button"
-          :title="tx('Nettoyer les tâches de cette vue')"
+          :aria-label="tx('Nettoyer les tâches de cette vue')" :title="tx('Nettoyer les tâches de cette vue')"
           @click="performAction(() => downloadStore.cleanCompleted())"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg> {{ tx("Nettoyer") }} </button>
@@ -135,7 +138,7 @@
           class="btn btn-icon-round"
           :class="{ active: isSettingsOpen }"
           type="button"
-          :title="tx('Paramètres rapides de débit et téléchargement')"
+          :aria-label="tx('Paramètres rapides de débit et téléchargement')" :title="tx('Paramètres rapides de débit et téléchargement')"
           @click="isSettingsOpen = !isSettingsOpen"
         >
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -244,7 +247,10 @@
       <router-link to="/" class="btn btn-primary" style="margin-top: 14px;"> {{ tx("Rechercher des animés") }} </router-link>
     </div>
 
-    <VerificationPrompt :challenges="downloadChallenges" />
+    <details v-if="downloadChallenges.length" class="download-verification">
+      <summary>{{ tx('Vérification nécessaire') }} · {{ downloadChallenges.length }}</summary>
+      <VerificationPrompt :challenges="downloadChallenges" />
+    </details>
     <!-- Liste des Tâches -->
     <div v-if="filteredTasks.length" class="tasks-table">
       <div
@@ -339,7 +345,7 @@
                 v-if="task.status === 'downloading' || task.status === 'queued' || task.status === 'paused'"
                 type="button"
                 class="speed-limit-chip"
-                :title="tx(task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `Plafond actuel : ${Math.round(task.maxSpeedLimit / 1024)} Ko/s (Cliquer pour modifier)` : 'Définir un plafond de vitesse pour ce téléchargement')"
+                :aria-label="tx(task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `Plafond actuel : ${Math.round(task.maxSpeedLimit / 1024)} Ko/s (Cliquer pour modifier)` : 'Définir un plafond de vitesse pour ce téléchargement')" :title="tx(task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `Plafond actuel : ${Math.round(task.maxSpeedLimit / 1024)} Ko/s (Cliquer pour modifier)` : 'Définir un plafond de vitesse pour ce téléchargement')"
                 @click="openSpeedLimitModal(task)"
               >
                 <span>⚡ {{ tx(task.maxSpeedLimit && task.maxSpeedLimit > 0 ? `${Math.round(task.maxSpeedLimit / 1024)} Ko/s` : 'Limiter') }}</span>
@@ -359,33 +365,33 @@
         <div class="task-col-actions">
           <!-- Actif : Pause & Annuler -->
           <template v-if="task.status === 'downloading' && !['assembling', 'muxing', 'verifying'].includes(task.phase || '')">
-            <button class="btn btn-sm btn-icon" :title="tx('Mettre en pause')" @click="performAction(() => downloadStore.pauseDownload(task.id))">
+            <button class="btn btn-sm btn-icon" :aria-label="tx('Mettre en pause')" :title="tx('Mettre en pause')" @click="performAction(() => downloadStore.pauseDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5v14M16 5v14"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Annuler le téléchargement')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :aria-label="tx('Annuler le téléchargement')" :title="tx('Annuler le téléchargement')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </template>
 
           <!-- En pause : Reprendre & Annuler -->
           <template v-else-if="task.status === 'paused'">
-            <button class="btn btn-success btn-sm btn-icon" :title="tx('Reprendre')" @click="performAction(() => downloadStore.resumeDownload(task.id))">
+            <button class="btn btn-success btn-sm btn-icon" :aria-label="tx('Reprendre')" :title="tx('Reprendre')" @click="performAction(() => downloadStore.resumeDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4v16l13-8Z"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Annuler')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :aria-label="tx('Annuler')" :title="tx('Annuler')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </template>
 
           <!-- En file d'attente : Monter en tête, Prioriser la série, Annuler -->
           <template v-else-if="task.status === 'queued'">
-            <button class="btn btn-sm btn-icon" :title="tx('Monter en tête de file d\'attente')" @click="moveTaskToTop(task)">
+            <button class="btn btn-sm btn-icon" :aria-label="tx('Monter en tête de file d\'attente')" :title="tx('Monter en tête de file d\'attente')" @click="moveTaskToTop(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
             </button>
-            <button class="btn btn-sm btn-icon" :title="tx('Prioriser tous les épisodes de cette série')" @click="moveSeriesToTop(task)">
+            <button class="btn btn-sm btn-icon" :aria-label="tx('Prioriser tous les épisodes de cette série')" :title="tx('Prioriser tous les épisodes de cette série')" @click="moveSeriesToTop(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Annuler')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :aria-label="tx('Annuler')" :title="tx('Annuler')" @click="performAction(() => downloadStore.cancelDownload(task.id))">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </template>
@@ -398,23 +404,23 @@
 
           <!-- Terminé : Lire (Mode Cinéma local), Vérifier l'intégrité, Supprimer -->
           <template v-else-if="task.status === 'completed'">
-            <button v-if="androidStorage" class="btn btn-secondary btn-sm" :disabled="exportingTask === String(task.id) || task.exportStatus === 'EXPORTING'" @click="exportToStorage(task)">{{ tx(task.exportStatus === 'EXPORT_FAILED' || task.exportStatus === 'PENDING' ? 'Réessayer l’export' : 'Exporter vers le stockage') }}</button>
+            <button v-if="androidStorage" class="btn btn-secondary btn-sm" :aria-label="tx(task.exportStatus === 'EXPORT_FAILED' || task.exportStatus === 'PENDING' ? 'Réessayer l’export' : 'Exporter vers le stockage')" :title="tx('Exporter vers le stockage')" :disabled="exportingTask === String(task.id) || task.exportStatus === 'EXPORTING'" @click="exportToStorage(task)">{{ tx(task.exportStatus === 'EXPORT_FAILED' || task.exportStatus === 'PENDING' ? 'Réessayer l’export' : 'Exporter') }}</button>
             <RouterLink v-if="androidStorage && (task.exportError || task.error)" class="btn btn-secondary btn-sm" to="/settings?tab=storage">{{ tx('Autorisations Android') }}</RouterLink>
-            <button class="btn btn-primary btn-sm btn-icon" :title="tx('Lire la vidéo locale (Mode Cinéma)')" @click="playTask(task)">
+            <button class="btn btn-primary btn-sm btn-icon" :aria-label="tx('Lire la vidéo locale (Mode Cinéma)')" :title="tx('Lire la vidéo locale (Mode Cinéma)')" @click="playTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8Z"/></svg>
             </button>
-            <button class="btn btn-sm btn-icon" :title="tx('Vérifier l\'intégrité du fichier MP4')" @click="verifySingleTask(task)">
+            <button class="btn btn-sm btn-icon" :aria-label="tx('Vérifier l\'intégrité du fichier MP4')" :title="tx('Vérifier l\'intégrité du fichier MP4')" @click="verifySingleTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
             </button>
             <button
               v-if="task.verificationStatus && task.verificationStatus !== 'VALID' && task.verificationStatus !== 'UNVERIFIED'"
               class="btn btn-warning btn-sm btn-icon"
-              :title="tx('Fichier corrompu : Re-télécharger proprement')"
+              :aria-label="tx('Fichier corrompu : Re-télécharger proprement')" :title="tx('Fichier corrompu : Re-télécharger proprement')"
               @click="redownloadTask(task)"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Supprimer de la liste')" @click="removeTask(task)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :aria-label="tx('Supprimer de la liste')" :title="tx('Supprimer de la liste')" @click="removeTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </template>
@@ -422,11 +428,11 @@
           <!-- Erreur / Annulé : Re-télécharger proprement (Smart Redownload) & Supprimer -->
           <template v-else-if="task.status === 'error' || task.status === 'failed' || task.status === 'cancelled'">
             <ProxyRotationButton v-if="task.status !== 'cancelled' && task.verificationDomain" :domain="task.verificationDomain" :retry="async () => { await redownloadTask(task); }" />
-            <button class="btn btn-warning btn-sm" :title="tx('Nettoyer le fichier corrompu et relancer un lien direct propre')" @click="redownloadTask(task)">
+            <button class="btn btn-warning btn-sm" :aria-label="tx('Nettoyer le fichier corrompu et relancer un lien direct propre')" :title="tx('Nettoyer le fichier corrompu et relancer un lien direct propre')" @click="redownloadTask(task)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
               <span>{{ tx("Réessayer") }}</span>
             </button>
-            <button class="btn btn-danger-outline btn-sm btn-icon" :title="tx('Supprimer de la liste')" @click="removeTask(task)">
+            <button class="btn btn-danger-outline btn-sm btn-icon" :aria-label="tx('Supprimer de la liste')" :title="tx('Supprimer de la liste')" @click="removeTask(task)">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </template>
@@ -435,39 +441,19 @@
     </div>
 
     <!-- Modale Réglage Plafond Débit Tâche Individuelle -->
-    <Transition name="fade">
-      <div v-if="speedModalTask" class="modal-overlay" @click.self="speedModalTask = null">
-        <div class="modal-card">
-          <div class="modal-header">
-            <h3>{{ tx("Plafond de vitesse :") }} {{ tx(speedModalTask.animeName) }} (Ep. {{ tx(speedModalTask.episodeNumber) }})</h3>
-            <button class="btn-icon" @click="speedModalTask = null">✕</button>
-          </div>
-          <div class="modal-body">
-            <p class="modal-sub">{{ tx("Définissez une vitesse maximale spécifique pour ce flux sans brider les autres téléchargements.") }}</p>
-            <div class="modal-input-group">
-              <input
-                v-model.number="taskSpeedLimitInput"
-                type="number"
-                class="input-premium"
-                :placeholder="tx('Ex: 500 pour 500 Ko/s (0 = Illimité)')"
-                min="0"
-              />
-              <span class="modal-unit">{{ tx("Ko/s") }}</span>
-            </div>
-            <div class="speed-presets" style="margin-top: 12px;">
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 0">{{ tx("Illimité") }}</button>
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 500">{{ tx("500 Ko/s") }}</button>
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 1024">{{ tx("1 Mo/s") }}</button>
-              <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 2048">{{ tx("2 Mo/s") }}</button>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn" @click="speedModalTask = null">{{ tx("Annuler") }}</button>
-            <button class="btn btn-primary" @click="applyTaskSpeedLimit">{{ tx("Appliquer") }}</button>
-          </div>
-        </div>
+    <ConfirmDialog :open="Boolean(speedModalTask)" :title="`${tx('Plafond de vitesse :')} ${speedModalTask?.animeName || ''} (Ep. ${speedModalTask?.episodeNumber || ''})`" :confirm-label="tx('Appliquer')" :busy="speedLimitSaving" @cancel="speedModalTask = null" @confirm="applyTaskSpeedLimit">
+      <p class="modal-sub">{{ tx("Définissez une vitesse maximale spécifique pour ce flux sans brider les autres téléchargements.") }}</p>
+      <div class="modal-input-group">
+        <input v-model.number="taskSpeedLimitInput" type="number" class="input-premium" :aria-label="tx('Plafond de vitesse :')" :placeholder="tx('Ex: 500 pour 500 Ko/s (0 = Illimité)')" min="0" />
+        <span class="modal-unit">{{ tx('Ko/s') }}</span>
       </div>
-    </Transition>
+      <div class="speed-presets" style="margin-top: 12px;">
+        <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 0">{{ tx('Illimité') }}</button>
+        <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 500">{{ tx('500 Ko/s') }}</button>
+        <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 1024">{{ tx('1 Mo/s') }}</button>
+        <button type="button" class="preset-chip" @click="taskSpeedLimitInput = 2048">{{ tx('2 Mo/s') }}</button>
+      </div>
+    </ConfirmDialog>
 
   </div>
 </template>
@@ -477,6 +463,7 @@ import { language, tx } from '@/utils/locale';
 import ProxyRotationButton from '@/components/ProxyRotationButton.vue';
 import VerificationPrompt from '@/components/VerificationPrompt.vue';
 import ExportStatusNotice from '@/components/ExportStatusNotice.vue';
+import ConfirmDialog from '@/components/ConfirmDialog.vue';
 import { ref, computed, onMounted, onActivated } from 'vue';
 import { useDownloadStore } from '@/stores/downloads';
 import { useLibraryStore } from '@/stores/library';
@@ -488,7 +475,7 @@ import { api } from '@/api/client';
 defineOptions({name: 'DownloadsView'});
 const notifications = useNotifications();
 const downloadStore = useDownloadStore();
-const downloadChallenges = computed(() => downloadStore.tasks.filter(t => t.status === 'verification_required' && t.verificationDomain).map(t => ({domain: t.verificationDomain!, url: t.verificationUrl || undefined, code: 'verification_required', error: t.error || ''})));
+const downloadChallenges = computed(() => filteredTasks.value.filter(t => t.status === 'verification_required' && t.verificationDomain).map(t => ({domain: t.verificationDomain!, url: t.verificationUrl || undefined, code: 'verification_required', error: t.error || ''})));
 let firstActivation = true;
 onActivated(() => { if (firstActivation) firstActivation = false; else void downloadStore.fetchTasks(); });
 const libraryStore = useLibraryStore();
@@ -506,6 +493,7 @@ async function exportToStorage(task: DownloadTask) {
 
 const tab = ref<'queue' | 'done' | 'errors' | 'all'>('queue');
 const isSettingsOpen = ref(false);
+const isActionsOpen = ref(false);
 const isSavingSettings = ref(false);
 const isVerifyingAll = ref(false);
 
@@ -520,6 +508,7 @@ const draggedTaskId = ref<string | number | null>(null);
 // Individual Speed Limit Modal state
 const speedModalTask = ref<DownloadTask | null>(null);
 const taskSpeedLimitInput = ref<number>(0);
+const speedLimitSaving = ref(false);
 
 function showToast(message: string, tone: 'success' | 'error' | 'info' = 'info') { notifications.notify(message, tone); }
 async function performAction(action: () => Promise<unknown>) {
@@ -889,7 +878,8 @@ function openSpeedLimitModal(task: DownloadTask) {
 }
 
 async function applyTaskSpeedLimit() {
-  if (!speedModalTask.value) return;
+  if (!speedModalTask.value || speedLimitSaving.value) return;
+  speedLimitSaving.value = true;
   try {
     const limitBytes = (taskSpeedLimitInput.value || 0) * 1024;
     await downloadStore.setTaskSpeedLimit(speedModalTask.value.id, limitBytes);
@@ -902,7 +892,7 @@ async function applyTaskSpeedLimit() {
     speedModalTask.value = null;
   } catch {
     showToast('Erreur lors de l\'application du plafond.', 'error');
-  }
+  } finally { speedLimitSaving.value = false; }
 }
 </script>
 
@@ -1411,42 +1401,6 @@ async function applyTaskSpeedLimit() {
 }
 
 /* Modal Styling */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.75);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-card {
-  width: 90%;
-  max-width: 480px;
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  padding: 20px;
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.modal-header h3 {
-  font-size: 16px;
-  margin: 0;
-  color: var(--text);
-}
-
 .modal-sub {
   font-size: 13px;
   color: var(--muted);
@@ -1459,15 +1413,11 @@ async function applyTaskSpeedLimit() {
   gap: 10px;
 }
 
+.modal-input-group .input-premium { min-width: 0; flex: 1; width: 0; }
+
 .modal-unit {
   font-size: 13px;
   color: var(--muted);
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
 .stat-red strong {
@@ -1497,11 +1447,52 @@ async function applyTaskSpeedLimit() {
 </style>
 
 <style scoped>
+.download-tools-toggle, .queue-tab-label-mobile { display: none; }
+.download-verification > summary { min-height: 44px; padding: 12px; border: 1px solid var(--yellow); border-radius: 10px; cursor: pointer; font-size: 13px; color: var(--yellow); }
+@media (max-width: 900px) {
+  /* Actions get their own row; long export labels must never shrink the content. */
+  .task-row-card { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: start; gap: 10px; padding: 12px; position: relative; }
+  .task-cover { grid-column: 1; grid-row: 1; width: 40px; height: 54px; }
+  .task-col-main { grid-column: 2; grid-row: 1; min-width: 0; }
+  .task-col-actions { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-end; min-width: 0; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .task-col-actions .btn { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .task-col-actions .btn-icon { min-width: 44px; width: 44px; flex-shrink: 0; }
+  .task-drag-handle { position: absolute; top: 72px; left: 12px; width: 40px; justify-content: center; }
+  .drag-dots { display: none; }
+  .task-title-line { gap: 4px 6px; }
+  .task-anime-title { width: 100%; max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; font-size: 14px; }
+  .task-title-line .badge { font-size: 11px; }
+  .task-meta-line { flex-wrap: wrap; white-space: normal; font-size: 12px; }
+  .task-filename { display: none; }
+  .task-stats-left, .task-stats-right { min-width: 0; flex-wrap: wrap; gap: 6px; }
+  .task-stats-left > span { line-height: 1.5; }
+  .verif-badge { white-space: nowrap; }
+  .task-error-box { min-width: 0; overflow-wrap: anywhere; }
+  .task-error-box svg { flex-shrink: 0; }
+  .speed-limit-chip { min-height: 44px; padding: 6px 10px; }
+}
 @media (max-width: 768px) {
-  .download-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .connection-status { grid-column: 1 / -1; }
-  .download-actions .btn { min-height: 44px; }
-  .download-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .download-tabs .tab-btn { padding: 8px 4px; min-height: 44px; font-size: 12px; justify-content: center; }
+  .downloads-container { gap: 12px; }
+  .dashboard-header { gap: 12px; margin-bottom: 0; }
+  .dashboard-header .page-sub { display: none; }
+  .stats-grid.compact-stats { width: 100%; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); }
+  .stat-card strong { white-space: nowrap; }
+  .download-toolbar { position: static; margin: 0; padding: 8px; gap: 8px; box-shadow: none; backdrop-filter: none; }
+  .download-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; gap: 0; }
+  .download-tabs .tab-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 2px; min-height: 52px; font-size: 12px; white-space: nowrap; }
+  .tab-badge { margin: 0; padding: 1px 6px; }
+  .queue-tab-label { display: none; }
+  .queue-tab-label-mobile { display: inline; }
+  .download-tools-toggle { display: flex; justify-content: space-between; width: 100%; background: var(--panel-subtle); font-size: 13px; min-height: 44px; }
+  .download-actions { display: none; }
+  .download-actions.actions-open { display: flex; flex-wrap: wrap; }
+  .download-actions .btn { width: auto; flex: 1 1 120px; min-height: 44px; padding: 8px; }
+  .download-actions .btn-icon-round { flex: 0 0 44px; }
+  .connection-status { flex-basis: 100%; font-size: 12px; }
+  .quick-settings-panel { padding: 12px; }
+  .quick-settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .quick-settings-header, .qs-input-row, .qs-control { flex-wrap: wrap; gap: 8px; }
+  .qs-number-input { max-width: 100%; }
+  .queue-reorder-hint { font-size: 12px; }
 }
 </style>
