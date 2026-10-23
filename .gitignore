@@ -12,6 +12,7 @@ build/
 develop-eggs/
 dist/
 downloads/
+backup/
 eggs/
 .eggs/
 lib/
@@ -52,6 +53,8 @@ cover/
 
 # Environments
 .env
+compose.override.yaml
+compose.override.yml
 .venv
 env/
 venv/

@@ -1,0 +1,27 @@
+# Allow only build inputs. In particular, never send Git credentials, Android
+# signing keys, databases, browser sessions or local downloads to the builder.
+**
+!Dockerfile
+!requirements.txt
+!run.py
+!animan/
+!animan/**
+!frontend/
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/tsconfig*.json
+!frontend/vite.config.ts
+!frontend/src/
+!frontend/src/**
+!frontend/public/
+!frontend/public/**
+
+**/__pycache__/
+**/*.pyc
+**/*.db*
+**/*.sqlite*
+**/.env*
+**/http_sessions/
+**/verification_profiles/
+animan/ressources/

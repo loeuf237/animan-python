@@ -37,6 +37,7 @@ Compiled builds are available on [GitHub Releases](https://github.com/loeuf237/a
 | macOS Intel | `.app` in `.zip` | [Download — UNTESTED](https://github.com/loeuf237/animelab/releases/download/v0.1.0/Animan-v0.1.0-macOS-x64-UNTESTED.zip) | **UNTESTED on real Mac hardware**, not Developer-ID signed or notarized. |
 | Android ARM64 | `.apk` | [Download beta 2](https://github.com/loeuf237/animelab/releases/download/android-v0.1.0-beta.2/AnimeLab-v0.1.0-Android-arm64.apk) | Android 10+; Python engine, Vue interface and native media tools embedded. **Not tested on a physical phone.** |
 | Web / Mobile | PWA | [Browser installation](#pwa-installation) | Standalone browser installation on Chrome, Edge, Safari iOS and Android. |
+| Docker server | Container | [Docker setup](docs/docker.md) | Python server, compiled Vue interface and FFmpeg; persistent library and downloads. |
 
 Extract the whole archive. Python and Node.js are not required for these packages. FFmpeg and ffprobe are included. [Package requirements and checks](docs/desktop-distribution.md) explain system compatibility and `SHA256SUMS.txt` verification.
 
@@ -237,6 +238,24 @@ python3 run.py
 ```
 
 Open `http://localhost:8080`. Use the host setting below to restrict access to the local machine.
+
+## Docker server
+
+With Docker and Compose installed, run from the repository root:
+
+```bash
+docker compose up -d --build --wait
+```
+
+Open **http://localhost:8080/app/**. The image builds Vue and includes Python,
+FFmpeg and ffprobe. The server runs without root privileges. Named volumes retain
+settings, extensions, source sessions and downloaded media across updates.
+Use `docker compose down` to stop it while preserving its data.
+
+See [Docker setup](docs/docker.md) for an alternative port when the desktop app
+already uses 8080, visible download folders, backups, LAN access and browser
+verification limitations. CI builds and tests the actual server image, including
+persistence and local playback after container replacement.
 
 ## PWA installation
 
