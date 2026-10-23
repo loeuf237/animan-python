@@ -84,7 +84,12 @@ print(json.dumps({'prefix':p.read_bytes()[:64].hex(), 'size':p.stat().st_size}))
         container = command('ps', '-q', 'animelab')
         command('stop', '--timeout', '30')
         exit_code = subprocess.check_output(['docker', 'inspect', '--format', '{{.State.ExitCode}}', container], text=True).strip()
-        if exit_code != '0':
+        # Uvicorn re-raises the received SIGTERM after its lifespan cleanup;
+        # Docker/init then reports 128 + SIGTERM (143), even on a clean stop.
+        # Require completed cleanup too, and reject forced SIGKILL (137).
+        shutdown_logs = command('logs', '--no-color', 'animelab')
+        if (exit_code not in ('0', '143') or 'Application shutdown complete.' not in shutdown_logs
+                or 'Finished server process' not in shutdown_logs):
             raise RuntimeError('Server did not shut down gracefully: ' + exit_code)
         command('down', '--timeout', '30')  # Recreate the container, retaining only its volumes.
         base = start()
