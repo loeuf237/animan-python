@@ -7,14 +7,16 @@ import pytest
 from scripts import desktop_release
 
 
-def test_publication_rejects_missing_platform_and_checksums_exact_files(tmp_path, monkeypatch):
+@pytest.mark.parametrize('version', ['0.1.0', '0.1.1'])
+def test_publication_rejects_missing_platform_and_checksums_exact_files(tmp_path, monkeypatch, version):
+    monkeypatch.setattr(desktop_release, '__version__', version)
     names = ['Windows-x64.zip', 'Linux-x64.tar.gz', 'macOS-arm64-UNTESTED.zip', 'macOS-x64-UNTESTED.zip']
     for name in names[:-1]:
-        (tmp_path / ('AnimeLab-v0.1.0-' + name)).write_bytes(b'package')
+        (tmp_path / (f'AnimeLab-v{version}-' + name)).write_bytes(b'package')
     monkeypatch.setattr(sys, 'argv', ['release','checksums',str(tmp_path)])
     with pytest.raises(RuntimeError, match='incomplete'):
         desktop_release.checksums()
-    (tmp_path / ('AnimeLab-v0.1.0-' + names[-1])).write_bytes(b'mac')
+    (tmp_path / (f'AnimeLab-v{version}-' + names[-1])).write_bytes(b'mac')
     (tmp_path / 'build-info.json').write_bytes(b'{}')
     desktop_release.checksums()
     for line in (tmp_path / 'SHA256SUMS.txt').read_text().splitlines():
