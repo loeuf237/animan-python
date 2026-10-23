@@ -57,6 +57,20 @@ def test_release_rejects_changed_artifact(candidate):
         prepare(candidate)
 
 
+def test_github_signing_records_actual_key_location_and_run(candidate):
+    prepare(candidate, signing_method='github_actions')
+    info = json.loads((candidate[1] / 'Android-build-info.json').read_text())
+    assert info['signing_private_key_uploaded'] is True
+    assert info['signing_method'] == 'github_actions'
+    assert info['signing_actions_run_id'] == 123
+    assert 'signed_assembly_actions_run_id' not in info
+
+
+def test_unknown_signing_method_is_rejected(candidate):
+    with pytest.raises(ValueError, match='signing method'):
+        prepare(candidate, signing_method='unknown')
+
+
 def test_release_rejects_different_source_commit(candidate):
     with pytest.raises(ValueError, match='commit'):
         prepare(candidate, source_commit='b' * 40)

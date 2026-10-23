@@ -84,13 +84,15 @@ render, before media probes: APK bytes, installed application bytes and private
 data (including cache). Do not add the cache figure to the data figure again.
 Compare these device measurements separately from APK ZIP bytes.
 
-Optional CI signing uses `ANIMAN_ANDROID_KEYSTORE`, `ANIMAN_ANDROID_STORE_PASSWORD`,
-`ANIMAN_ANDROID_KEY_PASSWORD` and `ANIMAN_ANDROID_KEY_ALIAS`, with
-`ANIMAN_ANDROID_KEYSTORE_BASE64` restored temporarily by the workflow. The beta
-uses local signing instead; no private signing material is uploaded to GitHub. The
+CI signing uses the encrypted Actions secrets `ANIMAN_ANDROID_KEYSTORE_BASE64`,
+`ANIMAN_ANDROID_STORE_PASSWORD`, `ANIMAN_ANDROID_KEY_PASSWORD` and
+`ANIMAN_ANDROID_KEY_ALIAS`. The workflow restores the key temporarily, exposes
+passwords only to the Gradle build step, and removes the temporary key even after
+failure. It verifies the production certificate on both APKs and checks it again
+before publication. The existing identity is retained for in-place updates. The
 `android/keystore/` directory is ignored; never commit or publish its contents.
-Preserve a secure backup of the release identity for updates. Publication uses
-the separate `android-v0.1.0-beta.1` tag and never modifies desktop `v0.1.0`.
+Preserve a secure local backup of the release identity for updates. The next
+publication targets `android-v0.1.0-beta.2` and never modifies desktop `v0.1.0`.
 
 Local signing avoids transferring the private identity to GitHub:
 
@@ -105,12 +107,14 @@ dedicated RSA identity, and preserves build provenance. The identity and its
 configuration stay in the ignored, private `android/keystore/` directory. Signed
 APKs must be tested again before publication. No private key is a release asset.
 
-For this beta, `android-assemble-signed.yml` reconstructs the already signed APK
+As an alternative to CI signing, `android-assemble-signed.yml` reconstructs the already signed APK
 from checksummed transfer chunks and checks its signature and alignment.
 `android-signed-validate.yml` reads its Actions artifact with read-only permissions
 and tests the signed app and matching instrumentation on API 30 and 35, plus
 the native media/storage probe on API 29. Transfer
-chunks and instrumentation are removed from the release before publication.
+chunks and instrumentation are excluded from the public release. The default
+`release-android.yml` now performs compilation, signing, the same API matrix and
+publication directly, without local signing or transfer chunks.
 
 Release checks cover native imports, Chrome/TLS, SQLite, rendered Vue, loopback
 authentication, Activity recreation, Java AES and byte-checked MediaStore export.

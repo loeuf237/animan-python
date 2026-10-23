@@ -16,7 +16,7 @@ Android 10+ · ARM64 · package `com.animan.app` · version code **214**.
 
 Download `AnimeLab-v0.1.0-Android-arm64.apk` and install it over the existing app. The application ID and production signing certificate remain unchanged, so an uninstall is not required. Existing libraries, settings and storage grants are retained by a normal update.
 
-The release contains `SHA256SUMS.txt` and `Android-build-info.json` with its source commit, version code, signature fingerprint, build provenance and test scope. The private signing identity stays on the owner's computer; GitHub receives only signed artifacts.
+The release contains `SHA256SUMS.txt` and `Android-build-info.json` with its source commit, version code, signature fingerprint, build provenance and test scope. GitHub Actions compiles, signs, tests and publishes the APK. The existing signing identity is stored in encrypted Actions secrets, restored only during the build and removed afterward; it is never committed or included in build artifacts.
 
 ## Validation scope and limitations
 

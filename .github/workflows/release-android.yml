@@ -65,9 +65,6 @@ jobs:
     timeout-minutes: 45
     env:
       ANIMAN_ANDROID_KEYSTORE: ${{ secrets.ANIMAN_ANDROID_KEYSTORE_BASE64 != '' && '/tmp/animan-release.p12' || '' }}
-      ANIMAN_ANDROID_STORE_PASSWORD: ${{ secrets.ANIMAN_ANDROID_STORE_PASSWORD }}
-      ANIMAN_ANDROID_KEY_PASSWORD: ${{ secrets.ANIMAN_ANDROID_KEY_PASSWORD }}
-      ANIMAN_ANDROID_KEY_ALIAS: ${{ secrets.ANIMAN_ANDROID_KEY_ALIAS }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -107,6 +104,10 @@ jobs:
           PY
       - name: Build installed test target and APK
         working-directory: android
+        env:
+          ANIMAN_ANDROID_STORE_PASSWORD: ${{ secrets.ANIMAN_ANDROID_STORE_PASSWORD }}
+          ANIMAN_ANDROID_KEY_PASSWORD: ${{ secrets.ANIMAN_ANDROID_KEY_PASSWORD }}
+          ANIMAN_ANDROID_KEY_ALIAS: ${{ secrets.ANIMAN_ANDROID_KEY_ALIAS }}
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm
@@ -134,6 +135,25 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs android-validation/AnimeLab-Android-under-test.apk
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 -v 4 android-validation/AnimeLab-Android-under-test.apk
           python scripts/android_apk_size.py android-validation/AnimeLab-Android-under-test.apk --output android-validation/size
+      - name: Verify production identity and record signing provenance
+        if: env.ANIMAN_ANDROID_KEYSTORE != ''
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          root = Path('android-validation')
+          expected = 'bdfde1d5b941680c8efb28f8692d894294762a9ad02292805457d5a82a3160b5'
+          signer = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0/apksigner'
+          names = ['AnimeLab-Android-under-test.apk', 'AnimeLab-instrumentation.apk', 'Android-build-info.json']
+          for name in names[:2]:
+              cert = subprocess.check_output([str(signer), 'verify', '--print-certs', str(root / name)], text=True)
+              if re.findall(r'certificate SHA-256 digest: ([a-f0-9]+)', cert) != [expected]:
+                  raise RuntimeError('APK signing identity differs from existing installations')
+          info = json.loads((root / names[2]).read_text())
+          info.update(signing_certificate_sha256=expected, signing_method='github_actions', signing_private_key_uploaded=True)
+          (root / names[2]).write_text(json.dumps(info, indent=2) + '\n')
+          (root / 'SHA256SUMS.txt').write_text(''.join(hashlib.sha256((root / name).read_bytes()).hexdigest() + '  ' + name + '\n' for name in names))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: Android-optimization-diagnostics
@@ -205,33 +225,29 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools build-tools;35.0.0'
       - uses: actions/download-artifact@v4
         with:
           name: Android-under-test
           path: android-validation
       - name: Require a production-signed, validated package
         run: |
-          python - <<'PY'
-          import hashlib, json, os, shutil
-          from pathlib import Path
-          root = Path('android-validation')
-          info = json.loads((root / 'Android-build-info.json').read_text())
-          assert info['version'] == '0.1.0' and not info['validation_key_only']
-          import re
-          assert re.fullmatch(r'android-v0\.1\.0-beta\.[1-9]\d*', os.environ['RELEASE_TAG'])
-          target = Path('release-assets'); target.mkdir()
-          apk = target / 'AnimeLab-v0.1.0-Android-arm64.apk'
-          shutil.copyfile(root / 'AnimeLab-Android-under-test.apk', apk)
-          info['emulator_api_levels_tested'] = [29, 30, 35]
-          info['runtime_test_abi'] = 'arm64-v8a via Android native translation'
-          info['media_test_abi'] = 'x86_64, same Kotlin JNI bridge'
-          info['full_arm64_media_pipeline_tested'] = False
-          (target / 'Android-build-info.json').write_text(json.dumps(info, indent=2))
-          (target / 'SHA256SUMS.txt').write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n' for p in sorted(target.iterdir()) if p.name != 'SHA256SUMS.txt'))
-          PY
+          python scripts/android_publish.py android-validation release-assets \
+            --build-tools "$ANDROID_HOME/build-tools/35.0.0" --tag "$RELEASE_TAG" \
+            --source-commit "$GITHUB_SHA" --candidate-run-id "$GITHUB_RUN_ID" \
+            --signing-method github_actions
       - name: Publish Android beta
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$RELEASE_TAG" release-assets/* --target "$GITHUB_SHA" \
-            --title "AnimeLab 0.1.0 Android beta" --prerelease --notes-file docs/releases/android-v0.1.0-beta.2.md
+            --title "AnimeLab 0.1.0 Android beta 2" --prerelease --notes-file docs/releases/android-v0.1.0-beta.2.md

@@ -44,7 +44,9 @@ The [**Android 0.1.0 beta**](https://github.com/loeuf237/animelab/releases/tag/a
 runs independently of a desktop server. Install the APK on an **Android 10+ / ARM64**
 device; Android may ask you to allow installation from your browser. Verified
 downloads are exported to `Downloads/Animan`, with a private library copy retained.
-The APK uses a dedicated release signing identity kept locally, outside GitHub.
+New releases use the existing signing identity through encrypted GitHub Actions
+secrets. Compilation, signing, emulator checks and publication run in Actions;
+the key is never committed or included in build artifacts.
 
 For the published beta, Android 11 and 15 emulator checks cover the signed
 ARM64 Python/Vue runtime through native translation. Encode, remux, subtitle mux and decode checks run separately

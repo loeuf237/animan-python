@@ -21,7 +21,10 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def prepare(source, output, tools, tag, source_commit, candidate_run_id, signed_run_id):
+def prepare(source, output, tools, tag, source_commit, candidate_run_id, signed_run_id,
+            signing_method='local_apksigner'):
+    if signing_method not in ('local_apksigner', 'github_actions'):
+        raise ValueError('Unknown signing method')
     expected = {'AnimeLab-Android-under-test.apk', 'AnimeLab-instrumentation.apk', 'Android-build-info.json'}
     verified = set()
     for line in (source / 'SHA256SUMS.txt').read_text().splitlines():
@@ -60,8 +63,14 @@ def prepare(source, output, tools, tag, source_commit, candidate_run_id, signed_
                 runtime_api_levels_tested=[30, 35], runtime_test_abi='arm64-v8a via Android native translation',
                 media_test_abi='x86_64, same Kotlin JNI bridge',
                 full_arm64_media_pipeline_tested=False, physical_device_tested=False,
-                candidate_actions_run_id=candidate_run_id, signed_assembly_actions_run_id=signed_run_id,
-                signing_private_key_uploaded=False, release_tag=tag)
+                candidate_actions_run_id=candidate_run_id,
+                signing_method=signing_method,
+                signing_private_key_uploaded=signing_method == 'github_actions', release_tag=tag)
+    if signing_method == 'github_actions':
+        info['signing_actions_run_id'] = candidate_run_id
+        info.pop('signed_assembly_actions_run_id', None)
+    else:
+        info['signed_assembly_actions_run_id'] = signed_run_id
     (output / 'Android-build-info.json').write_text(json.dumps(info, indent=2) + '\n')
     (output / 'SHA256SUMS.txt').write_text(''.join(digest(p) + '  ' + p.name + '\n' for p in sorted(output.iterdir())))
     return {'tag': tag, 'commit': source_commit, 'apk': filename, 'size': (output / filename).stat().st_size}
@@ -75,7 +84,8 @@ if __name__ == '__main__':
     parser.add_argument('--tag', required=True)
     parser.add_argument('--source-commit', required=True)
     parser.add_argument('--candidate-run-id', required=True, type=int)
-    parser.add_argument('--signed-run-id', required=True, type=int)
+    parser.add_argument('--signed-run-id', default=0, type=int)
+    parser.add_argument('--signing-method', choices=['local_apksigner', 'github_actions'], default='local_apksigner')
     args = parser.parse_args()
     print(json.dumps(prepare(args.source, args.output, args.build_tools, args.tag, args.source_commit,
-                             args.candidate_run_id, args.signed_run_id), indent=2))
+                             args.candidate_run_id, args.signed_run_id, args.signing_method), indent=2))
