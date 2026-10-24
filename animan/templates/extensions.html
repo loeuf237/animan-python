@@ -22,7 +22,12 @@
         <p class="page-sub">{{ t('ext_header_sub') }}</p>
       </div>
 
-      <div style="display: flex; gap: 10px; align-items: center;">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        {% if updates_count and updates_count > 0 %}
+        <span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.4); padding: 8px 14px; border-radius: 9999px; font-weight: 600;">
+          🔄 <strong id="updates-count-header">{{ updates_count }}</strong> {% if current_lang() == 'en' %}update(s) available{% else %}mise(s) à jour disponible(s){% endif %}
+        </span>
+        {% endif %}
         <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.3); padding: 8px 14px; border-radius: 9999px; font-weight: 500;">
           <strong id="active-count-header">{{ enabled_count }}</strong> / {{ total_count }} {% if current_lang() == 'en' %}active sources{% else %}sources actives{% endif %}
         </span>
@@ -84,7 +89,15 @@
           <strong style="color: var(--text); margin-left: 6px; font-size: 0.95rem;">{{ active_repo.name }}</strong>
         </div>
       </div>
-      <div style="font-size: 0.85rem; color: #9ca3af; display: flex; align-items: center; gap: 16px;">
+      <div style="font-size: 0.85rem; color: #9ca3af; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <button type="button" class="btn btn-sm" id="btn-check-updates" onclick="handleCheckUpdates()">
+          {% if current_lang() == 'en' %}Check updates{% else %}Vérifier les mises à jour{% endif %}
+        </button>
+        {% if updates_count and updates_count > 0 %}
+        <button type="button" class="btn btn-sm btn-primary" id="btn-update-all" onclick="handleUpdateAll()">
+          {% if current_lang() == 'en' %}Update all ({{ updates_count }}){% else %}Tout mettre à jour ({{ updates_count }}){% endif %}
+        </button>
+        {% endif %}
         <span>{{ t('ext_catalog_count', count=total_count) }}</span>
         <span>{{ t('ext_active_count', count=enabled_count) }}</span>
       </div>
@@ -97,6 +110,7 @@
         <button type="button" class="tab-btn active lang-filter-btn" data-lang="all" onclick="filterByLang('all', this)">{% if current_lang() == 'en' %}All{% else %}Toutes{% endif %} ({{ total_count }})</button>
         <button type="button" class="tab-btn lang-filter-btn" data-lang="fr" onclick="filterByLang('fr', this)">🇫🇷 Français</button>
         <button type="button" class="tab-btn lang-filter-btn" data-lang="active" onclick="filterByLang('active', this)">{{ t('ext_filter_active_only') }}</button>
+        <button type="button" class="tab-btn lang-filter-btn" data-lang="updates" onclick="filterByLang('updates', this)">🔄 {% if current_lang() == 'en' %}Updates{% else %}Mises à jour{% endif %} ({{ updates_count or 0 }})</button>
       </div>
 
       <div style="position: relative; min-width: 260px; flex: 1; max-width: 360px;">
@@ -115,7 +129,8 @@
                data-name="{{ ext.name | lower }}"
                data-pkg="{{ ext.pkg | lower }}"
                data-lang="{{ ext.lang | lower }}"
-               data-active="{{ 'true' if ext.is_enabled else 'false' }}">
+               data-active="{{ 'true' if ext.is_enabled else 'false' }}"
+               data-update="{{ 'true' if ext.has_update else 'false' }}">
         
         <div class="ext-compact-left">
           {% if ext.icon_url %}
@@ -127,14 +142,23 @@
           </div>
 
           <div style="flex: 1; min-width: 0;">
-            <div style="display:flex;align-items:center;gap:6px;">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <h3 class="ext-title-text" title="{{ ext.name }}">{{ ext.name }}</h3>
               <span class="version-badge" style="font-size: 0.68rem; padding: 1px 5px; background: {% if ext.lang == 'fr' %}#2563eb{% elif ext.lang == 'all' %}#7c3aed{% else %}#4b5563{% endif %};">
                 {{ ext.lang | upper }}
               </span>
+              {% if ext.has_update %}
+              <span class="version-badge" style="font-size: 0.68rem; padding: 1px 6px; background: #d97706; color: #fffbeb; font-weight: 600;">
+                {% if current_lang() == 'en' %}Update available{% else %}Mise à jour dispo{% endif %}
+              </span>
+              {% endif %}
             </div>
             <div style="display:flex;align-items:center;gap:8px;font-size:0.75rem;color:#9ca3af;margin-top:2px;">
-              <span>v{{ ext.version }}</span>
+              {% if ext.has_update %}
+              <span style="color:#fbbf24;font-weight:600;">v{{ ext.installed_version or ext.version }} → v{{ ext.available_version }}</span>
+              {% else %}
+              <span>v{{ ext.installed_version or ext.version }}</span>
+              {% endif %}
               {% if ext.base_url %}
               <span>•</span>
               <a href="{{ ext.base_url }}" target="_blank" rel="noopener noreferrer" style="color: #818cf8; text-decoration: none; overflow:hidden; text-overflow:ellipsis; max-width:120px; white-space:nowrap;" title="{{ ext.base_url }}">
@@ -146,6 +170,11 @@
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+          {% if ext.has_update %}
+          <button type="button" class="btn btn-sm btn-primary" onclick="handleUpdateExtension({{ ext.id }}, '{{ ext.name }}')">
+            {% if current_lang() == 'en' %}Update{% else %}Mettre à jour{% endif %}
+          </button>
+          {% endif %}
           <label class="toggle-switch">
             <input type="checkbox" id="toggle-ext-{{ ext.id }}" {% if ext.is_enabled %}checked{% endif %}
                    onchange="handleToggleExtension({{ ext.id }}, this.checked, '{{ ext.name }}')" />
@@ -348,6 +377,59 @@ function handleInstantFilter(query) {
   applyFilters();
 }
 
+async function handleCheckUpdates() {
+  const btn = document.getElementById('btn-check-updates');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/extensions/check-updates', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (typeof showToast === 'function') {
+        showToast(data.message || 'Vérification terminée.', data.count > 0 ? 'info' : 'success');
+      }
+      if (data.count > 0) {
+        window.location.reload();
+      }
+    }
+  } catch (err) {
+    if (typeof showToast === 'function') showToast('Erreur : ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function handleUpdateExtension(id, name) {
+  try {
+    const res = await fetch(`/api/extensions/${id}/update`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (typeof showToast === 'function') showToast(data.message || `${name} mis à jour.`, 'success');
+      window.location.reload();
+    } else if (typeof showToast === 'function') {
+      showToast('Erreur : ' + (data.detail || 'Mise à jour impossible.'), 'error');
+    }
+  } catch (err) {
+    if (typeof showToast === 'function') showToast('Erreur réseau : ' + err.message, 'error');
+  }
+}
+
+async function handleUpdateAll() {
+  const btn = document.getElementById('btn-update-all');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/extensions/update-all', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (typeof showToast === 'function') showToast(data.message || 'Extensions mises à jour.', 'success');
+      window.location.reload();
+    }
+  } catch (err) {
+    if (typeof showToast === 'function') showToast('Erreur : ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function applyFilters() {
   const cards = document.querySelectorAll('.ext-card');
   cards.forEach(card => {
@@ -355,12 +437,15 @@ function applyFilters() {
     const pkg = card.getAttribute('data-pkg') || '';
     const lang = card.getAttribute('data-lang') || '';
     const isActive = card.getAttribute('data-active') === 'true';
+    const hasUpdate = card.getAttribute('data-update') === 'true';
 
     let matchLang = true;
     if (currentLangFilter === 'fr') {
       matchLang = (lang === 'fr');
     } else if (currentLangFilter === 'active') {
       matchLang = isActive;
+    } else if (currentLangFilter === 'updates') {
+      matchLang = hasUpdate;
     }
 
     let matchSearch = true;

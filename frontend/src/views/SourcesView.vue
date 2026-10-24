@@ -389,11 +389,27 @@ function changeMode(value: string) {
 }
 function toggleTag(id: string) {
   invalidatePending()
-  selectedTags.value = selectedTags.value.includes(id)
-    ? selectedTags.value.filter((t) => t !== id)
-    : currentSource.value?.multiTags
-      ? [...selectedTags.value, id]
-      : [id]
+  if (selectedTags.value.includes(id)) {
+    selectedTags.value = selectedTags.value.filter((t) => t !== id)
+    return
+  }
+  if (!currentSource.value?.multiTags) {
+    selectedTags.value = [id]
+    return
+  }
+  const tagObj = filters.value.tags.find((t) => t.id === id)
+  const groupMeta = tagObj
+    ? (filters.value.groups || []).find((g) => g.name === tagObj.group)
+    : undefined
+  if (groupMeta?.single && tagObj) {
+    const otherGroups = selectedTags.value.filter((tid) => {
+      const other = filters.value.tags.find((t) => t.id === tid)
+      return !other || other.group !== tagObj.group
+    })
+    selectedTags.value = [...otherGroups, id]
+  } else {
+    selectedTags.value = [...selectedTags.value, id]
+  }
 }
 function resetFilters() {
   selectedTags.value = []

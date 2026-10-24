@@ -315,14 +315,25 @@ class ExtensionResponse(WireModel):
     name: str
     lang: str
     version: str | None = None
+    installed_version: str | None = None
+    available_version: str | None = None
+    available_apk_url: str | None = None
+    available_base_url: str | None = None
+    has_update: int | bool = False
+    is_installed: bool = False
     is_enabled: int | bool = False
     recipe_json: str | None = None
     base_url: str | None = None
+    icon_url: str | None = None
+    apk_url: str | None = None
+    updated_at: str | None = None
+    capabilities_summary: dict[str, JsonValue] | None = None
 
 
 class ExtensionList(WireModel):
     active_repo: ExtensionRepository | None
     count: int
+    updates_count: int = 0
     extensions: list[ExtensionResponse]
 
 
@@ -343,6 +354,7 @@ class CatalogueSources(WireModel):
 
 class CatalogueFilters(WireModel):
     tags: list[dict[str, str]]
+    groups: list[dict[str, JsonValue]] = []
     orders: list[dict[str, str]]
 
 
@@ -449,7 +461,8 @@ for name in ('start_download', 'start_batch_download', 'set_global_speed_limit',
              'get_episode_size', 'move_task_to_top', 'move_series_to_top', 'reorder_tasks', 'verify_task',
              'verify_all_tasks', 'redownload_task', 'remove_favorite', 'clear_all_favorites', 'mark_watched',
              'delete_history_entry', 'clear_history', 'trigger_watchdog_check', 'import_repo_api',
-             'toggle_extension_api', 'refresh_extensions_api', 'configure_extension_api', 'diagnose_extension_api',
+             'toggle_extension_api', 'refresh_extensions_api', 'check_updates_api', 'update_extension_api',
+             'update_all_extensions_api', 'recompile_extension_api', 'configure_extension_api', 'diagnose_extension_api',
              'set_language', 'cancel', 'rotate_proxy'):
     RESPONSES[name] = Result
 

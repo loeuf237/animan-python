@@ -171,3 +171,56 @@ async def test_franime_api_tags_search_and_pagination(catalogue, monkeypatch):
     assert len(first['results']) == 48 and first['queryScope'] == 'catalogue'
     second = await catalogue.browse(source.pkg, 'catalogue', 'Anime', [filters['tags'][0]['id']], 'title', first['nextCursor'])
     assert len(second['results']) == 22 and not second['nextCursor']
+
+
+@pytest.mark.asyncio
+async def test_animesama_multi_group_tags_and_custom_feeds(catalogue, monkeypatch):
+    from animan.services.aniyomi_dex_parser import AniyomiDexParser
+    recipe = SourceRecipe(pkg='eu.kanade.tachiyomi.animeextension.fr.animesama', name='Anime-Sama')
+    AniyomiDexParser._fill_heuristics(recipe)
+    source = AniyomiContainerSource(recipe)
+    monkeypatch.setattr(extension_service, 'get_container_source_by_id', lambda sid: source)
+    monkeypatch.setattr(extension_service, 'get_enabled_container_sources', lambda: [source])
+
+    sources = catalogue.sources()
+    animesama_desc = next(s for s in sources if s['id'] == recipe.pkg)
+    view_ids = [v['id'] for v in animesama_desc['views']]
+    assert 'popular' in view_ids
+    assert 'feed:pepites' in view_ids
+    assert 'feed:classiques' in view_ids
+
+    filters = await catalogue.filters(recipe.pkg)
+    assert any(t['group'] == 'Genres' and t['value'] == 'Action' for t in filters['tags'])
+    assert any(t['group'] == 'Type' and t['value'] == 'Anime' for t in filters['tags'])
+    assert any(t['group'] == 'Langue' and t['value'] == 'VOSTFR' for t in filters['tags'])
+
+    requests = []
+    sample_html = '''
+    <div id="containerPepites">
+      <div class="shrink-0 m-3 rounded border-2"><a href="/catalogue/frieren"><img src="/frieren.jpg"><h2 class="card-title">Frieren</h2></a></div>
+    </div>
+    <div id="list_catalog">
+      <div class="catalog-card"><a href="/catalogue/solo-leveling"><img src="/sl.jpg"><h2 class="card-title">Solo Leveling</h2></a></div>
+    </div>
+    '''
+    async def fetch(svc, url, *args):
+        requests.append(url)
+        return sample_html, url
+
+    monkeypatch.setattr(catalogue, 'html', fetch)
+
+    # Test custom feed "feed:pepites"
+    pepites_page = await catalogue.browse(recipe.pkg, 'feed:pepites')
+    assert len(pepites_page['results']) == 1
+    assert pepites_page['results'][0].title == 'Frieren'
+
+    # Test multi-parameter filter groups (genre[] + type[] + langue[])
+    action_tag = next(t['id'] for t in filters['tags'] if t['group'] == 'Genres' and t['value'] == 'Action')
+    type_tag = next(t['id'] for t in filters['tags'] if t['group'] == 'Type' and t['value'] == 'Anime')
+    lang_tag = next(t['id'] for t in filters['tags'] if t['group'] == 'Langue' and t['value'] == 'VOSTFR')
+    filtered_page = await catalogue.browse(recipe.pkg, 'catalogue', '', [action_tag, type_tag, lang_tag])
+    assert any(r.title == 'Solo Leveling' for r in filtered_page['results'])
+    parsed = parse_qs(urlparse(requests[-1]).query)
+    assert parsed['genre[]'] == ['Action']
+    assert parsed['type[]'] == ['Anime']
+    assert parsed['langue[]'] == ['VOSTFR']

@@ -41,7 +41,9 @@ On Android, completed videos can be exported to shared storage. Export failures 
 
 Import an Aniyomi-compatible repository from **Sources → Extensions**, then enable the sources you want to use. Source health checks and recipe configuration help diagnose failures.
 
-AnimeLab uses extracted recipes and Python adapters; it does **not execute Aniyomi APKs as an Android extension runtime**. Extensions requiring unsupported custom logic may need an additional adapter. Source availability also depends on external websites.
+AnimeLab extracts selectors and request constants from APKs and runs serializable recipes through a shared Python interpreter. There are no per-source runtime adapters. Recipes can describe HTML, JSON catalogues, AJAX episodes, literal player arrays and redirects. Some known sources use declarative compatibility plans to supplement extracted constants.
+
+An APK contains compiled Kotlin code, **not a portable scraping recipe**. AnimeLab does not run Android bytecode: arbitrary Kotlin logic, encrypted requests and unsupported parsers cannot automatically be converted into complete recipes. Compatibility therefore depends on the operations the interpreter supports and on the external website. See [recipe execution and limitations](docs/extension-recipes.md).
 
 If a site blocks access or requests verification, AnimeLab offers a manual website link and retry controls. Supported verification windows can capture cookies after you complete verification. Opening an ordinary browser tab alone does not transfer cookies to AnimeLab. Proxy configuration and optional rotation are available in Settings; they do not guarantee access.
 

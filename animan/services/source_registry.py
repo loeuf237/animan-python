@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 from animan.api_errors import APIProblem
 from animan.models.anime import AnimeResult, AnimeDetail
 from animan.services.aniyomi_dex_parser import SourceRecipe
-from animan.services.container_adapters.registry import adapter_registry
 
 
 @runtime_checkable
@@ -62,6 +61,13 @@ class RegisteredSource:
         self.require('latest')
         return self._identify(await self.observe("latest",self.service.get_latest_releases()))
 
+    async def get_popular_anime(self, page: int = 1) -> list[AnimeResult]:
+        self.require('popular')
+        fn = getattr(self.service, 'get_popular_anime', None)
+        if fn is None:
+            raise APIProblem('source_operation_unsupported', status=400, category='validation')
+        return self._identify(await self.observe("popular", fn(page=page)))
+
     async def get_anime_detail(self, url: str) -> AnimeDetail | None:
         self.require('detail')
         detail = await self.observe("detail",self.service.get_anime_detail(url))
@@ -101,9 +107,18 @@ class RegisteredSource:
         return [item.model_copy(update={'source': self.id}) for item in items or []]
 
     def descriptor(self) -> dict:
+        views = list(self.capabilities.views())
+        recipe = getattr(self.service, 'recipe', None)
+        if isinstance(recipe, SourceRecipe) and recipe.custom_feeds:
+            existing_ids = {v['id'] for v in views}
+            for feed in recipe.custom_feeds:
+                fid = f"feed:{feed.get('id')}"
+                if feed.get('id') and feed.get('label') and fid not in existing_ids:
+                    views.append({'id': fid, 'label': feed['label']})
+                    existing_ids.add(fid)
         return {'id': self.id, 'name': self.name, 'baseUrl': self.base_url,
                 'lang': self.language, 'type': 'imported' if self.imported else 'native',
-                'isEnabled': True, 'views': self.capabilities.views(), 'multiTags': self.capabilities.multi_tags,
+                'isEnabled': True, 'views': views, 'multiTags': self.capabilities.multi_tags,
                 'capabilities': {key: getattr(self.capabilities, key) for key in self.capabilities.__dataclass_fields__}}
 
 
@@ -131,15 +146,21 @@ class SourceRegistry:
         imported = source_id not in self.natives()
         recipe = getattr(service, 'recipe', None)
         if imported and isinstance(recipe, SourceRecipe):
-            adapter = adapter_registry.find_adapter(source_id, service.base_url)
-            api_catalogue = bool(adapter and adapter.name in ('FRAnime', 'Hanime'))
-            popular = bool(recipe.popular_request_path and recipe.popular_selector and not adapter)
+            api_catalogue = bool(recipe.runtime.get('catalogue'))
+            popular = bool(
+                (recipe.popular_request_path and recipe.popular_selector)
+                or api_catalogue
+            )
+            has_filters = bool(recipe.filter_tags or recipe.filter_orders or recipe.filter_groups)
             capabilities = SourceCapabilities(
-                search=bool(adapter or recipe.search_selector),
-                detail=bool(adapter or recipe.episode_list_selector),
-                latest=bool(recipe.supports_latest and (adapter or recipe.latest_selector or recipe.popular_selector)),
-                popular=popular, catalogue=api_catalogue or popular,
-                multi_tags=api_catalogue)
+                search=bool(api_catalogue or recipe.runtime.get('search') or recipe.search_selector),
+                detail=bool(api_catalogue or recipe.runtime.get('episodes') or recipe.episode_list_selector),
+                latest=bool(recipe.supports_latest and (api_catalogue or recipe.latest_selector or recipe.popular_selector)),
+                popular=popular,
+                catalogue=bool(api_catalogue or popular or has_filters),
+                featured=bool(recipe.custom_feeds),
+                multi_tags=bool(api_catalogue or recipe.multi_tags),
+            )
         else:
             capabilities = SourceCapabilities(search=True, detail=True, latest=True,
                 popular=source_id == 'voir-anime', catalogue=not imported,

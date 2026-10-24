@@ -21,8 +21,9 @@ export interface CatalogueSource {
   multiTags: boolean
 }
 export interface CatalogueFilters {
-  tags: { id: string; label: string; group: string }[]
-  orders: { id: string; label: string }[]
+  tags: { id: string; label: string; group: string; param?: string; value?: string }[]
+  groups?: { name: string; param?: string; single?: boolean }[]
+  orders: { id: string; label: string; value?: string }[]
 }
 export interface CataloguePage {
   source: string
@@ -196,6 +197,18 @@ export interface HistoryItem {
   status?: string
 }
 
+export interface ExtensionCapabilitiesSummary {
+  popular?: boolean
+  latest?: boolean
+  search?: boolean
+  multi_tags?: boolean
+  tags_count?: number
+  orders_count?: number
+  feeds_count?: number
+  custom_feeds?: string[]
+  multisrc_theme?: string
+}
+
 export interface ExtensionSource {
   health?: import('./api').ExtensionHealth[]
   recipe_revision?: number
@@ -206,6 +219,14 @@ export interface ExtensionSource {
   name: string
   lang?: string
   version?: string
+  installed_version?: string | null
+  available_version?: string | null
+  available_apk_url?: string | null
+  available_base_url?: string | null
+  has_update?: boolean | number
+  is_installed?: boolean
+  updated_at?: string | null
+  capabilities_summary?: ExtensionCapabilitiesSummary | null
   enabled?: boolean
   is_enabled?: boolean
   iconUrl?: string | null

@@ -39,7 +39,21 @@
         </p>
       </div>
 
-      <div style="display: flex; gap: 10px; align-items: center">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap">
+        <span
+          v-if="updatesCount > 0"
+          class="badge"
+          style="
+            background: rgba(245, 158, 11, 0.18);
+            color: #fcd34d;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            padding: 8px 14px;
+            border-radius: 9999px;
+            font-weight: 600;
+          "
+        >
+          🔄 <strong>{{ tx(updatesCount) }}</strong> {{ tx('mise(s) à jour disponible(s)') }}
+        </span>
         <span
           class="badge"
           style="
@@ -227,8 +241,30 @@
         </div>
       </div>
       <div
-        style="font-size: 0.85rem; color: #9ca3af; display: flex; align-items: center; gap: 16px"
+        style="
+          font-size: 0.85rem;
+          color: #9ca3af;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        "
       >
+        <button
+          class="btn btn-sm"
+          :disabled="isCheckingUpdates || isImporting"
+          @click="checkUpdates"
+        >
+          {{ tx(isCheckingUpdates ? 'Vérification...' : 'Vérifier les mises à jour') }}
+        </button>
+        <button
+          v-if="updatesCount > 0"
+          class="btn btn-sm btn-primary"
+          :disabled="isUpdatingAll"
+          @click="handleUpdateAll"
+        >
+          {{ tx(isUpdatingAll ? 'Mise à jour...' : 'Tout mettre à jour') }} ({{ tx(updatesCount) }})
+        </button>
         <button class="btn btn-sm" :disabled="isImporting" @click="refreshRepo">
           {{ tx('Actualiser le dépôt') }}
         </button>
@@ -272,6 +308,14 @@
           @click="filterLang = 'active'"
         >
           {{ tx('Sources actives uniquement (') }}{{ tx(enabledCount) }})
+        </button>
+        <button
+          type="button"
+          class="tab-btn"
+          :class="{ active: filterLang === 'updates' }"
+          @click="filterLang = 'updates'"
+        >
+          {{ tx('🔄 Mises à jour (') }}{{ tx(updatesCount) }})
         </button>
       </div>
 
@@ -334,7 +378,7 @@
           </div>
 
           <div style="flex: 1; min-width: 0">
-            <div style="display: flex; align-items: center; gap: 6px">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
               <h3 class="ext-title-text" :title="tx(ext.name)">{{ tx(ext.name) }}</h3>
               <span
                 class="version-badge"
@@ -347,7 +391,21 @@
               >
                 {{ tx((ext.lang || 'ALL').toUpperCase()) }}
               </span>
+              <span
+                v-if="hasExtensionUpdate(ext)"
+                class="version-badge"
+                style="
+                  font-size: 0.68rem;
+                  padding: 1px 6px;
+                  background: #d97706;
+                  color: #fffbeb;
+                  font-weight: 600;
+                "
+              >
+                {{ tx('Mise à jour dispo') }}
+              </span>
             </div>
+
             <div
               style="
                 display: flex;
@@ -356,9 +414,15 @@
                 font-size: 0.75rem;
                 color: #9ca3af;
                 margin-top: 2px;
+                flex-wrap: wrap;
               "
             >
-              <span>v{{ tx(ext.version || '1.0') }}</span>
+              <span v-if="hasExtensionUpdate(ext)" style="color: #fbbf24; font-weight: 600">
+                v{{ tx(ext.installed_version || ext.version || '1.0') }} → v{{
+                  tx(ext.available_version || ext.version || '1.0')
+                }}
+              </span>
+              <span v-else>v{{ tx(ext.installed_version || ext.version || '1.0') }}</span>
               <template v-if="ext.base_url || ext.baseUrl">
                 <span>•</span>
                 <a
@@ -370,7 +434,7 @@
                     text-decoration: none;
                     overflow: hidden;
                     text-overflow: ellipsis;
-                    max-width: 120px;
+                    max-width: 140px;
                     white-space: nowrap;
                   "
                   :title="tx(ext.base_url || ext.baseUrl!)"
@@ -378,6 +442,49 @@
                   {{ tx(formatDomain(ext.base_url || ext.baseUrl!)) }}
                 </a>
               </template>
+            </div>
+
+            <div
+              v-if="ext.capabilities_summary"
+              style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px"
+            >
+              <span
+                v-if="ext.capabilities_summary.popular"
+                style="
+                  font-size: 0.68rem;
+                  padding: 1px 6px;
+                  border-radius: 999px;
+                  background: rgba(16, 185, 129, 0.14);
+                  color: #6ee7b7;
+                "
+              >
+                🔥 {{ tx('Populaires') }}
+              </span>
+              <span
+                v-if="(ext.capabilities_summary.tags_count || 0) > 0"
+                style="
+                  font-size: 0.68rem;
+                  padding: 1px 6px;
+                  border-radius: 999px;
+                  background: rgba(99, 102, 241, 0.15);
+                  color: #a5b4fc;
+                "
+              >
+                🏷️ {{ tx(ext.capabilities_summary.tags_count) }} {{ tx('tags') }}
+              </span>
+              <span
+                v-for="feedLabel in (ext.capabilities_summary.custom_feeds || []).slice(0, 2)"
+                :key="feedLabel"
+                style="
+                  font-size: 0.68rem;
+                  padding: 1px 6px;
+                  border-radius: 999px;
+                  background: rgba(236, 72, 153, 0.14);
+                  color: #f9a8d4;
+                "
+              >
+                ✨ {{ tx(feedLabel) }}
+              </span>
             </div>
           </div>
         </div>
@@ -399,8 +506,30 @@
           >
         </div>
         <div class="extension-actions">
+          <button
+            v-if="hasExtensionUpdate(ext)"
+            class="btn btn-sm btn-primary"
+            :disabled="busyExtensions.has(ext.id)"
+            @click="handleUpdateExtension(ext)"
+          >
+            {{ tx('Mettre à jour') }} (v{{ tx(ext.available_version) }})
+          </button>
+          <router-link
+            v-if="isExtensionActive(ext)"
+            :to="{ name: 'sources', params: { sourceId: ext.pkg } }"
+            class="btn btn-sm"
+          >
+            {{ tx('Explorer') }}
+          </router-link>
           <button class="btn btn-sm" :disabled="busyExtensions.has(ext.id)" @click="diagnose(ext)">
             {{ tx('Tester') }}
+          </button>
+          <button
+            class="btn btn-sm"
+            :disabled="busyExtensions.has(ext.id)"
+            @click="handleRecompileExtension(ext)"
+          >
+            {{ tx('Recompiler') }}
           </button>
           <button class="btn btn-sm" @click="editRecipe(ext)">{{ tx('Configurer') }}</button>
           <label class="toggle-switch">
@@ -512,6 +641,8 @@ const extensions = ref<ExtensionSource[]>([])
 const busyExtensions = ref(new Set<number | string>())
 const editingExtension = ref<ExtensionSource | null>(null)
 const recipeText = ref('')
+const isCheckingUpdates = ref(false)
+const isUpdatingAll = ref(false)
 
 function editRecipe(ext: ExtensionSource) {
   editingExtension.value = ext
@@ -600,12 +731,72 @@ async function refreshRepo() {
     isImporting.value = false
   }
 }
+async function checkUpdates() {
+  isCheckingUpdates.value = true
+  try {
+    const res = await api.checkExtensionUpdates()
+    await fetchExtensions()
+    showToast(
+      res.message ||
+        (res.count
+          ? `${res.count} mise(s) à jour disponible(s).`
+          : 'Toutes vos extensions installées sont à jour.'),
+      res.count ? 'info' : 'success',
+    )
+    if (res.count && res.count > 0) {
+      filterLang.value = 'updates'
+    }
+  } catch (e: any) {
+    showToast(e.message || 'Erreur lors de la vérification des mises à jour.', 'error')
+  } finally {
+    isCheckingUpdates.value = false
+  }
+}
+async function handleUpdateExtension(ext: ExtensionSource) {
+  busyExtensions.value.add(ext.id)
+  try {
+    const res = await api.updateExtension(ext.id)
+    animeStore.homeFeed = null
+    await fetchExtensions()
+    showToast(res.message || `${ext.name} mis à jour.`, 'success')
+  } catch (e: any) {
+    showToast(e.message || 'Erreur lors de la mise à jour.', 'error')
+  } finally {
+    busyExtensions.value.delete(ext.id)
+  }
+}
+async function handleUpdateAll() {
+  isUpdatingAll.value = true
+  try {
+    const res = await api.updateAllExtensions()
+    animeStore.homeFeed = null
+    await fetchExtensions()
+    showToast(res.message || 'Extensions mises à jour.', 'success')
+  } catch (e: any) {
+    showToast(e.message || 'Erreur lors de la mise à jour globale.', 'error')
+  } finally {
+    isUpdatingAll.value = false
+  }
+}
+async function handleRecompileExtension(ext: ExtensionSource) {
+  busyExtensions.value.add(ext.id)
+  try {
+    const res = await api.recompileExtension(ext.id)
+    animeStore.homeFeed = null
+    await fetchExtensions()
+    showToast(res.message || `Recette recompilée pour ${ext.name}.`, 'success')
+  } catch (e: any) {
+    showToast(e.message || 'Erreur lors de la recompilation.', 'error')
+  } finally {
+    busyExtensions.value.delete(ext.id)
+  }
+}
 const activeRepo = ref<any>(null)
 const isLoading = ref(false)
 const isImporting = ref(false)
 const repoUrl = ref('https://raw.githubusercontent.com/yuzono/anime-repo/repo/index.min.json')
 
-const filterLang = ref<'all' | 'fr' | 'active'>('all')
+const filterLang = ref<'all' | 'fr' | 'active' | 'updates'>('all')
 const searchQuery = ref('')
 
 const notifications = useNotifications()
@@ -621,19 +812,27 @@ function isExtensionActive(ext: ExtensionSource) {
   return Boolean(ext.is_enabled ?? ext.enabled)
 }
 
+function hasExtensionUpdate(ext: ExtensionSource) {
+  return Boolean(ext.has_update)
+}
+
 const totalCount = computed(() => extensions.value.length)
 const enabledCount = computed(() => extensions.value.filter(isExtensionActive).length)
+const updatesCount = computed(() => extensions.value.filter(hasExtensionUpdate).length)
 const frCount = computed(
   () => extensions.value.filter((e) => (e.lang || '').toLowerCase() === 'fr').length,
 )
 
 const filteredExtensions = computed(() => {
   return extensions.value.filter((ext) => {
-    // Filter by language / active tab
+    // Filter by language / active / updates tab
     if (filterLang.value === 'fr' && (ext.lang || '').toLowerCase() !== 'fr') {
       return false
     }
     if (filterLang.value === 'active' && !isExtensionActive(ext)) {
+      return false
+    }
+    if (filterLang.value === 'updates' && !hasExtensionUpdate(ext)) {
       return false
     }
 

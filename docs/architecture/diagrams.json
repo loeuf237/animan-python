@@ -1,6 +1,6 @@
 {
-  "analysis_date": "2026-10-21",
-  "analyzed_commit": "9d596c1b6ba00859b5d51dd0408484be05a97fbd",
+  "analysis_date": "2026-10-24",
+  "analyzed_commit": "bbc331202c95686eb3c94d6e27f353a27f6a3385",
   "scope": "repository source analysis; not runtime validation",
   "working_tree_changes": true,
   "diagrams": [
@@ -78,7 +78,7 @@
         {
           "path": "animan/migrations.py",
           "symbol": "migrate",
-          "line": 151
+          "line": 194
         },
         {
           "path": "animan/database.py",
@@ -105,12 +105,12 @@
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService",
-          "line": 62
+          "line": 63
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "ResolvedVideoInfo",
-          "line": 47
+          "line": 48
         },
         {
           "path": "animan/services/library_service.py",
@@ -187,7 +187,7 @@
         {
           "path": "animan/services/source_catalogue.py",
           "symbol": "SourceCatalogueService",
-          "line": 23
+          "line": 24
         },
         {
           "path": "animan/services/scraping_service.py",
@@ -207,32 +207,32 @@
         {
           "path": "animan/services/extension_service.py",
           "symbol": "ExtensionService",
-          "line": 29
+          "line": 32
         },
         {
           "path": "animan/services/aniyomi_dex_parser.py",
           "symbol": "SourceRecipe",
-          "line": 17
+          "line": 18
         },
         {
           "path": "animan/services/aniyomi_dex_parser.py",
           "symbol": "AniyomiDexParser",
-          "line": 71
+          "line": 156
         },
         {
           "path": "animan/services/aniyomi_container.py",
           "symbol": "AniyomiContainerSource",
-          "line": 89
+          "line": 90
         },
         {
-          "path": "animan/services/container_adapters/base.py",
-          "symbol": "BaseSourceAdapter",
-          "line": 9
+          "path": "animan/services/recipe_runtime.py",
+          "symbol": "RecipeRuntime",
+          "line": 42
         },
         {
-          "path": "animan/services/container_adapters/registry.py",
-          "symbol": "AdapterRegistry",
-          "line": 13
+          "path": "animan/services/recipe_plans.py",
+          "symbol": "compile_operations",
+          "line": 22
         },
         {
           "path": "animan/services/extractors/base.py",
@@ -257,22 +257,22 @@
         {
           "path": "animan/services/source_registry.py",
           "symbol": "SourceRegistry",
-          "line": 110
+          "line": 125
         },
         {
           "path": "animan/services/source_registry.py",
           "symbol": "RegisteredSource",
-          "line": 41
+          "line": 40
         },
         {
           "path": "animan/services/source_registry.py",
           "symbol": "SourceProvider",
-          "line": 17
+          "line": 16
         },
         {
           "path": "animan/services/source_registry.py",
           "symbol": "SourceCapabilities",
-          "line": 25
+          "line": 24
         },
         {
           "path": "animan/services/extension_observability.py",
@@ -282,8 +282,8 @@
       ],
       "source": "plantuml/03-classes-sources.puml",
       "svg": "svg/03-classes-sources.svg",
-      "width": 2394,
-      "height": 1421
+      "width": 2397,
+      "height": 1398
     },
     {
       "id": "04-classes-reseau",
@@ -411,7 +411,7 @@
         {
           "path": "animan/android_security.py",
           "symbol": "AndroidSessionMiddleware",
-          "line": 6
+          "line": 7
         }
       ],
       "source": "plantuml/05-classes-android.puml",
@@ -509,17 +509,17 @@
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._execute_download",
-          "line": 1532
+          "line": 1563
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._finalize_task",
-          "line": 1553
+          "line": 1584
         },
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._publish_mux_file",
-          "line": 1581
+          "line": 1612
         }
       ],
       "source": "plantuml/09-sequence-telechargement.puml",
@@ -541,12 +541,12 @@
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService._download_single_file",
-          "line": 1535
+          "line": 1566
         },
         {
           "path": "animan/services/download_resume.py",
           "symbol": "prepare_hls_cache",
-          "line": 53
+          "line": 56
         }
       ],
       "source": "plantuml/10-sequence-reprise-proxy.puml",
@@ -563,22 +563,22 @@
         {
           "path": "animan/services/extension_service.py",
           "symbol": "ExtensionService.import_repository",
-          "line": 48
+          "line": 51
         },
         {
           "path": "animan/services/extension_service.py",
           "symbol": "ExtensionService.toggle_extension",
-          "line": 227
+          "line": 295
         },
         {
           "path": "animan/services/aniyomi_dex_parser.py",
           "symbol": "AniyomiDexParser.parse_apk",
-          "line": 75
+          "line": 160
         },
         {
           "path": "animan/services/extension_service.py",
           "symbol": "ExtensionService.restore_recipe",
-          "line": 457
+          "line": 843
         }
       ],
       "source": "plantuml/11-sequence-extensions.puml",
@@ -605,7 +605,7 @@
         {
           "path": "animan/services/download_manager.py",
           "symbol": "DownloadManagerService.export_task",
-          "line": 1550
+          "line": 1581
         },
         {
           "path": "android/app/src/main/java/com/animan/app/StorageAccess.kt",
@@ -743,7 +743,7 @@
         {
           "path": "animan/android_security.py",
           "symbol": "AndroidSessionMiddleware",
-          "line": 6
+          "line": 7
         }
       ],
       "source": "plantuml/16-deploiement-android.puml",

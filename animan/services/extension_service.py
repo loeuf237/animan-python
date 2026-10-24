@@ -3,6 +3,8 @@ from animan.database import init_db, sqlite_connection
 from animan.services.source_http import source_http, VerificationRequired
 import asyncio
 import json
+import hashlib
+import io
 import logging
 import os
 import re
@@ -12,6 +14,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from urllib.parse import urlparse, urljoin
 import httpx
+import zipfile
 
 from animan.security import is_safe_url
 from animan.config import settings
@@ -144,20 +147,28 @@ class ExtensionService:
 
                 cursor.execute("""
                     INSERT INTO imported_extensions (
-                        repo_id, pkg, name, lang, version, apk_url, base_url, icon_url, sources_meta, is_enabled
+                        repo_id, pkg, name, lang, version, available_version, apk_url, available_apk_url,
+                        base_url, available_base_url, icon_url, sources_meta, is_enabled, has_update
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
                     ON CONFLICT(repo_id, pkg) DO UPDATE SET
                         name = excluded.name,
                         lang = excluded.lang,
                         recipe_json = CASE WHEN version IS NOT excluded.version OR base_url IS NOT excluded.base_url OR apk_url IS NOT excluded.apk_url THEN NULL ELSE recipe_json END,
+                        has_update = CASE
+                            WHEN installed_version IS NOT NULL AND installed_version != '' AND installed_version IS NOT excluded.version THEN 1
+                            ELSE 0
+                        END,
                         version = excluded.version,
+                        available_version = excluded.version,
                         apk_url = excluded.apk_url,
+                        available_apk_url = excluded.apk_url,
+                        available_base_url = excluded.base_url,
                         base_url = excluded.base_url,
                         icon_url = excluded.icon_url,
                         sources_meta = excluded.sources_meta;
                 """, (
-                    repo_id, pkg, name, lang, version, apk_url, base_url, icon_url, json.dumps(sources)
+                    repo_id, pkg, name, lang, version, version, apk_url, apk_url, base_url, base_url, icon_url, json.dumps(sources)
                 ))
                 imported_count += 1
 
@@ -187,6 +198,52 @@ class ExtensionService:
             row = cursor.fetchone()
             return dict(row) if row else None
 
+    @staticmethod
+    def _build_capabilities_summary(entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Résume les recettes disponibles (populaires, tags, tris, flux dédiés) d'une extension."""
+        recipe_data: Dict[str, Any] = {}
+        if entry.get("recipe_json"):
+            try:
+                recipe_data = json.loads(entry["recipe_json"])
+            except Exception:
+                recipe_data = {}
+        try:
+            recipe = SourceRecipe.from_dict(recipe_data) if recipe_data else SourceRecipe(
+                pkg=entry.get("pkg") or "",
+                name=entry.get("name") or "",
+                base_url=entry.get("base_url") or "",
+                lang=entry.get("lang") or "all",
+            )
+            AniyomiDexParser._fill_heuristics(recipe)
+            if recipe_data:
+                recipe = SourceRecipe.from_dict({
+                    **recipe.to_dict(),
+                    **{k: v for k, v in recipe_data.items() if v not in ("", None, [])},
+                })
+        except Exception:
+            recipe = SourceRecipe(
+                pkg=entry.get("pkg") or "",
+                name=entry.get("name") or "",
+                base_url=entry.get("base_url") or "",
+                lang=entry.get("lang") or "all",
+            )
+            AniyomiDexParser._fill_heuristics(recipe)
+        return {
+            "popular": bool(recipe.popular_request_path and recipe.popular_selector),
+            "latest": bool(recipe.latest_request_path and recipe.latest_selector),
+            "search": bool(recipe.search_request_path and recipe.search_selector),
+            "multi_tags": bool(recipe.multi_tags),
+            "tags_count": len(recipe.filter_tags or []),
+            "orders_count": len(recipe.filter_orders or []),
+            "feeds_count": len(recipe.custom_feeds or []),
+            "custom_feeds": [
+                f.get("label", f.get("id", ""))
+                for f in (recipe.custom_feeds or [])
+                if isinstance(f, dict) and (f.get("label") or f.get("id"))
+            ],
+            "multisrc_theme": recipe.multisrc_theme or "",
+        }
+
     def get_visible_extensions(self, query: Optional[str] = None, lang: Optional[str] = None, enabled_only: bool = False) -> List[Dict[str, Any]]:
         """Retourne uniquement les extensions présentes dans le dernier magasin ajouté."""
         active_repo = self.get_active_repository()
@@ -209,19 +266,30 @@ class ExtensionService:
         if enabled_only:
             sql += " AND is_enabled = 1"
 
-        sql += " ORDER BY is_enabled DESC, lang = 'fr' DESC, name ASC;"
+        sql += " ORDER BY has_update DESC, is_enabled DESC, lang = 'fr' DESC, name ASC;"
 
         with self._get_conn() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(params))
             rows = cursor.fetchall()
-            entries=[dict(r) for r in rows]
+            entries = [dict(r) for r in rows]
             for entry in entries:
-                entry['health']=extension_observability.health(conn,entry['id'])
+                entry["health"] = extension_observability.health(conn, entry["id"])
+                is_installed = bool(entry.get("is_enabled") or entry.get("recipe_json") or entry.get("installed_version"))
+                installed_ver = entry.get("installed_version") or (entry.get("version") if is_installed else None)
+                available_ver = entry.get("available_version") or entry.get("version")
+                has_update = bool(entry.get("has_update")) or bool(
+                    is_installed and installed_ver and available_ver and installed_ver != available_ver
+                )
+                entry["is_installed"] = is_installed
+                entry["installed_version"] = installed_ver
+                entry["available_version"] = available_ver
+                entry["has_update"] = has_update
+                entry["capabilities_summary"] = self._build_capabilities_summary(entry)
             return entries
 
     # -------------------------------------------------------------------------
-    # Activation & Compilation de Recette
+    # Activation, Mise à jour & Compilation de Recette
     # -------------------------------------------------------------------------
 
     async def toggle_extension(self, ext_id: int, enabled: bool) -> Dict[str, Any]:
@@ -250,18 +318,47 @@ class ExtensionService:
                     except Exception:
                         pass
 
+                installed_ver = ext_data.get("installed_version") or ext_data.get("available_version") or ext_data.get("version")
+                avail_ver = ext_data.get("available_version") or ext_data.get("version")
+                has_upd = 1 if (installed_ver and avail_ver and installed_ver != avail_ver) else 0
+
                 if not recipe_dict:
-                    recipe_dict = await self._compile_extension_recipe(ext_data)
-                    cursor.execute("UPDATE imported_extensions SET recipe_json = ?, is_enabled = 1 WHERE id = ?;", (json.dumps(recipe_dict), ext_id))
+                    compile_target = self._available_target(ext_data)
+                    upgrading = bool(ext_data.get('installed_version') and compile_target['version'] != ext_data['installed_version'])
+                    recipe_dict = await self._compile_extension_recipe(compile_target, force_download=upgrading)
+                    installed_ver = avail_ver or installed_ver
+                    has_upd = 0
+                    cursor.execute(
+                        """
+                        UPDATE imported_extensions
+                        SET recipe_json = ?, is_enabled = 1,
+                            installed_version = ?, version = ?, apk_url = ?, base_url = ?,
+                            available_version = COALESCE(available_version, version),
+                            has_update = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?;
+                        """,
+                        (json.dumps(recipe_dict), installed_ver, installed_ver, compile_target['apk_url'],
+                         recipe_dict['base_url'], has_upd, ext_id),
+                    )
                 else:
-                    cursor.execute("UPDATE imported_extensions SET is_enabled = 1 WHERE id = ?;", (ext_id,))
+                    cursor.execute(
+                        """
+                        UPDATE imported_extensions
+                        SET is_enabled = 1,
+                            installed_version = COALESCE(installed_version, version),
+                            available_version = COALESCE(available_version, version),
+                            has_update = ?
+                        WHERE id = ?;
+                        """,
+                        (has_upd, ext_id),
+                    )
 
                 recipe = SourceRecipe.from_dict(recipe_dict)
                 if not recipe.base_url or not await asyncio.to_thread(is_safe_url, recipe.base_url):
                     raise ValueError("Aucune adresse de source valide : configurez sa recette avant activation.")
-                source=AniyomiContainerSource(recipe)
-                source._diagnostics_db_path=self.db_path
-                source._diagnostics_recipe_revision=save_recipe_revision(conn,ext_id,source.recipe.to_dict(),'activate')
+                source = AniyomiContainerSource(recipe)
+                source._diagnostics_db_path = self.db_path
+                source._diagnostics_recipe_revision = save_recipe_revision(conn, ext_id, source.recipe.to_dict(), 'activate')
                 self._active_container_sources[pkg] = source
                 logger.info("[extensions] Extension enabled: %s (%s)", ext_data["name"], pkg)
             else:
@@ -279,7 +376,260 @@ class ExtensionService:
             "name": ext_data["name"],
         }
 
-    async def _compile_extension_recipe(self, ext_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def check_updates(self) -> Dict[str, Any]:
+        """Vérifie auprès du dépôt actif si des mises à jour sont disponibles pour les extensions installées,
+        sans écraser les versions actuellement installées afin que l'utilisateur décide quand mettre à jour.
+        """
+        active_repo = self.get_active_repository()
+        if not active_repo:
+            raise ValueError("Aucun dépôt actif.")
+
+        clean_url = active_repo["url"]
+        try:
+            async with source_http.async_client(
+                timeout=15.0,
+                verify=settings.SSL_VERIFY,
+                follow_redirects=True,
+                event_hooks={"request": [self._validate_request]},
+            ) as client:
+                resp = await client.get(clean_url, headers={"User-Agent": settings.DEFAULT_USER_AGENT})
+                if resp.status_code != 200:
+                    raise ValueError(f"Impossible de joindre le magasin (HTTP {resp.status_code})")
+                data = resp.json()
+        except VerificationRequired:
+            raise
+        except Exception as e:
+            raise ValueError(f"Erreur lors de la vérification des mises à jour : {e}")
+
+        if not isinstance(data, list):
+            raise ValueError("Format d'index du dépôt invalide.")
+
+        repo_base = clean_url.rsplit("/", 1)[0]
+        apk_base_dir = f"{repo_base}/apk"
+
+        updates_available: List[Dict[str, Any]] = []
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM imported_extensions WHERE repo_id = ?;", (active_repo["id"],))
+            existing_by_pkg = {row["pkg"]: dict(row) for row in cursor.fetchall()}
+
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                pkg = item.get("pkg") or ""
+                if pkg not in existing_by_pkg:
+                    continue
+                ext = existing_by_pkg[pkg]
+                remote_version = item.get("version") or str(item.get("code") or "1.0")
+                raw_apk = item.get("apk") or ""
+                sources = item.get('sources') or []
+                remote_base_url = (sources[0].get('baseUrl') or '') if isinstance(sources, list) and sources and isinstance(sources[0], dict) else ''
+                if raw_apk.startswith("http"):
+                    remote_apk_url = raw_apk
+                elif raw_apk:
+                    remote_apk_url = f"{apk_base_dir}/{raw_apk}"
+                else:
+                    remote_apk_url = ''
+
+                is_installed = bool(ext.get("is_enabled") or ext.get("recipe_json") or ext.get("installed_version"))
+                installed_ver = ext.get("installed_version") or (ext.get("version") if is_installed else None)
+                has_upd = 1 if (is_installed and installed_ver and remote_version != installed_ver) else 0
+
+                cursor.execute(
+                    """
+                    UPDATE imported_extensions
+                    SET available_version = ?,
+                        available_apk_url = ?,
+                        available_base_url = ?,
+                        installed_version = COALESCE(installed_version, CASE WHEN is_enabled = 1 OR recipe_json IS NOT NULL THEN version ELSE NULL END),
+                        has_update = ?
+                    WHERE id = ?;
+                    """,
+                    (remote_version, remote_apk_url, remote_base_url or None, has_upd, ext["id"]),
+                )
+                if has_upd:
+                    updates_available.append({
+                        "id": ext["id"],
+                        "pkg": pkg,
+                        "name": ext["name"],
+                        "installed_version": installed_ver,
+                        "available_version": remote_version,
+                    })
+            conn.commit()
+
+        return {
+            "success": True,
+            "count": len(updates_available),
+            "updates": updates_available,
+            "message": (
+                f"{len(updates_available)} mise(s) à jour disponible(s)."
+                if updates_available
+                else "Toutes vos extensions installées sont à jour."
+            ),
+        }
+
+    async def update_extension(self, ext_id: int) -> Dict[str, Any]:
+        """Met à jour une extension à la demande de l'utilisateur en téléchargeant le nouvel APK et en recompilant sa recette."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM imported_extensions WHERE id = ?;", (ext_id,)).fetchone()
+            if not row:
+                raise ValueError("Extension introuvable.")
+            ext_data = dict(row)
+            active = self.get_active_repository()
+            if not active or active["id"] != ext_data["repo_id"]:
+                raise ValueError("Cette extension appartient à un dépôt inactif.")
+
+        compile_target = self._available_target(ext_data)
+        target_version = compile_target['version']
+        target_apk_url = compile_target['apk_url']
+        # Updates must never silently install cached older bytes or a heuristic recipe.
+        recipe_dict = await self._compile_extension_recipe(compile_target, force_download=True)
+        recipe = SourceRecipe.from_dict(recipe_dict)
+        if not recipe.base_url or not await asyncio.to_thread(is_safe_url, recipe.base_url):
+            raise ValueError('URL de source invalide dans la mise à jour.')
+
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if ext_data.get("recipe_json"):
+                try:
+                    save_recipe_revision(conn, ext_id, json.loads(ext_data["recipe_json"]), "legacy")
+                except Exception:
+                    pass
+            conn.execute(
+                """
+                UPDATE imported_extensions
+                SET version = ?,
+                    installed_version = ?,
+                    available_version = ?,
+                    apk_url = ?,
+                    available_apk_url = ?,
+                    available_base_url = ?,
+                    base_url = COALESCE(NULLIF(?, ''), base_url),
+                    recipe_json = ?,
+                    has_update = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?;
+                """,
+                (
+                    target_version,
+                    target_version,
+                    target_version,
+                    target_apk_url,
+                    target_apk_url,
+                    recipe.base_url,
+                    recipe.base_url,
+                    json.dumps(recipe_dict),
+                    ext_id,
+                ),
+            )
+            save_recipe_revision(conn, ext_id, recipe_dict, "update", force=True)
+            conn.commit()
+
+        self._load_enabled_sources()
+        return {
+            "success": True,
+            "id": ext_id,
+            "pkg": ext_data["pkg"],
+            "name": ext_data["name"],
+            "version": target_version,
+            "installed_version": target_version,
+            "available_version": target_version,
+            "has_update": False,
+            "message": f"{ext_data['name']} mis à jour vers v{target_version}.",
+        }
+
+    async def update_all_extensions(self) -> Dict[str, Any]:
+        """Met à jour toutes les extensions du dépôt actif disposant d'une nouvelle version."""
+        visible = self.get_visible_extensions()
+        to_update = [ext for ext in visible if ext.get("has_update")]
+        updated_ids: List[int] = []
+        for ext in to_update:
+            await self.update_extension(int(ext["id"]))
+            updated_ids.append(int(ext["id"]))
+        return {
+            "success": True,
+            "count": len(updated_ids),
+            "updated_ids": updated_ids,
+            "message": (
+                f"{len(updated_ids)} extension(s) mise(s) à jour."
+                if updated_ids
+                else "Aucune mise à jour en attente."
+            ),
+        }
+
+    async def recompile_extension(self, ext_id: int) -> Dict[str, Any]:
+        """Recompile la recette DEX d'une extension depuis son APK (local ou distant)."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM imported_extensions WHERE id = ?;", (ext_id,)).fetchone()
+            if not row:
+                raise ValueError("Extension introuvable.")
+            ext_data = dict(row)
+            active = self.get_active_repository()
+            if not active or active["id"] != ext_data["repo_id"]:
+                raise ValueError("Cette extension appartient à un dépôt inactif.")
+
+        recipe_dict = await self._compile_extension_recipe(ext_data)
+        recipe = SourceRecipe.from_dict(recipe_dict)
+        with self._get_conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if ext_data.get("recipe_json"):
+                try:
+                    save_recipe_revision(conn, ext_id, json.loads(ext_data["recipe_json"]), "legacy")
+                except Exception:
+                    pass
+            conn.execute(
+                """
+                UPDATE imported_extensions
+                SET recipe_json = ?,
+                    base_url = COALESCE(NULLIF(?, ''), base_url),
+                    installed_version = COALESCE(installed_version, version),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?;
+                """,
+                (json.dumps(recipe_dict), recipe.base_url, ext_id),
+            )
+            save_recipe_revision(conn, ext_id, recipe_dict, "recompile", force=True)
+            conn.commit()
+
+        self._load_enabled_sources()
+        return {
+            "success": True,
+            "id": ext_id,
+            "pkg": ext_data["pkg"],
+            "name": ext_data["name"],
+            "message": f"Recette recompilée pour {ext_data['name']}.",
+        }
+
+    @staticmethod
+    def _available_target(ext_data):
+        return {
+            **ext_data,
+            'version': ext_data.get('available_version') or ext_data.get('version'),
+            'apk_url': (ext_data['available_apk_url'] if ext_data.get('available_apk_url') is not None else ext_data.get('apk_url')) or '',
+            'base_url': ext_data.get('available_base_url') or ext_data.get('base_url') or '',
+        }
+
+    @staticmethod
+    def _apk_cache_path(ext_data):
+        identity = f"{ext_data.get('pkg') or ''}:{ext_data.get('version')}:{ext_data.get('apk_url') or ''}"
+        return APKS_DIR / f'{hashlib.sha256(identity.encode()).hexdigest()}.apk'
+
+    @staticmethod
+    def _validate_apk(apk_bytes):
+        try:
+            with zipfile.ZipFile(io.BytesIO(apk_bytes)) as archive:
+                names = [name for name in archive.namelist() if re.fullmatch(r'classes(?:\d+)?\.dex', name)]
+                if not names:
+                    raise ValueError('L’APK ne contient aucun fichier DEX.')
+                for name in names:
+                    with archive.open(name) as stream:
+                        header = stream.read(112)
+                    if len(header) < 112 or not header.startswith(b'dex\n'):
+                        raise ValueError('Fichier DEX invalide dans l’APK.')
+        except (zipfile.BadZipFile, OSError, EOFError, RuntimeError) as exc:
+            raise ValueError('Le fichier reçu n’est pas un APK valide.') from exc
+
+    async def _compile_extension_recipe(self, ext_data: Dict[str, Any], force_download: bool = False) -> Dict[str, Any]:
         """Télécharge l'APK et extrait la recette de scraping via AniyomiDexParser."""
         apk_url = ext_data.get("apk_url") or ""
         pkg = ext_data.get("pkg") or ""
@@ -288,27 +638,45 @@ class ExtensionService:
         lang = ext_data.get("lang") or "all"
 
         apk_bytes = b""
-        import hashlib
-        cache_id = hashlib.sha256(f"{pkg}:{ext_data.get('version')}:{apk_url}".encode()).hexdigest()
-        local_apk = APKS_DIR / f"{cache_id}.apk"
+        local_apk = self._apk_cache_path(ext_data)
 
-        if local_apk.exists() and local_apk.stat().st_size > 1000:
-            apk_bytes = local_apk.read_bytes()
-        elif apk_url:
+        if not force_download and local_apk.exists():
+            try:
+                cached = local_apk.read_bytes()
+                self._validate_apk(cached)
+                apk_bytes = cached
+            except (OSError, ValueError):
+                logger.warning('[extensions] Ignoring invalid APK cache for %s', pkg)
+        if not apk_bytes and apk_url:
             logger.info("[extensions] Downloading APK for %s from %s", name, apk_url)
             try:
                 async with source_http.async_client(timeout=25.0, verify=settings.SSL_VERIFY, follow_redirects=True, event_hooks={"request": [self._validate_request]}) as client:
                     resp = await client.get(apk_url, headers={"User-Agent": settings.DEFAULT_USER_AGENT})
-                    if resp.status_code == 200 and len(resp.content) > 1000:
-                        apk_bytes = resp.content
-                        local_apk.write_bytes(apk_bytes)
+                    if resp.status_code != 200:
+                        raise ValueError(f'Téléchargement de l’APK impossible (HTTP {resp.status_code}).')
+                    self._validate_apk(resp.content)
+                    apk_bytes = resp.content
             except VerificationRequired:
                 raise
             except Exception as e:
                 logger.warning("[extensions] Failed downloading APK for %s: %s", name, e)
+                if force_download:
+                    raise ValueError('Mise à jour annulée : impossible de récupérer un APK valide.') from e
+
+        if force_download and not apk_bytes:
+            raise ValueError('Mise à jour annulée : aucune URL d’APK disponible.')
 
         if apk_bytes:
-            recipe = AniyomiDexParser.parse_apk(apk_bytes, pkg_name=pkg, default_base_url=base_url)
+            recipe = AniyomiDexParser.parse_apk(apk_bytes, pkg_name=pkg, default_base_url=base_url, strict=force_download)
+            # Publish a complete cache entry only after validation and parsing.
+            import tempfile
+            with tempfile.NamedTemporaryFile(dir=APKS_DIR, delete=False) as cached:
+                scratch = Path(cached.name)
+                cached.write(apk_bytes)
+            try:
+                scratch.replace(local_apk)
+            finally:
+                scratch.unlink(missing_ok=True)
         else:
             # Recette heuristique basée sur les métadonnées déclarées
             recipe = SourceRecipe(pkg=pkg, base_url=base_url)
@@ -337,6 +705,15 @@ class ExtensionService:
                 if not ext.get("recipe_json"):
                     recipe = SourceRecipe(pkg=ext["pkg"], name=ext["name"], base_url=ext["base_url"] or "", lang=ext["lang"])
                     AniyomiDexParser._fill_heuristics(recipe)
+                    cached_apk = self._apk_cache_path({**ext, 'version': ext.get('installed_version') or ext.get('version')})
+                    if cached_apk.exists():
+                        try:
+                            apk_bytes = cached_apk.read_bytes()
+                            self._validate_apk(apk_bytes)
+                            recipe = AniyomiDexParser.parse_apk(apk_bytes, pkg_name=ext['pkg'], default_base_url=ext['base_url'] or '')
+                            recipe.name, recipe.lang = ext['name'], ext['lang']
+                        except (OSError, ValueError):
+                            logger.warning('[extensions] Ignoring invalid APK cache for %s', ext['pkg'])
                     if recipe.base_url:
                         loaded[ext["pkg"]] = AniyomiContainerSource(recipe)
                         effective=loaded[ext['pkg']].recipe.to_dict()
@@ -347,6 +724,11 @@ class ExtensionService:
                     try:
                         recipe_data = json.loads(ext["recipe_json"])
                         recipe = SourceRecipe.from_dict(recipe_data)
+                        from animan.services.recipe_plans import repair_legacy_recipe
+                        if repair_legacy_recipe(recipe):
+                            save_recipe_revision(conn, ext['id'], recipe_data, 'before_identity_repair')
+                            recipe_data = recipe.to_dict()
+                            conn.execute('UPDATE imported_extensions SET base_url=? WHERE id=?', (recipe.base_url, ext['id']))
                         AniyomiDexParser._fill_heuristics(recipe)
                         # Keep user-defined paths/selectors; fill only missing values.
                         recipe = SourceRecipe.from_dict({**recipe.to_dict(), **{key: value for key, value in recipe_data.items() if value not in ("", None, [])}})
@@ -395,12 +777,16 @@ class ExtensionService:
             if not isinstance(recipe.base_url, str) or not await asyncio.to_thread(is_safe_url, recipe.base_url):
                 raise ValueError("URL de source invalide.")
             from bs4 import BeautifulSoup
-            import re
+            from animan.services.recipe_plans import source_key
+            key = source_key(recipe.pkg, recipe.base_url)
+            api_marker = f'api:{key}' if key in ('franime', 'hanime') else None
             for key, value in recipe.to_dict().items():
                 if key.endswith("selector"):
                     if not isinstance(value, str):
                         raise ValueError("Les sélecteurs doivent être du texte.")
                     if value:
+                        if value == api_marker and key in ('popular_selector', 'latest_selector', 'search_selector', 'episode_list_selector'):
+                            continue
                         try:
                             BeautifulSoup("", "html.parser").select(value)
                         except VerificationRequired:

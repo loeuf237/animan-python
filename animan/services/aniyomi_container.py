@@ -17,11 +17,10 @@ from animan.services.proxy_service import proxy_service
 
 logger = logging.getLogger("animan.container")
 
-from animan.services.container_adapters import adapter_registry
-from animan.services.container_adapters.hanime_adapter import get_hanime_catalog
+from animan.services.recipe_runtime import RecipeRuntime
+from animan.services.recipe_plans import compile_operations, repair_legacy_recipe
 from animan.services.extractors import extractor_registry
 
-_get_hanime_catalog = get_hanime_catalog
 
 KNOWN_EMBED_HOSTS = {
     "sibnet": "Sibnet",
@@ -54,6 +53,8 @@ def _clean_selector(sel: Optional[str]) -> str:
 
 def _safe_select(parent: Any, selector: str) -> List[Any]:
     s = _clean_selector(selector)
+    if s.startswith("api:"):
+        raise NotImplementedError("This APK operation needs a supported data recipe; API markers are not CSS selectors")
     if not s:
         return []
     try:
@@ -116,6 +117,8 @@ class AniyomiContainerSource:
             path = getattr(recipe, field)
             if path.endswith("?page="):
                 setattr(recipe, field, path + "1")
+        repair_legacy_recipe(recipe)
+        compile_operations(recipe)
         self.recipe = recipe
         self.name = recipe.name or recipe.pkg.split(".")[-1].capitalize()
         self.base_url = recipe.base_url.rstrip("/")
@@ -123,6 +126,7 @@ class AniyomiContainerSource:
         self.lang = recipe.lang
         self.last_error = None
         self.source_id = recipe.pkg  # Identifiant unique de la source
+        self.data_runtime = RecipeRuntime(self)
 
     def _get_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
         return {
@@ -160,10 +164,8 @@ class AniyomiContainerSource:
         if not clean_q or not self.base_url:
             return []
 
-        # Délégation aux adaptateurs d'architecture/API spécifique (Hanime, Anime-Sama, etc.)
-        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
-        if adapter:
-            return await adapter.search_anime(clean_q, self)
+        if self.recipe.runtime.get('catalogue') or self.recipe.runtime.get('search'):
+            return await self.data_runtime.search(clean_q)
 
         return await self._search_anime_html(clean_q)
 
@@ -181,7 +183,9 @@ class AniyomiContainerSource:
                 "search_start": "1",
                 "story": clean_q,
                 "full_search": "0",
-                "result_from": "1"
+                "result_from": "1",
+                **{k: v.replace("{query}", clean_q) for k, v in self.recipe.search_post_params.items()},
+                self.recipe.search_query_param or "story": clean_q,
             }
         else:
             path_tmpl = self.recipe.search_request_path or f"/?{self.recipe.search_query_param or 's'}={{query}}"
@@ -222,6 +226,8 @@ class AniyomiContainerSource:
                 continue
 
             href = urljoin(self.base_url, link_el.get("href"))
+            if any(part in href for part in self.recipe.runtime.get("exclude_urls", [])):
+                continue
             if href in seen_hrefs:
                 continue
             seen_hrefs.add(href)
@@ -253,7 +259,7 @@ class AniyomiContainerSource:
                         title=title,
                         imageUrl=img_url,
                         url=href,
-                        version=self.lang.upper(),
+                        version="VF" if "/vf/" in href else "VOSTFR" if "/vostfr/" in href else self.lang.upper(),
                         type="Anime",
                         episodeInfo=self.name,
                         source=self.source_id,
@@ -271,35 +277,32 @@ class AniyomiContainerSource:
         if not self.base_url:
             return []
 
-        # Délégation aux adaptateurs d'architecture/API spécifique
-        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
-        if adapter:
-            return await adapter.get_latest_releases(self)
+        if self.recipe.runtime.get('catalogue'):
+            from animan.services.source_catalogue import source_catalogue
+            return (await source_catalogue.api_catalogue(self, order=self.recipe.runtime['catalogue']['latest_order']))[:24]
 
         return await self._latest_html()
 
-    async def _latest_html(self) -> List[AnimeResult]:
-        rel_path = self.recipe.latest_request_path or self.recipe.popular_request_path or "/"
-        target_url = urljoin(self.base_url, rel_path)
-        html = await self._fetch_html(target_url)
-        if not html:
-            return []
-
-        soup = BeautifulSoup(html, "html.parser")
-        selector = self.recipe.latest_selector or self.recipe.popular_selector or ".movie-poster, .c-tabs-item__content, article"
-        items = _safe_select(soup, selector)
-        if not items and html.strip() and not re.search(r'(?i)no (?:results|anime)|aucun (?:résultat|anime)',soup.get_text(' ',strip=True)):
-            raise SelectorMismatch('Expected catalogue elements were not found')
-
+    def _parse_list_items(self, items: List[Any], info_label: str = "Récents", limit: int = 24) -> List[AnimeResult]:
         results: List[AnimeResult] = []
-        for it in items[:18]:
+        seen_hrefs = set()
+        for it in items[:limit]:
             link_el = _safe_select_one(it, self.recipe.item_link_selector or "a[href]") or (it if it.name == "a" else None)
             if not link_el or not link_el.get("href"):
                 continue
             href = urljoin(self.base_url, link_el.get("href"))
+            if any(part in href for part in self.recipe.runtime.get("exclude_urls", [])):
+                continue
+            if href in seen_hrefs:
+                continue
+            seen_hrefs.add(href)
             title_el = _safe_select_one(it, self.recipe.item_title_selector or "h2, h3, .title, .movie-title") or link_el
             title = (title_el.get_text().strip() or title_el.get("alt", "")) if title_el else ""
             img_el = _safe_select_one(it, self.recipe.item_thumb_selector or "img[src], img[data-src]")
+            if not title and img_el and img_el.get("alt"):
+                title = img_el.get("alt", "").strip()
+            if not title and link_el.get("title"):
+                title = link_el.get("title", "").strip()
             img_url = urljoin(self.base_url, img_el.get("data-src") or img_el.get("data-lazy-src") or img_el.get("src", "")) if img_el else ""
 
             if title:
@@ -309,13 +312,78 @@ class AniyomiContainerSource:
                         title=title,
                         imageUrl=img_url,
                         url=href,
-                        version=self.lang.upper(),
+                        version="VF" if "/vf/" in href else "VOSTFR" if "/vostfr/" in href else self.lang.upper(),
                         type="Anime",
-                        episodeInfo="Récents",
+                        episodeInfo=info_label,
                         source=self.source_id,
                     )
                 )
         return results
+
+    async def _latest_html(self) -> List[AnimeResult]:
+        rel_path = self.recipe.latest_request_path or self.recipe.popular_request_path or "/"
+        target_url = urljoin(self.base_url, rel_path.replace("{page}", "1"))
+        html = await self._fetch_html(target_url)
+        if not html:
+            return []
+
+        soup = BeautifulSoup(html, "html.parser")
+        selector = self.recipe.latest_selector or self.recipe.popular_selector or ".movie-poster, .c-tabs-item__content, article"
+        items = _safe_select(soup, selector)
+        if not items and html.strip() and not re.search(r'(?i)no (?:results|anime)|aucun (?:résultat|anime)', soup.get_text(' ', strip=True)):
+            raise SelectorMismatch('Expected catalogue elements were not found')
+
+        return self._parse_list_items(items, info_label="Récents", limit=18)
+
+    # -------------------------------------------------------------------------
+    # Séries populaires & Recettes spécifiques à la source
+    # -------------------------------------------------------------------------
+
+    async def get_popular_anime(self, page: int = 1) -> List[AnimeResult]:
+        if not self.base_url:
+            return []
+
+        if self.recipe.runtime.get('catalogue'):
+            from animan.services.source_catalogue import source_catalogue
+            items = await source_catalogue.api_catalogue(self, order=self.recipe.runtime['catalogue']['popular_order'])
+            return items[(page-1)*24:page*24]
+
+        return await self._popular_html(page=page)
+
+    async def _popular_html(self, page: int = 1) -> List[AnimeResult]:
+        rel_path = (self.recipe.popular_request_path or self.recipe.latest_request_path or "/").replace("{page}", str(page))
+        target_url = urljoin(self.base_url, rel_path)
+        html = await self._fetch_html(target_url)
+        if not html:
+            return []
+
+        soup = BeautifulSoup(html, "html.parser")
+        selector = self.recipe.popular_selector or self.recipe.latest_selector or ".movie-poster, .c-tabs-item__content, article"
+        items = _safe_select(soup, selector)
+        if not items and html.strip() and not re.search(r'(?i)no (?:results|anime)|aucun (?:résultat|anime)', soup.get_text(' ', strip=True)):
+            raise SelectorMismatch('Expected popular catalogue elements were not found')
+
+        return self._parse_list_items(items, info_label="Populaires", limit=24)
+
+    async def get_custom_feed(self, feed_id: str, page: int = 1) -> List[AnimeResult]:
+        if not self.base_url:
+            return []
+
+        return await self._custom_feed_html(feed_id, page=page)
+
+    async def _custom_feed_html(self, feed_id: str, page: int = 1) -> List[AnimeResult]:
+        feed = next((f for f in (self.recipe.custom_feeds or []) if f.get("id") == feed_id), None)
+        if not feed:
+            return await self.get_popular_anime(page=page)
+        rel_path = (feed.get("path") or "/").replace("{page}", str(page))
+        target_url = urljoin(self.base_url, rel_path)
+        html = await self._fetch_html(target_url)
+        if not html:
+            return []
+        soup = BeautifulSoup(html, "html.parser")
+        selector = feed.get("selector") or self.recipe.popular_selector or self.recipe.latest_selector or "article"
+        items = _safe_select(soup, selector)
+        return self._parse_list_items(items, info_label=feed.get("label") or feed_id, limit=24)
 
     # -------------------------------------------------------------------------
     # Détails & Épisodes
@@ -325,10 +393,8 @@ class AniyomiContainerSource:
         if not is_safe_url(anime_url):
             return None
 
-        # Délégation aux adaptateurs d'architecture/API spécifique
-        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
-        if adapter:
-            return await adapter.get_anime_detail(anime_url, self)
+        if self.recipe.runtime.get('catalogue'):
+            return await self.data_runtime.detail(anime_url)
 
         html = await self._fetch_html(anime_url)
         if not html:
@@ -342,7 +408,7 @@ class AniyomiContainerSource:
 
         # Synopsis
         syn_el = _safe_select_one(soup, self.recipe.details_synopsis_selector or ".synopsis, .description, .entry-content p, #dle-content .full-text")
-        synopsis = syn_el.get_text().strip() if syn_el else ""
+        synopsis = (syn_el.get("data-full-description") or syn_el.get_text().strip()) if syn_el else ""
 
         # Affiche
         img_el = _safe_select_one(soup, self.recipe.details_thumb_selector or ".poster img, .fposter img, meta[property='og:image']")
@@ -353,7 +419,7 @@ class AniyomiContainerSource:
                 img_url = urljoin(self.base_url, img_src)
 
         # Genres
-        genres = [g.get_text().strip() for g in _safe_select(soup, ".genre a, .genres a, a[href*='/genre/']") if g.get_text().strip()]
+        genres = [g.get_text().strip() for g in _safe_select(soup, self.recipe.details_genre_selector or ".genre a, .genres a, a[href*='/genre/']") if g.get_text().strip()]
 
         # Épisodes
         episodes: List[Episode] = []
@@ -406,47 +472,10 @@ class AniyomiContainerSource:
 
         episodes.sort(key=lambda ep: ep.number)
 
-        # Extraction spécifique Anime-Sama via panneauAnime et episodes.js
-        if not episodes and ("anime-sama" in self.base_url or "animesama" in (self.pkg or "").lower()):
-            panneaux = re.findall(r'panneauAnime\s*\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*\)', html)
-            valid_panneaux = [(p_title, p_rel) for p_title, p_rel in panneaux if p_rel != "url" and not p_rel.startswith("http")]
-            if not valid_panneaux:
-                valid_panneaux = [("Saison 1 (VOSTFR)", "saison1/vostfr")]
-            for p_title, p_rel in valid_panneaux:
-                p_url = urljoin(anime_url.rstrip("/") + "/", p_rel.rstrip("/") + "/episodes.js")
-                js_content = await self._fetch_html(p_url)
-                if js_content and "eps" in js_content:
-                    arr_matches = re.findall(r"var\s+eps\d*\s*=\s*\[(.*?)\];", js_content, re.DOTALL)
-                    if arr_matches:
-                        ep_urls = re.findall(r"['\"]([^'\"]+)['\"]", arr_matches[0])
-                        for i, ep_u in enumerate(ep_urls, 1):
-                            episodes.append(
-                                Episode(
-                                    number=i,
-                                    title=f"{p_title} - Épisode {i}",
-                                    version=self.lang.upper(),
-                                    downloadPageUrl=ep_u,
-                                    playerUrl=ep_u,
-                                    thumbnailUrl=img_url,
-                                )
-                            )
-                        if episodes:
-                            break
-
-        # Si aucun épisode trouvé via sélecteur, créer un épisode 1 par défaut sur la page
-        if not episodes and soup.select_one("iframe, video, #playeroptionsul"):
-            episodes.append(
-                Episode(
-                    number=1,
-                    title="Épisode 1",
-                    url=anime_url,
-                    version=self.lang.upper(),
-                    downloadPageUrl=anime_url,
-                    playerUrl=anime_url,
-                    thumbnailUrl=img_url,
-                    animeId=str(hash(anime_url))[-8:],
-                )
-            )
+        version = "VF" if re.search(r"(?<![a-z])vf(?![a-z])", anime_url + " " + title, re.I) else "VOSTFR"
+        interpreted = await self.data_runtime.episodes(anime_url, soup, version)
+        if interpreted is not None:
+            episodes = interpreted
 
         return AnimeDetail(
             id=str(hash(anime_url))[-8:],
@@ -457,7 +486,7 @@ class AniyomiContainerSource:
             episodes=episodes,
             source=self.source_id,
             url=anime_url,
-            version=self.lang.upper(),
+            version=version,
         )
 
     # -------------------------------------------------------------------------
@@ -468,12 +497,24 @@ class AniyomiContainerSource:
         if not is_safe_url(play_url):
             return []
 
-        # 1. Vérifier si un adaptateur personnalisé gère cette source
-        adapter = adapter_registry.find_adapter(self.pkg, self.base_url)
-        if adapter:
-            adapter_sources = await adapter.get_episode_sources(play_url, self)
-            if adapter_sources:
-                return adapter_sources
+        from urllib.parse import parse_qs, unquote_plus
+        fragment = parse_qs(urlparse(play_url).fragment)
+        if 'players' in fragment or 'servers' in fragment:
+            raw = fragment.get('players', fragment.get('servers'))[0]
+            players = json.loads(raw)
+            links = players.values() if isinstance(players, dict) else players
+            if not isinstance(players, (dict, list)) or len(players) > 100:
+                raise ValueError('Invalid recipe player list')
+            results = []
+            for link in links:
+                if not isinstance(link, str) or not is_safe_url(link):
+                    continue
+                extractor = extractor_registry.find_extractor(link)
+                results.append(self.data_runtime.stream(link, extractor.name if extractor else 'Player'))
+            return results
+        interpreted = await self.data_runtime.players(play_url)
+        if interpreted is not None:
+            return interpreted
 
         # 2. Si l'URL de lecture est déjà un lien d'intégration vidéo direct via le hub d'extracteurs
         matched_ext = extractor_registry.find_extractor(play_url)

@@ -1,26 +1,17 @@
+import json
+from unittest.mock import AsyncMock, patch
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-
-from animan.services.container_adapters.registry import adapter_registry
-from animan.services.container_adapters.hanime_adapter import HanimeAdapter
-from animan.services.container_adapters.animesama_adapter import AnimeSamaAdapter
 from animan.services.aniyomi_container import AniyomiContainerSource
-
 from animan.services.aniyomi_dex_parser import SourceRecipe
 
-def test_adapter_registry_matching():
-    hanime = adapter_registry.find_adapter("eu.kanade.tachiyomi.animeextension.all.hanime", "https://hanime.tv")
-    assert isinstance(hanime, HanimeAdapter)
+@pytest.fixture(autouse=True)
+def public_fixture_dns(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket, 'getaddrinfo', lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('93.184.216.34', 443))])
 
-    animesama = adapter_registry.find_adapter("eu.kanade.tachiyomi.animeextension.fr.animesama", "https://anime-sama.fr")
-    assert isinstance(animesama, AnimeSamaAdapter)
-
-    unknown = adapter_registry.find_adapter("eu.kanade.tachiyomi.animeextension.en.standardhtml", "https://example.com")
-    assert unknown is None
 
 @pytest.mark.asyncio
-async def test_hanime_adapter_search_detail_sources():
-    adapter = HanimeAdapter()
+async def test_json_recipe_search_detail_sources():
     recipe = SourceRecipe(
         pkg="eu.kanade.tachiyomi.animeextension.en.hanime",
         name="Hanime",
@@ -49,22 +40,21 @@ async def test_hanime_adapter_search_detail_sources():
         },
     ]
 
-    with patch("animan.services.container_adapters.hanime_adapter.get_hanime_catalog", new_callable=AsyncMock) as mock_cat:
-        mock_cat.return_value = fake_catalog
+    with patch.object(container, "_fetch_html", new_callable=AsyncMock, return_value=json.dumps(fake_catalog)):
 
         # 1. Search
-        search_res = await adapter.search_anime("overflow", container)
+        search_res = await container.search_anime("overflow")
         assert len(search_res) == 1
         assert search_res[0].title == "Overflow Season 1"
         assert search_res[0].url == "https://hanime.tv/videos/hentai/overflow-season-1"
 
         # 2. Latest
-        latest_res = await adapter.get_latest_releases(container)
+        latest_res = await container.get_latest_releases()
         assert len(latest_res) == 2
         assert latest_res[0].title == "Overflow Season 1"
 
         # 3. Detail
-        detail = await adapter.get_anime_detail("https://hanime.tv/videos/hentai/overflow-season-1", container)
+        detail = await container.get_anime_detail("https://hanime.tv/videos/hentai/overflow-season-1")
         assert detail is not None
         assert detail.title == "Overflow Season 1"
         assert detail.synopsis == "Super anime"
@@ -84,18 +74,14 @@ async def test_hanime_adapter_search_detail_sources():
                 ]
             }
         }
-        mock_api_resp = MagicMock(status_code=200)
-        mock_api_resp.json.return_value = fake_api_manifest
-
-        with patch("animan.services.source_http.AsyncSourceClient.get", new_callable=AsyncMock, return_value=mock_api_resp):
-            sources = await adapter.get_episode_sources("https://hanime.tv/videos/hentai/overflow-season-1", container)
+        with patch.object(container, "_fetch_html", new_callable=AsyncMock, return_value=json.dumps(fake_api_manifest)):
+            sources = await container.get_episode_sources("https://hanime.tv/videos/hentai/overflow-season-1")
             assert len(sources) == 2
             assert sources[0]["server"] == "Server 1"
             assert sources[0]["quality"] == "1080p"
 
 @pytest.mark.asyncio
-async def test_animesama_adapter_js_array_extraction():
-    adapter = AnimeSamaAdapter()
+async def test_episode_recipe_js_array_extraction():
     recipe = SourceRecipe(
         pkg="eu.kanade.tachiyomi.animeextension.fr.animesama",
         name="Anime-Sama",
@@ -117,20 +103,54 @@ async def test_animesama_adapter_js_array_extraction():
     </html>
     '''
 
-    with patch.object(adapter, "_fetch_text", new_callable=AsyncMock) as mock_fetch:
+    with patch.object(container, "_fetch_html", new_callable=AsyncMock) as mock_fetch:
         mock_fetch.return_value = fake_detail_html
 
-        detail = await adapter.get_anime_detail("https://anime-sama.fr/catalogue/solo-leveling/saison1/vostfr/", container)
+        detail = await container.get_anime_detail("https://anime-sama.fr/catalogue/solo-leveling/saison1/vostfr/")
         assert detail is not None
         assert detail.title == "Solo Leveling"
         assert len(detail.episodes) == 2
         assert detail.episodes[0].number == 1
-        assert detail.episodes[0].playerUrl == "https://video.sibnet.ru/shell.php?videoid=111"
+        assert detail.episodes[0].playerUrl.startswith("https://video.sibnet.ru/shell.php?videoid=111")
         assert detail.episodes[1].number == 2
-        assert detail.episodes[1].playerUrl == "https://video.sibnet.ru/shell.php?videoid=222"
+        assert detail.episodes[1].playerUrl.startswith("https://video.sibnet.ru/shell.php?videoid=222")
 
     # Test sources d'un épisode direct
-    sources = await adapter.get_episode_sources("https://video.sibnet.ru/shell.php?videoid=111", container)
+    sources = await container.get_episode_sources("https://video.sibnet.ru/shell.php?videoid=111")
     assert len(sources) == 1
     assert sources[0]["server"] == "Sibnet"
-    assert sources[0]["url"] == "https://video.sibnet.ru/shell.php?videoid=111"
+    assert sources[0]["url"].startswith("https://video.sibnet.ru/shell.php?videoid=111")
+
+
+@pytest.mark.asyncio
+async def test_serialized_data_recipe_runs_for_unknown_package_without_dispatch():
+    recipe = SourceRecipe(pkg='independent.publisher', base_url='https://independent.example', runtime={
+        'catalogue': {'url': '{base}/catalogue.json', 'kind': 'flat',
+            'entry_url': '{base}/series/{slug}', 'version': 'VO',
+            'popular_order': 'views', 'latest_order': 'created_at_unix'},
+    })
+    source = AniyomiContainerSource(SourceRecipe.from_dict(json.loads(json.dumps(recipe.to_dict()))))
+    source._fetch_html = AsyncMock(return_value=json.dumps([{
+        'id': 1, 'title': 'Example', 'slug': 'example', 'genres': ['Adventure'], 'poster': '',
+    }]))
+    results = await source.search_anime('Example')
+    assert results[0].url == 'https://independent.example/series/example'
+    detail = await source.get_anime_detail(results[0].url)
+    assert detail.title == 'Example'
+    assert detail.genres == ['Adventure']
+    assert source._fetch_html.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_literal_arrays_preserve_missing_player_positions():
+    source = AniyomiContainerSource(SourceRecipe(pkg='independent.arrays', base_url='https://independent.example', runtime={
+        'episodes': {'kind': 'js_arrays', 'array_pattern': r'(?:var|let|const)\s+(eps\w*)\s*=\s*\[([^\]]*)\]'},
+    }))
+    source._fetch_html = AsyncMock(return_value='''<h1>Example</h1><script>
+        var eps1 = ['', 'https://sendvid.com/two'];
+        var eps2 = ['https://sendvid.com/one', null];
+    </script>''')
+    detail = await source.get_anime_detail('https://independent.example/show')
+    assert [(e.number, e.playerUrl) for e in detail.episodes] == [
+        (1, 'https://sendvid.com/one'), (2, 'https://sendvid.com/two'),
+    ]

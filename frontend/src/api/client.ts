@@ -656,6 +656,7 @@ export const api = {
   ): Promise<{
     active_repo?: ExtensionRepository | null
     count?: number
+    updates_count?: number
     extensions?: ExtensionSource[]
     installed?: ExtensionSource[]
   }> {
@@ -690,6 +691,46 @@ export const api = {
   },
   async refreshExtensions(): Promise<{ success: boolean }> {
     return request('/api/extensions/refresh', { method: 'POST' })
+  },
+  async checkExtensionUpdates(): Promise<{
+    success: boolean
+    count?: number
+    updates?: {
+      id: number | string
+      pkg: string
+      name: string
+      installed_version?: string
+      available_version?: string
+    }[]
+    message?: string
+  }> {
+    return request('/api/extensions/check-updates', { method: 'POST' })
+  },
+  async updateExtension(id: number | string): Promise<{
+    success: boolean
+    id?: number | string
+    version?: string
+    installed_version?: string
+    available_version?: string
+    has_update?: boolean
+    message?: string
+  }> {
+    return request(`/api/extensions/${encodeURIComponent(id)}/update`, { method: 'POST' })
+  },
+  async updateAllExtensions(): Promise<{
+    success: boolean
+    count?: number
+    updated_ids?: (number | string)[]
+    message?: string
+  }> {
+    return request('/api/extensions/update-all', { method: 'POST' })
+  },
+  async recompileExtension(id: number | string): Promise<{
+    success: boolean
+    id?: number | string
+    message?: string
+  }> {
+    return request(`/api/extensions/${encodeURIComponent(id)}/recompile`, { method: 'POST' })
   },
   async importExtensionRepo(
     url: string,

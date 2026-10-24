@@ -9,8 +9,8 @@ title AnimeLab — sources, recettes importées et extracteurs
 ' @source animan/services/aniyomi_dex_parser.py:SourceRecipe
 ' @source animan/services/aniyomi_dex_parser.py:AniyomiDexParser
 ' @source animan/services/aniyomi_container.py:AniyomiContainerSource
-' @source animan/services/container_adapters/base.py:BaseSourceAdapter
-' @source animan/services/container_adapters/registry.py:AdapterRegistry
+' @source animan/services/recipe_runtime.py:RecipeRuntime
+' @source animan/services/recipe_plans.py:compile_operations
 ' @source animan/services/extractors/base.py:BaseVideoExtractor
 ' @source animan/services/extractors/base.py:ExtractorResult
 ' @source animan/services/extractors/registry.py:ExtractorRegistry
@@ -72,23 +72,18 @@ package "Extensions : conversion et exécution Python" {
     +get_anime_detail(...)
     +get_episode_sources(...)
   }
-  abstract class BaseSourceAdapter {
-    +matches(pkg, base_url)
-    +search_anime(query, container)
-    +get_latest_releases(page, container)
-    +get_anime_detail(anime_url, container)
-    +get_episode_sources(play_url, container)
-  }
-  class AdapterRegistry {
-    +register(adapter)
-    +find_adapter(pkg, base_url)
+  class RecipeRuntime {
+    +catalogue()
+    +search(query)
+    +detail(url)
+    +episodes(url, soup, version)
+    +players(url)
   }
   ExtensionService ..> AniyomiDexParser : compile la recette
   AniyomiDexParser ..> SourceRecipe : produit heuristiquement
   ExtensionService "1" o-- "0..*" AniyomiContainerSource : instances activées
   AniyomiContainerSource "1" --> "1" SourceRecipe : utilise
-  AniyomiContainerSource ..> AdapterRegistry : sélection spécifique si connue
-  AdapterRegistry "1" o-- "0..*" BaseSourceAdapter : registre
+  AniyomiContainerSource "1" --> "1" RecipeRuntime : interprète les opérations de la recette
   SourceCatalogueService ..> ExtensionService : sources importées activées
   SourceCatalogueService ..> AniyomiContainerSource : capacités / navigation
 }
