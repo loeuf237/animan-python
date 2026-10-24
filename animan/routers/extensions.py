@@ -22,6 +22,7 @@ async def extensions_page(
     extensions = extension_service.get_visible_extensions(query=q, lang=lang) if active_repo else []
     
     enabled_count = sum(1 for e in extensions if e.get("is_enabled"))
+    updates_count = sum(1 for e in extensions if e.get("has_update"))
     total_count = len(extensions)
 
     return templates.TemplateResponse(
@@ -31,6 +32,7 @@ async def extensions_page(
             "active_repo": active_repo,
             "extensions": extensions,
             "enabled_count": enabled_count,
+            "updates_count": updates_count,
             "total_count": total_count,
             "query": q or "",
             "selected_lang": lang or "all",
@@ -80,9 +82,11 @@ async def list_extensions_api(
     """Retourne la liste JSON des extensions visibles (uniquement du dernier magasin actif)."""
     active_repo = extension_service.get_active_repository()
     extensions = extension_service.get_visible_extensions(query=q, lang=lang, enabled_only=enabled_only) if active_repo else []
+    updates_count = sum(1 for e in extensions if e.get("has_update"))
     return JSONResponse(content={
         "active_repo": active_repo,
         "count": len(extensions),
+        "updates_count": updates_count,
         "extensions": extensions
     })
 
@@ -94,6 +98,42 @@ async def refresh_extensions_api():
         raise HTTPException(status_code=400, detail="Aucun dépôt actif.")
     try:
         return await extension_service.import_repository(repo["url"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/extensions/check-updates")
+async def check_updates_api():
+    """Vérifie si de nouvelles versions sont disponibles dans le dépôt actif sans écraser les extensions installées."""
+    try:
+        return await extension_service.check_updates()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/extensions/update-all")
+async def update_all_extensions_api():
+    """Met à jour toutes les extensions disposant d'une nouvelle version."""
+    try:
+        return await extension_service.update_all_extensions()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/extensions/{ext_id}/update")
+async def update_extension_api(ext_id: int):
+    """Met à jour une extension spécifique vers la dernière version disponible."""
+    try:
+        return await extension_service.update_extension(ext_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/api/extensions/{ext_id}/recompile")
+async def recompile_extension_api(ext_id: int):
+    """Recompile la recette DEX d'une extension depuis son APK."""
+    try:
+        return await extension_service.recompile_extension(ext_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

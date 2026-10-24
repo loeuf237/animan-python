@@ -8,7 +8,6 @@ from animan.services.library_service import library_service
 from animan.services.extension_service import ExtensionService
 from animan.services.aniyomi_dex_parser import SourceRecipe, AniyomiDexParser
 from animan.services.aniyomi_container import AniyomiContainerSource
-from animan.services.container_adapters.registry import adapter_registry
 
 
 @pytest.fixture
@@ -46,7 +45,7 @@ async def test_anisama_ajax_episodes_and_sources(isolated, monkeypatch):
     recipe = SourceRecipe(pkg='eu.kanade.tachiyomi.animeextension.fr.anisama', base_url='https://v1.animesz.xyz')
     AniyomiDexParser._fill_heuristics(recipe)
     source = AniyomiContainerSource(recipe)
-    assert adapter_registry.find_adapter(source.pkg, source.base_url).__class__.__name__ == 'AniSamaAdapter'
+    assert source.recipe.runtime['episodes']['kind'] == 'json_html'
     async def fetch(url, **kwargs):
         if '/ajax/episode/list/' in url:
             assert url.endswith('/123')

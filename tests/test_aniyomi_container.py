@@ -214,7 +214,7 @@ def test_api_extensions_routes(client):
 @pytest.mark.asyncio
 async def test_hanime_search_and_detail():
     """Vérifie la recherche et les détails pour l'extension Hanime.tv via le catalogue API."""
-    from animan.services.aniyomi_container import AniyomiContainerSource, _get_hanime_catalog
+    from animan.services.aniyomi_container import AniyomiContainerSource
     recipe = SourceRecipe(
         pkg="eu.kanade.tachiyomi.animeextension.en.hanime",
         name="Hanime",
@@ -245,8 +245,7 @@ async def test_hanime_search_and_detail():
         }
     ]
 
-    with patch("animan.services.aniyomi_container._get_hanime_catalog", new_callable=AsyncMock) as mock_get_cat:
-        mock_get_cat.return_value = mock_catalog
+    with patch.object(source, "_fetch_html", new_callable=AsyncMock, return_value=json.dumps(mock_catalog)):
 
         # Recherche
         results = await source.search_anime("overflow")
@@ -357,4 +356,106 @@ def test_download_task_source_propagation():
             download_manager.tasks.pop(bt.id, None)
             if bt.id in download_manager.task_order:
                 download_manager.task_order.remove(bt.id)
+
+
+def test_dex_parser_popular_tags_and_custom_feeds():
+    """Vérifie que chaque profil d'extension Aniyomi expose ses recettes de populaires, tags, groupes et flux dédiés."""
+    pkgs = [
+        "eu.kanade.tachiyomi.animeextension.fr.animesama",
+        "eu.kanade.tachiyomi.animeextension.fr.animevostfr",
+        "eu.kanade.tachiyomi.animeextension.fr.anisama",
+        "eu.kanade.tachiyomi.animeextension.fr.franime",
+        "eu.kanade.tachiyomi.animeextension.fr.jetanime",
+        "eu.kanade.tachiyomi.animeextension.fr.voiranime",
+        "eu.kanade.tachiyomi.animeextension.fr.vostfree",
+        "eu.kanade.tachiyomi.animeextension.de.aniworld",
+        "eu.kanade.tachiyomi.animeextension.en.hanime",
+        "eu.kanade.tachiyomi.animeextension.en.hentaihaven",
+    ]
+    for pkg in pkgs:
+        recipe = SourceRecipe(pkg=pkg)
+        AniyomiDexParser._fill_heuristics(recipe)
+        assert recipe.base_url.startswith("https://")
+        assert recipe.popular_request_path
+        assert recipe.popular_selector
+        assert recipe.latest_request_path
+        assert len(recipe.filter_tags) > 0
+        assert len(recipe.custom_feeds) > 0
+
+    animesama = SourceRecipe(pkg="eu.kanade.tachiyomi.animeextension.fr.animesama")
+    AniyomiDexParser._fill_heuristics(animesama)
+    feed_ids = {f["id"] for f in animesama.custom_feeds}
+    assert {"pepites", "classiques", "films"} <= feed_ids
+    assert len(animesama.filter_groups) == 2
+
+    vostfree = SourceRecipe(pkg="eu.kanade.tachiyomi.animeextension.fr.vostfree")
+    AniyomiDexParser._fill_heuristics(vostfree)
+    vf_feeds = {f["id"] for f in vostfree.custom_feeds}
+    assert {"animes_vostfr", "animes_vf", "films"} <= vf_feeds
+
+
+@pytest.mark.asyncio
+async def test_extension_update_detection_and_user_triggered_upgrade(tmp_path, extension_apk):
+    """Vérifie la détection de nouvelle version sans écrasement automatique et la mise à jour au souhait de l'utilisateur."""
+    db_file = str(tmp_path / "test_updates.sqlite3")
+    service = ExtensionService(db_path=db_file)
+
+    repo_v1 = [
+        {
+            "pkg": "eu.kanade.tachiyomi.animeextension.fr.animesama",
+            "name": "Aniyomi: Anime-Sama",
+            "lang": "fr",
+            "version": "1.4.29",
+            "apk": "animesama-1.4.29.apk",
+            "sources": [{"baseUrl": "https://anime-sama.to"}],
+        }
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = extension_apk('https://anime-sama.to')
+    mock_resp.json.side_effect = lambda: repo_v1
+
+    with patch("animan.services.source_http.AsyncSourceClient.get", new_callable=AsyncMock) as mock_get, \
+         patch("animan.services.extension_service.is_safe_url", return_value=True):
+        mock_get.return_value = mock_resp
+        await service.import_repository("https://example.com/repo/index.min.json")
+        ext = service.get_visible_extensions()[0]
+        await service.toggle_extension(ext["id"], True)
+
+        installed_ext = service.get_visible_extensions()[0]
+        assert installed_ext["is_installed"] is True
+        assert installed_ext["installed_version"] == "1.4.29"
+        assert installed_ext["available_version"] == "1.4.29"
+        assert installed_ext["has_update"] is False
+        assert installed_ext["capabilities_summary"]["popular"] is True
+        assert installed_ext["capabilities_summary"]["tags_count"] > 50
+
+        # Une nouvelle version 1.4.30 est publiée sur le dépôt
+        repo_v1[0] = {
+            **repo_v1[0],
+            "version": "1.4.30",
+            "apk": "animesama-1.4.30.apk",
+        }
+        check_res = await service.check_updates()
+        assert check_res["success"] is True
+        assert check_res["count"] == 1
+        assert check_res["updates"][0]["installed_version"] == "1.4.29"
+        assert check_res["updates"][0]["available_version"] == "1.4.30"
+
+        # Tant que l'utilisateur n'a pas cliqué sur "Mettre à jour", installed_version reste 1.4.29
+        pending_ext = service.get_visible_extensions()[0]
+        assert pending_ext["installed_version"] == "1.4.29"
+        assert pending_ext["available_version"] == "1.4.30"
+        assert pending_ext["has_update"] is True
+
+        # L'utilisateur déclenche la mise à jour à son souhait
+        upd_res = await service.update_extension(ext["id"])
+        assert upd_res["success"] is True
+        assert upd_res["installed_version"] == "1.4.30"
+        assert upd_res["has_update"] is False
+
+        updated_ext = service.get_visible_extensions()[0]
+        assert updated_ext["installed_version"] == "1.4.30"
+        assert updated_ext["available_version"] == "1.4.30"
+        assert updated_ext["has_update"] is False
 

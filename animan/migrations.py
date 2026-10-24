@@ -147,6 +147,37 @@ def download_preferences(conn):
         'user_agent TEXT NOT NULL, default_server TEXT NOT NULL)')
 
 
+def extension_update_management(conn):
+    columns = {row[1] for row in conn.exec_driver_sql('PRAGMA table_info(imported_extensions)')}
+    new_cols = [
+        ('installed_version', 'TEXT'),
+        ('available_version', 'TEXT'),
+        ('available_apk_url', 'TEXT'),
+        ('has_update', 'INTEGER NOT NULL DEFAULT 0'),
+        ('updated_at', 'TEXT'),
+    ]
+    for col_name, col_type in new_cols:
+        if col_name not in columns:
+            conn.exec_driver_sql(f'ALTER TABLE imported_extensions ADD COLUMN {col_name} {col_type}')
+    conn.exec_driver_sql("""
+        UPDATE imported_extensions
+        SET available_version = COALESCE(available_version, version),
+            available_apk_url = COALESCE(available_apk_url, apk_url),
+            installed_version = CASE
+                WHEN installed_version IS NOT NULL THEN installed_version
+                WHEN is_enabled = 1 OR (recipe_json IS NOT NULL AND recipe_json != '') THEN version
+                ELSE NULL
+            END
+    """)
+
+
+def extension_update_source_url(conn):
+    # Separate migration: installations may already have applied version 8.
+    columns = {row[1] for row in conn.exec_driver_sql('PRAGMA table_info(imported_extensions)')}
+    if 'available_base_url' not in columns:
+        conn.exec_driver_sql('ALTER TABLE imported_extensions ADD COLUMN available_base_url TEXT')
+
+
 MIGRATIONS = (
     Migration(1, 'core_tables', bootstrap),
     Migration(2, 'download_identity_and_verification', download_identity),
@@ -155,6 +186,8 @@ MIGRATIONS = (
     Migration(5, 'playback_positions_and_selection', playback_tracking),
     Migration(6, 'extension_recipe_history_and_health', extension_observability),
     Migration(7, 'persistent_download_preferences', download_preferences),
+    Migration(8, 'extension_update_management', extension_update_management),
+    Migration(9, 'extension_update_source_url', extension_update_source_url),
 )
 
 

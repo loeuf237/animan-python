@@ -23,7 +23,7 @@ async def catalogue_filters(source_id: str):
     try:
         filters = await source_catalogue.filters(source_id)
         return {"tags": [{k: t[k] for k in ('id', 'label', 'group')} for t in filters['tags']],
-                "orders": filters['orders']}
+                "groups": filters.get('groups', []), "orders": filters['orders']}
     except CatalogueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except httpx.HTTPError as exc:

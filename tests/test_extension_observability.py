@@ -45,12 +45,11 @@ async def test_versioned_html_reference_corpus(case):
 
 @pytest.mark.asyncio
 async def test_json_reference_corpus():
-    from animan.services.container_adapters.aniworld_adapter import AniWorldAdapter
     manifest=json.loads((FIXTURES/'manifest.json').read_text())
     for case in manifest['jsonCases']:
         source=AniyomiContainerSource(SourceRecipe(pkg='animeextension.de.aniworld',base_url='https://aniworld.example'))
         source._fetch_html=AsyncMock(return_value=(FIXTURES/case['file']).read_text())
-        results=await AniWorldAdapter().search_anime('river',source)
+        results=await source.search_anime('river')
         assert len(results)==case['expectedCount'] and results[0].title==case['expectedTitle']
 
 

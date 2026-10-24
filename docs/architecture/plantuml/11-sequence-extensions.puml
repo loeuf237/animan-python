@@ -13,7 +13,7 @@ control SourceHTTPService as HTTP
 participant "Dépôt JSON / APK" as Repo
 control AniyomiDexParser as Parser
 database "SQLite : extension_repos\nimported_extensions" as DB
-control "AniyomiContainerSource\n+ AdapterRegistry" as Runtime
+control "AniyomiContainerSource\n+ RecipeRuntime" as Runtime
 U -> UI : importer l'URL du dépôt
 UI -> API : POST /api/extensions/import-repo
 API -> Ext : import_repository(repo_url)

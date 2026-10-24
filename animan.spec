@@ -29,7 +29,7 @@ hiddenimports = ['uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.loops.asyncio
     'uvicorn.protocols.http.h11_impl', 'uvicorn.protocols.websockets.websockets_impl',
     'uvicorn.lifespan.on', 'sqlalchemy.dialects.sqlite', 'yt_dlp', '__cffi_backend']
 hiddenimports += collect_submodules('animan.services.extractors')
-hiddenimports += collect_submodules('animan.services.container_adapters')
+hiddenimports += ['animan.services.recipe_runtime', 'animan.services.recipe_plans']
 if sys.platform == 'win32':
     hiddenimports += ['webview.platforms.edgechromium', 'webview.platforms.winforms']
 elif sys.platform == 'darwin':
