@@ -1,5 +1,4 @@
 from animan.services.source_http import VerificationRequired
-import html
 import logging
 import re
 from typing import Any, Dict, List, Optional

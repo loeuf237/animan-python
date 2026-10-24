@@ -1,9 +1,18 @@
 <template>
   <div v-if="isOpen" class="palette-backdrop" @click="close">
-    <div class="palette-card" role="dialog" aria-modal="true" :aria-label="tx('Recherche d’animés')" @click.stop>
+    <div
+      class="palette-card"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="tx('Recherche d’animés')"
+      @click.stop
+    >
       <div class="palette-header">
         <div class="palette-search-field">
-          <svg viewBox="0 0 24 24" class="palette-search-icon"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+          <svg viewBox="0 0 24 24" class="palette-search-icon">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-4-4" />
+          </svg>
           <input
             ref="inputRef"
             v-model="query"
@@ -24,25 +33,62 @@
             @keydown.enter.prevent="selectActive"
             @keydown.esc="close"
           />
-          <button v-if="query" type="button" class="palette-clear-btn" :aria-label="tx('Effacer la recherche')" @click="clearQuery">✕</button>
-          <button type="button" class="palette-esc-badge palette-close-button" :aria-label="tx('Fermer la recherche')" @click="close">{{ tx("Fermer") }}</button>
+          <button
+            v-if="query"
+            type="button"
+            class="palette-clear-btn"
+            :aria-label="tx('Effacer la recherche')"
+            @click="clearQuery"
+          >
+            ✕
+          </button>
+          <button
+            type="button"
+            class="palette-esc-badge palette-close-button"
+            :aria-label="tx('Fermer la recherche')"
+            @click="close"
+          >
+            {{ tx('Fermer') }}
+          </button>
         </div>
 
-        <div class="palette-source-bar"><SourceSelector :model-value="selectedSource" :sources="sourceOptions" @update:model-value="setSource" /></div>
+        <div class="palette-source-bar">
+          <SourceSelector
+            :model-value="selectedSource"
+            :sources="sourceOptions"
+            @update:model-value="setSource"
+          />
+        </div>
       </div>
 
       <div class="palette-body">
         <VerificationPrompt :challenges="challenges" />
         <p v-if="error" class="palette-error" role="alert">{{ tx(error) }}</p>
-        <p v-for="warning in warnings" :key="warning.source" class="palette-error">{{ tx(warning.source) }} : {{ tx(warning.message) }} <a v-if="warning.url" :href="warning.url" target="_blank" rel="noopener noreferrer">{{ tx("Ouvrir le site") }}</a> <ProxyRotationButton v-if="warning.domain" :domain="warning.domain" :retry="executeSearch" /></p>
+        <p v-for="warning in warnings" :key="warning.source" class="palette-error">
+          {{ tx(warning.source) }} : {{ tx(warning.message) }}
+          <a v-if="warning.url" :href="warning.url" target="_blank" rel="noopener noreferrer">{{
+            tx('Ouvrir le site')
+          }}</a>
+          <ProxyRotationButton
+            v-if="warning.domain"
+            :domain="warning.domain"
+            :retry="executeSearch"
+          />
+        </p>
         <!-- Spinner -->
         <div v-if="isLoading" class="palette-loading" role="status">
           <div class="spinner"></div>
-          <span>{{ tx("Recherche en cours…") }}</span>
+          <span>{{ tx('Recherche en cours…') }}</span>
         </div>
 
         <!-- Results List -->
-        <div v-else-if="results.length > 0" id="search-results" role="listbox" :aria-label="tx('Résultats de recherche')" class="palette-results-list">
+        <div
+          v-else-if="results.length > 0"
+          id="search-results"
+          role="listbox"
+          :aria-label="tx('Résultats de recherche')"
+          class="palette-results-list"
+        >
           <button
             v-for="(item, idx) in results"
             type="button"
@@ -67,18 +113,23 @@
                 <span v-if="item.type" class="palette-item-type">{{ tx(item.type) }}</span>
               </div>
             </div>
-            <span class="palette-enter-hint">{{ tx("Entrée ↵") }}</span>
+            <span class="palette-enter-hint">{{ tx('Entrée ↵') }}</span>
           </button>
         </div>
 
         <!-- Empty State -->
-        <div v-else-if="hasSearched && !challenges.length && !error && !warnings.length" class="palette-empty-hint">
-          <p>{{ tx("Aucun résultat trouvé pour \"") }}{{ tx(query) }}{{ tx("\" sur cette source.") }}</p>
+        <div
+          v-else-if="hasSearched && !challenges.length && !error && !warnings.length"
+          class="palette-empty-hint"
+        >
+          <p>
+            {{ tx('Aucun résultat trouvé pour "') }}{{ tx(query) }}{{ tx('" sur cette source.') }}
+          </p>
         </div>
 
         <!-- Initial Hint -->
         <div v-else-if="!hasSearched" class="palette-empty-hint">
-          <p>{{ tx("Tapez au moins 2 lettres pour rechercher dans la sélection de sources.") }}</p>
+          <p>{{ tx('Tapez au moins 2 lettres pour rechercher dans la sélection de sources.') }}</p>
         </div>
       </div>
     </div>
@@ -86,144 +137,242 @@
 </template>
 
 <script setup lang="ts">
-import { tx } from '@/utils/locale';
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { useSourcePreferences } from '@/stores/sourcePreferences';
-import { useSearchContext } from '@/stores/searchContext';
-import { api } from '@/api/client';
-import VerificationPrompt from './VerificationPrompt.vue';
-import ProxyRotationButton from './ProxyRotationButton.vue';
-import SourceSelector from './SourceSelector.vue';
-import { useVerificationStore, challengeFromError } from '@/stores/verification';
-import type { AnimeResult, SourceChallenge, CatalogueSource } from '@/types';
+import { tx } from '@/utils/locale'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useSourcePreferences } from '@/stores/sourcePreferences'
+import { useSearchContext } from '@/stores/searchContext'
+import { api } from '@/api/client'
+import VerificationPrompt from './VerificationPrompt.vue'
+import ProxyRotationButton from './ProxyRotationButton.vue'
+import SourceSelector from './SourceSelector.vue'
+import { useVerificationStore, challengeFromError } from '@/stores/verification'
+import type { AnimeResult, SourceChallenge, CatalogueSource } from '@/types'
 
-const props = defineProps<{isOpen: boolean; initialQuery?: string; initialSource?: string}>();
-const emit = defineEmits<{(e: 'close'): void}>();
-const router = useRouter();
-const searchContext = useSearchContext();
-const verification = useVerificationStore();
-const query = ref('');
-const preferences = useSourcePreferences();
-const selectedSource = ref(preferences.defaultSource);
-watch(() => preferences.defaultSource, source => { if (!hasSearched.value) selectedSource.value = source; });
-const results = ref<AnimeResult[]>([]);
-const challenges = ref<SourceChallenge[]>([]);
-const warnings = ref<{source: string; message: string; url?: string; domain?: string}[]>([]);
-const enabledExtensions = ref<CatalogueSource[]>([]);
-const error = ref('');
-const isLoading = ref(false);
-const hasSearched = ref(false);
-const activeIdx = ref(0);
-const inputRef = ref<HTMLInputElement | null>(null);
+const props = defineProps<{ isOpen: boolean; initialQuery?: string; initialSource?: string }>()
+const emit = defineEmits<{ (e: 'close'): void }>()
+const router = useRouter()
+const searchContext = useSearchContext()
+const verification = useVerificationStore()
+const query = ref('')
+const preferences = useSourcePreferences()
+const selectedSource = ref(preferences.defaultSource)
+watch(
+  () => preferences.defaultSource,
+  (source) => {
+    if (!hasSearched.value) selectedSource.value = source
+  },
+)
+const results = ref<AnimeResult[]>([])
+const challenges = ref<SourceChallenge[]>([])
+const warnings = ref<{ source: string; message: string; url?: string; domain?: string }[]>([])
+const enabledExtensions = ref<CatalogueSource[]>([])
+const error = ref('')
+const isLoading = ref(false)
+const hasSearched = ref(false)
+const activeIdx = ref(0)
+const inputRef = ref<HTMLInputElement | null>(null)
 const sourceOptions = computed(() => [
-  {id: 'french-manga', name: 'French-Manga'}, {id: 'voir-anime', name: 'VoirAnime'}, {id: 'animepahe', name: 'AnimePahe'},
-  ...enabledExtensions.value.map(source => ({id: source.id, name: source.name.replace(/^Aniyomi:\s*/i, '')})),
-]);
-let returnFocus: HTMLElement | null = null;
-let previousOverflow = '';
-let interrupted = false;
-let debounceTimer: ReturnType<typeof setTimeout> | undefined;
-let sequence = 0;
+  { id: 'french-manga', name: 'French-Manga' },
+  { id: 'voir-anime', name: 'VoirAnime' },
+  { id: 'animepahe', name: 'AnimePahe' },
+  ...enabledExtensions.value.map((source) => ({
+    id: source.id,
+    name: source.name.replace(/^Aniyomi:\s*/i, ''),
+  })),
+])
+let returnFocus: HTMLElement | null = null
+let previousOverflow = ''
+let interrupted = false
+let debounceTimer: ReturnType<typeof setTimeout> | undefined
+let sequence = 0
 
 function invalidate() {
-  sequence++;
-  clearTimeout(debounceTimer);
-  verification.clearPending('palette-search');
-  challenges.value = []; warnings.value = []; error.value = ''; isLoading.value = false;
+  sequence++
+  clearTimeout(debounceTimer)
+  verification.clearPending('palette-search')
+  challenges.value = []
+  warnings.value = []
+  error.value = ''
+  isLoading.value = false
 }
-watch(() => props.isOpen, async open => {
-  if (open) {
-    returnFocus = document.activeElement as HTMLElement;
-    previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const changed = (props.initialQuery !== undefined && props.initialQuery !== query.value)
-      || (props.initialSource !== undefined && props.initialSource !== selectedSource.value);
-    if (changed) { invalidate(); results.value = []; hasSearched.value = false; }
-    if (props.initialQuery !== undefined) query.value = props.initialQuery;
-    if (props.initialSource !== undefined) selectedSource.value = props.initialSource;
-    await nextTick(); inputRef.value?.focus();
-    void api.getSources().then(res => { enabledExtensions.value = res.sources.filter(s => s.isEnabled && s.type === 'imported'); }).catch(() => {});
-    if (query.value.trim().length >= 2 && (changed || interrupted || !hasSearched.value || challenges.value.length)) void executeSearch();
-    interrupted = false;
-  } else {
-    interrupted = interrupted || isLoading.value;
-    sequence++; clearTimeout(debounceTimer); isLoading.value = false;
-    verification.clearPending('palette-search');
-    document.body.style.overflow = previousOverflow;
-    await nextTick();
-    if (returnFocus?.isConnected) returnFocus.focus();
-  }
-});
-function close() { interrupted = interrupted || isLoading.value; sequence++; clearTimeout(debounceTimer); isLoading.value = false; verification.clearPending('palette-search'); emit('close'); }
-function clearQuery() { query.value = ''; results.value = []; hasSearched.value = false; invalidate(); inputRef.value?.focus(); }
+watch(
+  () => props.isOpen,
+  async (open) => {
+    if (open) {
+      returnFocus = document.activeElement as HTMLElement
+      previousOverflow = document.body.style.overflow
+      document.body.style.overflow = 'hidden'
+      const changed =
+        (props.initialQuery !== undefined && props.initialQuery !== query.value) ||
+        (props.initialSource !== undefined && props.initialSource !== selectedSource.value)
+      if (changed) {
+        invalidate()
+        results.value = []
+        hasSearched.value = false
+      }
+      if (props.initialQuery !== undefined) query.value = props.initialQuery
+      if (props.initialSource !== undefined) selectedSource.value = props.initialSource
+      await nextTick()
+      inputRef.value?.focus()
+      void api
+        .getSources()
+        .then((res) => {
+          enabledExtensions.value = res.sources.filter((s) => s.isEnabled && s.type === 'imported')
+        })
+        .catch(() => {})
+      if (
+        query.value.trim().length >= 2 &&
+        (changed || interrupted || !hasSearched.value || challenges.value.length)
+      )
+        void executeSearch()
+      interrupted = false
+    } else {
+      interrupted = interrupted || isLoading.value
+      sequence++
+      clearTimeout(debounceTimer)
+      isLoading.value = false
+      verification.clearPending('palette-search')
+      document.body.style.overflow = previousOverflow
+      await nextTick()
+      if (returnFocus?.isConnected) returnFocus.focus()
+    }
+  },
+)
+function close() {
+  interrupted = interrupted || isLoading.value
+  sequence++
+  clearTimeout(debounceTimer)
+  isLoading.value = false
+  verification.clearPending('palette-search')
+  emit('close')
+}
+function clearQuery() {
+  query.value = ''
+  results.value = []
+  hasSearched.value = false
+  invalidate()
+  inputRef.value?.focus()
+}
 function setSource(src: string) {
-  invalidate(); selectedSource.value = src; preferences.setDefault(src); results.value = [];
-  if (query.value.trim().length >= 2) void executeSearch();
+  invalidate()
+  selectedSource.value = src
+  preferences.setDefault(src)
+  results.value = []
+  if (query.value.trim().length >= 2) void executeSearch()
 }
 function onInput() {
-  invalidate(); results.value = [];
-  if (query.value.trim().length < 2) { hasSearched.value = false; return; }
-  debounceTimer = setTimeout(() => void executeSearch(), 300);
+  invalidate()
+  results.value = []
+  if (query.value.trim().length < 2) {
+    hasSearched.value = false
+    return
+  }
+  debounceTimer = setTimeout(() => void executeSearch(), 300)
 }
 async function executeSearch() {
-  if (!query.value.trim() || !props.isOpen) return;
-  const current = ++sequence;
-  const requestedQuery = query.value.trim(), source = selectedSource.value;
-  verification.clearPending('palette-search');
-  isLoading.value = true; hasSearched.value = true; activeIdx.value = 0; error.value = '';
+  if (!query.value.trim() || !props.isOpen) return
+  const current = ++sequence
+  const requestedQuery = query.value.trim(),
+    source = selectedSource.value
+  verification.clearPending('palette-search')
+  isLoading.value = true
+  hasSearched.value = true
+  activeIdx.value = 0
+  error.value = ''
   try {
-    const response = await api.searchAnimeDetailed(requestedQuery, source);
-    if (current !== sequence || !props.isOpen) return;
-    results.value = response.results; challenges.value = response.challenges; warnings.value = response.errors;
-    verification.waitForVerification('palette-search', [...response.challenges, ...response.errors.flatMap(e => e.domain ? [{domain: e.domain}] : [])], async () => {
-      if (current === sequence && props.isOpen) await executeSearch();
-    });
+    const response = await api.searchAnimeDetailed(requestedQuery, source)
+    if (current !== sequence || !props.isOpen) return
+    results.value = response.results
+    challenges.value = response.challenges
+    warnings.value = response.errors
+    verification.waitForVerification(
+      'palette-search',
+      [
+        ...response.challenges,
+        ...response.errors.flatMap((e) => (e.domain ? [{ domain: e.domain }] : [])),
+      ],
+      async () => {
+        if (current === sequence && props.isOpen) await executeSearch()
+      },
+    )
   } catch (exc) {
-    if (current !== sequence || !props.isOpen) return;
-    const challenge = challengeFromError(exc);
-    results.value = [];
+    if (current !== sequence || !props.isOpen) return
+    const challenge = challengeFromError(exc)
+    results.value = []
     if (challenge) {
-      challenges.value = [challenge];
+      challenges.value = [challenge]
       verification.waitForVerification('palette-search', [challenge], async () => {
-        if (current === sequence && props.isOpen) await executeSearch();
-      });
-    } else error.value = exc instanceof Error ? exc.message : 'La recherche a échoué.';
-  } finally { if (current === sequence) isLoading.value = false; }
+        if (current === sequence && props.isOpen) await executeSearch()
+      })
+    } else error.value = exc instanceof Error ? exc.message : 'La recherche a échoué.'
+  } finally {
+    if (current === sequence) isLoading.value = false
+  }
 }
 function navigateResults(delta: number) {
-  const next = activeIdx.value + delta;
+  const next = activeIdx.value + delta
   if (next >= 0 && next < results.value.length) {
-    activeIdx.value = next;
-    void nextTick(() => document.querySelector('.palette-result-item.is-active')?.scrollIntoView({block: 'nearest'}));
+    activeIdx.value = next
+    void nextTick(() =>
+      document
+        .querySelector('.palette-result-item.is-active')
+        ?.scrollIntoView({ block: 'nearest' }),
+    )
   }
 }
 function selectActive() {
-  if (results.value[activeIdx.value]) openAnime(results.value[activeIdx.value]!);
-  else if (!isLoading.value) void executeSearch();
+  if (results.value[activeIdx.value]) openAnime(results.value[activeIdx.value]!)
+  else if (!isLoading.value) void executeSearch()
 }
 function openAnime(item: AnimeResult) {
-  searchContext.markDetail(item.url);
-  close();
-  void router.push({path: '/anime', query: {url: item.url, source: item.source || 'french-manga'}});
+  searchContext.markDetail(item.url)
+  close()
+  void router.push({
+    path: '/anime',
+    query: { url: item.url, source: item.source || 'french-manga' },
+  })
 }
 function onEscape(event: KeyboardEvent) {
-  if (!props.isOpen) return;
-  if (event.key === 'Escape') close();
+  if (!props.isOpen) return
+  if (event.key === 'Escape') close()
   if (event.key === 'Tab') {
-    const elements = [...document.querySelectorAll<HTMLElement>('.palette-card input, .palette-card button:not(:disabled), .palette-card select')].filter(el => el.getClientRects().length);
-    const first = elements[0], last = elements[elements.length - 1];
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    const elements = [
+      ...document.querySelectorAll<HTMLElement>(
+        '.palette-card input, .palette-card button:not(:disabled), .palette-card select',
+      ),
+    ].filter((el) => el.getClientRects().length)
+    const first = elements[0],
+      last = elements[elements.length - 1]
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last?.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first?.focus()
+    }
   }
 }
-onMounted(() => window.addEventListener('keydown', onEscape));
-onUnmounted(() => { invalidate(); if (props.isOpen) document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', onEscape); });
+onMounted(() => window.addEventListener('keydown', onEscape))
+onUnmounted(() => {
+  invalidate()
+  if (props.isOpen) document.body.style.overflow = previousOverflow
+  window.removeEventListener('keydown', onEscape)
+})
 </script>
 
 <style scoped>
-.palette-close-button { display: inline-flex !important; }
-.palette-result-item { width: 100%; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
+.palette-close-button {
+  display: inline-flex !important;
+}
+.palette-result-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
 .palette-backdrop {
   position: fixed;
   inset: 0;
@@ -336,8 +485,13 @@ onUnmounted(() => { invalidate(); if (props.isOpen) document.body.style.overflow
   border-color: var(--accent);
 }
 
-.palette-error { padding: 12px 16px; color: var(--yellow, #d9a441); }
-.palette-body > .verification-prompt { margin: 12px; }
+.palette-error {
+  padding: 12px 16px;
+  color: var(--yellow, #d9a441);
+}
+.palette-body > .verification-prompt {
+  margin: 12px;
+}
 .palette-body {
   flex: 1;
   overflow-y: auto;
@@ -442,11 +596,44 @@ onUnmounted(() => { invalidate(); if (props.isOpen) document.body.style.overflow
   border: 1px solid var(--input-border);
   border-radius: var(--radius-pill);
 }
-.palette-search-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-container); }
-.palette-search-icon { position: static; transform: none; flex: 0 0 20px; }
-.palette-search-input { flex: 1; width: 0; min-width: 0; height: 40px; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.palette-search-input:focus { box-shadow: none; }
-.palette-search-input:focus-visible { outline: none !important; }
-.palette-clear-btn, .palette-close-button { position: static; flex-shrink: 0; min-width: 40px; min-height: 40px; display: inline-flex !important; align-items: center; justify-content: center; }
-.palette-close-button { padding: 0 10px; font-size: 12px; color: var(--text); }
+.palette-search-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-container);
+}
+.palette-search-icon {
+  position: static;
+  transform: none;
+  flex: 0 0 20px;
+}
+.palette-search-input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.palette-search-input:focus {
+  box-shadow: none;
+}
+.palette-search-input:focus-visible {
+  outline: none !important;
+}
+.palette-clear-btn,
+.palette-close-button {
+  position: static;
+  flex-shrink: 0;
+  min-width: 40px;
+  min-height: 40px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.palette-close-button {
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text);
+}
 </style>

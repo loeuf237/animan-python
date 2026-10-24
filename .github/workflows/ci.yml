@@ -14,6 +14,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  python-quality:
+    name: Python quality
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.1'
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Check locked runtime requirements export
+        run: |
+          uv export --locked --no-dev --no-hashes --no-emit-project --output-file requirements.txt > /dev/null
+          git diff --exit-code -- requirements.txt uv.lock
+      - run: uv run --locked python -m ruff check .
+      - run: uv run --locked python -m mypy
+
   docker:
     name: Docker server build and persistence
     runs-on: ubuntu-22.04
@@ -48,6 +66,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
       - run: npm test
       - name: Install browser for responsive UI tests
         run: npx playwright install --with-deps chromium
@@ -90,23 +111,19 @@ jobs:
         with:
           name: animelab-frontend
           path: frontend/dist/
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v7
         with:
+          version: '0.13.1'
           python-version: ${{ matrix.python }}
-          cache: pip
-          cache-dependency-path: requirements.txt
+          enable-cache: true
       - name: Install media and binary inspection tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg llvm
       - name: Install Python dependencies
-        run: python -m pip install -r requirements.txt
+        run: uv sync --locked
       - name: Test backend and packaging tools with isolated storage
-        env:
-          ANIMAN_DB_PATH: ${{ runner.temp }}/animelab-tests/library.sqlite3
-          ANIMAN_DOWNLOAD_DIR: ${{ runner.temp }}/animelab-tests/downloads
-          ANIMAN_CACHE_DIR: ${{ runner.temp }}/animelab-tests/cache
-        run: python -m pytest tests -q --junitxml=test-results/python.xml
+        run: uv run --locked python scripts/check.py python --junitxml=test-results/python.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:

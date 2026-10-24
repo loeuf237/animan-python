@@ -4,7 +4,16 @@
       <!-- Logo / Brand -->
       <router-link to="/" class="brand-logo">
         <div class="logo-icon-glow">
-          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            viewBox="0 0 24 24"
+            width="22"
+            height="22"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
         </div>
@@ -15,7 +24,15 @@
       <!-- Search Bar -->
       <div class="search-box">
         <div class="search-input-wrapper">
-          <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <svg
+            class="search-icon"
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
@@ -28,16 +45,19 @@
             @focus="isSearchDropdownOpen = true"
             @keydown.enter="triggerSearch"
           />
-          <button v-if="searchQuery" class="clear-btn" @click="clearSearch">
-            ✕
-          </button>
+          <button v-if="searchQuery" class="clear-btn" @click="clearSearch">✕</button>
         </div>
 
         <!-- Search Auto-suggest dropdown -->
-        <div v-if="isSearchDropdownOpen && searchStore.searchResults.length > 0" class="search-dropdown glass-panel">
+        <div
+          v-if="isSearchDropdownOpen && searchStore.searchResults.length > 0"
+          class="search-dropdown glass-panel"
+        >
           <div class="dropdown-header">
-            <span>{{ tx("Résultats de recherche") }}</span>
-            <span class="results-count">{{ tx(searchStore.searchResults.length) }} {{ tx("animés") }}</span>
+            <span>{{ tx('Résultats de recherche') }}</span>
+            <span class="results-count"
+              >{{ tx(searchStore.searchResults.length) }} {{ tx('animés') }}</span
+            >
           </div>
           <div class="results-list">
             <div
@@ -51,7 +71,9 @@
                 <span class="result-title">{{ tx(item.title) }}</span>
                 <div class="result-meta">
                   <span class="badge badge-source">{{ tx(item.source) }}</span>
-                  <span v-if="item.latestEpisode" class="result-ep">{{ tx(item.latestEpisode) }}</span>
+                  <span v-if="item.latestEpisode" class="result-ep">{{
+                    tx(item.latestEpisode)
+                  }}</span>
                 </div>
               </div>
             </div>
@@ -61,11 +83,13 @@
 
       <!-- Navigation Links -->
       <nav class="nav-links">
-        <router-link to="/" class="nav-item" active-class="active"> {{ tx("Accueil") }} </router-link>
-        <router-link to="/favorites" class="nav-item" active-class="active"> {{ tx("Favoris") }} </router-link>
-        <router-link to="/sources" class="nav-item" active-class="active">
-          Sources
+        <router-link to="/" class="nav-item" active-class="active">
+          {{ tx('Accueil') }}
         </router-link>
+        <router-link to="/favorites" class="nav-item" active-class="active">
+          {{ tx('Favoris') }}
+        </router-link>
+        <router-link to="/sources" class="nav-item" active-class="active"> Sources </router-link>
         <router-link to="/extensions" class="nav-item" active-class="active">
           Extensions
         </router-link>
@@ -73,13 +97,24 @@
 
       <!-- Actions (Downloads & Status) -->
       <div class="nav-actions">
-        <button class="downloads-btn" :class="{ 'has-active': downloadStore.stats.activeCount > 0 }" @click="downloadStore.toggleDrawer">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+        <button
+          class="downloads-btn"
+          :class="{ 'has-active': downloadStore.stats.activeCount > 0 }"
+          @click="downloadStore.toggleDrawer"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <span>{{ tx("Téléchargements") }}</span>
+          <span>{{ tx('Téléchargements') }}</span>
           <span v-if="downloadStore.stats.activeCount > 0" class="dl-count-badge">
             {{ tx(downloadStore.stats.activeCount) }}
           </span>
@@ -90,51 +125,51 @@
 </template>
 
 <script setup lang="ts">
-import { tx } from '@/utils/locale';
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import { useAnimeStore } from '@/stores/anime';
-import { useDownloadStore } from '@/stores/downloads';
-import type { AnimeResult } from '@/types';
+import { tx } from '@/utils/locale'
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAnimeStore } from '@/stores/anime'
+import { useDownloadStore } from '@/stores/downloads'
+import type { AnimeResult } from '@/types'
 
-const router = useRouter();
-const searchStore = useAnimeStore();
-const downloadStore = useDownloadStore();
+const router = useRouter()
+const searchStore = useAnimeStore()
+const downloadStore = useDownloadStore()
 
-const searchQuery = ref('');
-const isSearchDropdownOpen = ref(false);
-let debounceTimer: any = null;
+const searchQuery = ref('')
+const isSearchDropdownOpen = ref(false)
+let debounceTimer: any = null
 
 function onSearchInput() {
-  if (debounceTimer) clearTimeout(debounceTimer);
+  if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     if (searchQuery.value.trim().length >= 2) {
-      searchStore.search(searchQuery.value.trim(), 'all');
-      isSearchDropdownOpen.value = true;
+      searchStore.search(searchQuery.value.trim(), 'all')
+      isSearchDropdownOpen.value = true
     } else {
-      isSearchDropdownOpen.value = false;
+      isSearchDropdownOpen.value = false
     }
-  }, 350);
+  }, 350)
 }
 
 function clearSearch() {
-  searchQuery.value = '';
-  isSearchDropdownOpen.value = false;
+  searchQuery.value = ''
+  isSearchDropdownOpen.value = false
 }
 
 function triggerSearch() {
   if (searchQuery.value.trim()) {
-    isSearchDropdownOpen.value = false;
-    router.push({ path: '/sources', query: { q: searchQuery.value.trim() } });
+    isSearchDropdownOpen.value = false
+    router.push({ path: '/sources', query: { q: searchQuery.value.trim() } })
   }
 }
 
 function selectAnime(anime: AnimeResult) {
-  isSearchDropdownOpen.value = false;
+  isSearchDropdownOpen.value = false
   router.push({
     path: '/anime',
     query: { url: anime.url, source: anime.source },
-  });
+  })
 }
 </script>
 

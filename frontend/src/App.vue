@@ -23,7 +23,12 @@
     <AppBottomNav :inert="isPaletteOpen" />
 
     <!-- Universal Command Palette Modal (Ctrl + K) -->
-    <CommandPaletteModal :is-open="isPaletteOpen" :initial-query="paletteQuery" :initial-source="paletteSource" @close="isPaletteOpen = false" />
+    <CommandPaletteModal
+      :is-open="isPaletteOpen"
+      :initial-query="paletteQuery"
+      :initial-source="paletteSource"
+      @close="isPaletteOpen = false"
+    />
 
     <!-- Global Video Streaming Modal -->
     <VideoPlayerModal />
@@ -32,53 +37,63 @@
 </template>
 
 <script setup lang="ts">
-import { tx } from '@/utils/locale';
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { useSearchContext } from '@/stores/searchContext';
-import AppNotifications from '@/components/AppNotifications.vue';
-import NetworkVerificationPanel from '@/components/NetworkVerificationPanel.vue';
-import AppSidebar from '@/components/AppSidebar.vue';
-import AppTopbar from '@/components/AppTopbar.vue';
-import AppBottomNav from '@/components/AppBottomNav.vue';
-import CommandPaletteModal from '@/components/CommandPaletteModal.vue';
-import VideoPlayerModal from '@/components/VideoPlayerModal.vue';
-import { useDownloadStore } from '@/stores/downloads';
-import { useI18nStore } from '@/stores/i18n';
+import { tx } from '@/utils/locale'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { useSearchContext } from '@/stores/searchContext'
+import AppNotifications from '@/components/AppNotifications.vue'
+import NetworkVerificationPanel from '@/components/NetworkVerificationPanel.vue'
+import AppSidebar from '@/components/AppSidebar.vue'
+import AppTopbar from '@/components/AppTopbar.vue'
+import AppBottomNav from '@/components/AppBottomNav.vue'
+import CommandPaletteModal from '@/components/CommandPaletteModal.vue'
+import VideoPlayerModal from '@/components/VideoPlayerModal.vue'
+import { useDownloadStore } from '@/stores/downloads'
+import { useI18nStore } from '@/stores/i18n'
 
-const searchContext = useSearchContext();
-watch(() => searchContext.restoreSequence, async () => { await nextTick(); openPalette(); });
-const downloadStore = useDownloadStore();
-const i18nStore = useI18nStore();
-const isPaletteOpen = ref(false);
-const paletteQuery = ref<string | undefined>();
-const paletteSource = ref<string | undefined>();
-function openPalette(query?: string, source?: string) { paletteQuery.value = query; paletteSource.value = source; isPaletteOpen.value = true; }
+const searchContext = useSearchContext()
+watch(
+  () => searchContext.restoreSequence,
+  async () => {
+    await nextTick()
+    openPalette()
+  },
+)
+const downloadStore = useDownloadStore()
+const i18nStore = useI18nStore()
+const isPaletteOpen = ref(false)
+const paletteQuery = ref<string | undefined>()
+const paletteSource = ref<string | undefined>()
+function openPalette(query?: string, source?: string) {
+  paletteQuery.value = query
+  paletteSource.value = source
+  isPaletteOpen.value = true
+}
 
 function onKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-    e.preventDefault();
-    if (e.repeat || document.querySelector('.dialog-overlay')) return;
-    if (isPaletteOpen.value) isPaletteOpen.value = false;
-    else openPalette();
+    e.preventDefault()
+    if (e.repeat || document.querySelector('.dialog-overlay')) return
+    if (isPaletteOpen.value) isPaletteOpen.value = false
+    else openPalette()
   }
 }
 
 onMounted(() => {
   // Initialize i18n
-  i18nStore.init();
+  i18nStore.init()
 
   // Listen for Ctrl+K
-  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keydown', onKeyDown)
 
   // Start real-time downloads SSE stream
-  downloadStore.startSSE();
-  downloadStore.fetchTasks();
-});
+  downloadStore.startSSE()
+  downloadStore.fetchTasks()
+})
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeyDown);
-  downloadStore.stopSSE();
-});
+  window.removeEventListener('keydown', onKeyDown)
+  downloadStore.stopSSE()
+})
 </script>
 
 <style>

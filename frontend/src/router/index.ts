@@ -1,6 +1,6 @@
-import { createRouter, createWebHistory } from 'vue-router';
-import { getRouterBase } from './base';
-import { useSearchContext } from '@/stores/searchContext';
+import { createRouter, createWebHistory } from 'vue-router'
+import { getRouterBase } from './base'
+import { useSearchContext } from '@/stores/searchContext'
 
 const routes = [
   {
@@ -51,26 +51,26 @@ const routes = [
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
-];
+]
 
-const positions = new Map<string, {left: number; top: number}>();
+const positions = new Map<string, { left: number; top: number }>()
 const router = createRouter({
   history: createWebHistory(getRouterBase(window.location.pathname)),
   routes,
   scrollBehavior(to, _from, savedPosition) {
-    return savedPosition || positions.get(to.fullPath) || { top: 0 };
+    return savedPosition || positions.get(to.fullPath) || { top: 0 }
   },
-});
+})
 
 router.beforeEach((_to, from) => {
-  positions.set(from.fullPath, {left: window.scrollX, top: window.scrollY});
-  if (positions.size > 50) positions.delete(positions.keys().next().value!);
-});
+  positions.set(from.fullPath, { left: window.scrollX, top: window.scrollY })
+  if (positions.size > 50) positions.delete(positions.keys().next().value!)
+})
 
 router.afterEach((to, from, failure) => {
   if (!failure && from.name === 'anime-detail' && to.name !== 'anime-detail') {
-    useSearchContext().detailUrl = '';
+    useSearchContext().detailUrl = ''
   }
-});
+})
 
-export default router;
+export default router

@@ -2,9 +2,10 @@
 import html
 import json
 from urllib.parse import urljoin
+from typing import Any
 
 
-def normalize_subtitles(value, base_url=""):
+def normalize_subtitles(value: object, base_url: str = "") -> list[dict[str, Any]]:
     if isinstance(value, str):
         value = json.loads(value or "[]")
     if value is None:
@@ -32,14 +33,14 @@ def normalize_subtitles(value, base_url=""):
     return tracks
 
 
-def subtitle_language(lang):
+def subtitle_language(lang: str | None) -> str:
     primary = (lang or "und").lower().replace("_", "-").split("-")[0]
     return {"fr": "fra", "en": "eng", "ja": "jpn", "de": "deu",
             "es": "spa", "it": "ita", "pt": "por", "ar": "ara",
             "ru": "rus", "zh": "zho", "ko": "kor"}.get(primary, primary if len(primary) == 3 else "und")
 
 
-def subtitle_extension(content):
+def subtitle_extension(content: bytes) -> str:
     text = content.decode("utf-8-sig", errors="replace").strip()
     if text.startswith("WEBVTT"):
         return ".vtt"

@@ -4,7 +4,7 @@
       <!-- Header -->
       <div class="drawer-header">
         <div class="header-left">
-          <h2>{{ tx("Téléchargements") }}</h2>
+          <h2>{{ tx('Téléchargements') }}</h2>
           <span class="sse-status" :class="{ connected: downloadStore.isConnected }">
             {{ tx(downloadStore.isConnected ? '● En direct' : '○ Polling') }}
           </span>
@@ -15,15 +15,15 @@
       <!-- Stats Bar -->
       <div class="drawer-stats">
         <div class="stat-item">
-          <span class="stat-label">{{ tx("En cours") }}</span>
+          <span class="stat-label">{{ tx('En cours') }}</span>
           <span class="stat-value">{{ tx(downloadStore.stats.activeCount) }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">{{ tx("Vitesse") }}</span>
+          <span class="stat-label">{{ tx('Vitesse') }}</span>
           <span class="stat-value">{{ tx(formatSpeed(downloadStore.stats.totalSpeed)) }}</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">{{ tx("Terminés") }}</span>
+          <span class="stat-label">{{ tx('Terminés') }}</span>
           <span class="stat-value">{{ tx(downloadStore.stats.completedCount) }}</span>
         </div>
       </div>
@@ -34,19 +34,30 @@
           v-if="downloadStore.stats.completedCount > 0"
           class="btn-secondary btn-sm"
           @click="downloadStore.cleanCompleted"
-        > {{ tx("Nettoyer terminés") }} </button>
-        <button class="btn-secondary btn-sm" @click="downloadStore.fetchTasks"> {{ tx("Actualiser") }} </button>
+        >
+          {{ tx('Nettoyer terminés') }}
+        </button>
+        <button class="btn-secondary btn-sm" @click="downloadStore.fetchTasks">
+          {{ tx('Actualiser') }}
+        </button>
       </div>
 
       <!-- Tasks List -->
       <div class="tasks-container">
         <div v-if="downloadStore.tasks.length === 0" class="empty-state">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+          <svg
+            viewBox="0 0 24 24"
+            width="48"
+            height="48"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
             <polyline points="7 10 12 15 17 10"></polyline>
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
-          <p>{{ tx("Aucun téléchargement en cours") }}</p>
+          <p>{{ tx('Aucun téléchargement en cours') }}</p>
         </div>
 
         <div
@@ -58,7 +69,7 @@
           <div class="task-top">
             <div class="task-info">
               <span class="task-anime">{{ tx(task.animeName) }}</span>
-              <span class="task-ep">{{ tx("Épisode") }} {{ tx(task.episodeNumber) }}</span>
+              <span class="task-ep">{{ tx('Épisode') }} {{ tx(task.episodeNumber) }}</span>
             </div>
             <span class="badge" :class="getStatusBadgeClass(task.status)">
               {{ tx(formatStatusLabel(task.status)) }}
@@ -132,63 +143,76 @@
 </template>
 
 <script setup lang="ts">
-import { tx } from '@/utils/locale';
-import { useDownloadStore } from '@/stores/downloads';
-import ExportStatusNotice from '@/components/ExportStatusNotice.vue';
+import { tx } from '@/utils/locale'
+import { useDownloadStore } from '@/stores/downloads'
+import ExportStatusNotice from '@/components/ExportStatusNotice.vue'
 
-const downloadStore = useDownloadStore();
+const downloadStore = useDownloadStore()
 
 function formatSpeed(bytesPerSec?: number | null): string {
-  if (!bytesPerSec || bytesPerSec <= 0) return '0 KB/s';
-  const mb = bytesPerSec / (1024 * 1024);
-  if (mb >= 1) return `${mb.toFixed(2)} MB/s`;
-  const kb = bytesPerSec / 1024;
-  return `${kb.toFixed(1)} KB/s`;
+  if (!bytesPerSec || bytesPerSec <= 0) return '0 KB/s'
+  const mb = bytesPerSec / (1024 * 1024)
+  if (mb >= 1) return `${mb.toFixed(2)} MB/s`
+  const kb = bytesPerSec / 1024
+  return `${kb.toFixed(1)} KB/s`
 }
 
 function formatBytes(bytes?: number | null): string {
-  if (!bytes) return '0 MB';
-  const mb = bytes / (1024 * 1024);
-  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
-  return `${mb.toFixed(1)} MB`;
+  if (!bytes) return '0 MB'
+  const mb = bytes / (1024 * 1024)
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`
+  return `${mb.toFixed(1)} MB`
 }
 
 function formatEta(seconds?: number | null): string {
-  if (!seconds || seconds <= 0 || seconds > 86400) return '--';
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
+  if (!seconds || seconds <= 0 || seconds > 86400) return '--'
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
   if (m > 60) {
-    const h = Math.floor(m / 60);
-    return `${h}h ${m % 60}m`;
+    const h = Math.floor(m / 60)
+    return `${h}h ${m % 60}m`
   }
-  return `${m}m ${s}s`;
+  return `${m}m ${s}s`
 }
 
 function getStatusBadgeClass(status: string) {
-  const s = (status || '').toLowerCase();
+  const s = (status || '').toLowerCase()
   switch (s) {
-    case 'completed': return 'badge-success';
-    case 'downloading': return 'badge-source';
+    case 'completed':
+      return 'badge-success'
+    case 'downloading':
+      return 'badge-source'
     case 'error':
-    case 'failed': return 'badge-warning';
-    case 'paused': return 'badge-warning';
-    default: return '';
+    case 'failed':
+      return 'badge-warning'
+    case 'paused':
+      return 'badge-warning'
+    default:
+      return ''
   }
 }
 
 function formatStatusLabel(status: string) {
-  const s = (status || '').toLowerCase();
+  const s = (status || '').toLowerCase()
   switch (s) {
-    case 'downloading': return 'En cours';
+    case 'downloading':
+      return 'En cours'
     case 'queued':
-    case 'pending': return 'En attente';
-    case 'scheduled': return 'Planifié';
-    case 'paused': return 'En pause';
-    case 'completed': return 'Terminé';
+    case 'pending':
+      return 'En attente'
+    case 'scheduled':
+      return 'Planifié'
+    case 'paused':
+      return 'En pause'
+    case 'completed':
+      return 'Terminé'
     case 'error':
-    case 'failed': return 'Échec';
-    case 'cancelled': return 'Annulé';
-    default: return status;
+    case 'failed':
+      return 'Échec'
+    case 'cancelled':
+      return 'Annulé'
+    default:
+      return status
   }
 }
 </script>
@@ -219,8 +243,12 @@ function formatStatusLabel(status: string) {
 }
 
 @keyframes slideLeft {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 .drawer-header {

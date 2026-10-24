@@ -1,0 +1,67 @@
+[project]
+name = "animelab"
+version = "0.1.1"
+description = "AnimeLab Python engine and web application"
+requires-python = ">=3.12,<3.14"
+license = "GPL-3.0-only"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy>=2.0.0",
+    "jinja2>=3.1.4",
+    "aiofiles>=24.1.0",
+    "httpx[socks]>=0.27.0",
+    "curl-cffi>=0.16.3",
+    "websockets>=15.0",
+    "cryptography>=43.0.0",
+    "socksio>=1.0.0",
+    "beautifulsoup4>=4.12.0",
+    "yt-dlp>=2026.3.17",
+    "lxml>=5.2.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+]
+
+[tool.uv]
+package = false
+required-version = "==0.13.1"
+
+[tool.ruff]
+target-version = "py312"
+include = ["animan/**/*.py", "scripts/**/*.py", "tests/**/*.py", "run.py", "desktop.py", "android_runtime.py"]
+
+[tool.ruff.lint]
+# Start with correctness checks across the engine, tests and build tools.
+# Unused imports/locals and style rules are deferred to a separate cleanup.
+select = ["E9", "F"]
+ignore = ["F401", "F841"]
+
+[tool.ruff.lint.per-file-ignores]
+# Imported pytest fixtures are deliberately shadowed by fixture parameters.
+"tests/test_download_proxy_resume.py" = ["F811"]
+"tests/test_proxy_pool.py" = ["F811"]
+"tests/test_transfer_fault_contracts.py" = ["F811"]
+
+[tool.mypy]
+python_version = "3.12"
+files = [
+    "animan/models/anime.py",
+    "animan/android_security.py",
+    "animan/services/download_resume.py",
+    "animan/services/subtitle_service.py",
+    "animan/services/download_errors.py",
+    "scripts/check.py",
+]
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+follow_imports = "silent"
+

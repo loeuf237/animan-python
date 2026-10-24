@@ -50,34 +50,33 @@ If a site blocks access or requests verification, AnimeLab offers a manual websi
 Requirements:
 
 - **Python 3.12 or 3.13**; these versions are covered by CI.
-- **Node.js 22.12+ and npm** to build the interface.
+- **Node.js 22 LTS (22.13+) and npm** to build and check the interface.
 - **FFmpeg and ffprobe** on `PATH` for media processing and verified subtitle muxing.
+- **uv 0.13.1**, the Python dependency manager ([installation](https://docs.astral.sh/uv/getting-started/installation/)).
 
-Clone the repository and create a virtual environment:
+Clone the repository and install the locked Python environment:
 
 ```bash
 git clone https://github.com/loeuf237/animelab.git
 cd animelab
-python3 -m venv .venv
-source .venv/bin/activate
+uv sync --locked
 ```
 
-On Windows, use `python` instead of `python3` if needed and activate with `.\.venv\Scripts\Activate.ps1` in PowerShell.
+uv selects Python 3.13 from `.python-version` and downloads it if necessary. No virtual-environment activation is needed; the same commands work in PowerShell.
 
 Install dependencies, build the interface and start the server:
 
 ```bash
-python -m pip install -r requirements.txt
 cd frontend
 npm ci
 npm run build
 cd ..
-python run.py
+uv run --locked python run.py
 ```
 
 Open **[http://localhost:8080/app/](http://localhost:8080/app/)**. Rebuild the interface after changing its source files.
 
-For a native desktop window, install `pywebview` and the platform's WebView dependencies, then run `python desktop.py`. See [desktop package details](docs/desktop-distribution.md) for platform compatibility.
+For a native desktop window, use the separate desktop packaging dependencies and the platform's WebView libraries. See [desktop package details](docs/desktop-distribution.md) for setup and compatibility. The default locked environment runs the web server; it does not install native desktop or Android build dependencies.
 
 ### Configuration and data
 
@@ -93,7 +92,7 @@ Settings controls language, downloads, sources and proxies. For a source checkou
 For local-only use without automatic reload, on Linux/macOS:
 
 ```bash
-ANIMAN_HOST=127.0.0.1 ANIMAN_RELOAD=false python run.py
+ANIMAN_HOST=127.0.0.1 ANIMAN_RELOAD=false uv run --locked python run.py
 ```
 
 AnimeLab was previously named **Animan**. Internal `animan` package names, `ANIMAN_*` variables, `.animan` data folders and Android ID `com.animan.app` are retained for compatibility. Desktop settings and the library live under `~/.animan`; Android uses private app storage and exports completed media separately.
@@ -123,18 +122,20 @@ npm run dev
 
 Vite serves the interface at **http://localhost:5173** and proxies API requests to port **8080**.
 
-[CI](.github/workflows/ci.yml) runs on pushes and pull requests. It checks Python, the frontend build and responsive layouts, Docker persistence and Android resources. Tests use temporary storage. Desktop and Android release workflows are separate.
+[CI](.github/workflows/ci.yml) runs on pushes and pull requests. It checks Python, the frontend build and responsive layouts, Docker persistence and Android resources. It also enforces Ruff, incremental mypy checks, ESLint, Prettier and Vue/TypeScript checks. Desktop and Android release workflows are separate.
 
-To run frontend checks locally from `frontend/`:
+After the source installation above, run all development checks from the repository root:
 
 ```bash
-npm test
-npm run build
+cd frontend
 npx playwright install --with-deps chromium
-npm run test:ui
+cd ..
+uv run --locked python scripts/check.py all
 ```
 
-For backend checks, follow the isolated storage setup in [the CI workflow](.github/workflows/ci.yml) before running `python -m pytest tests -q`.
+The runner executes linting, typing, unit tests, the interface build, Python tests and browser tests. Python tests use a temporary home, database, cache and download directory. To run only the backend suite, after building the interface, use **`uv run --locked python scripts/check.py python`**; CI uses the same command with a JUnit report option.
+
+Python dependencies, including development tools, are pinned in `uv.lock`; `requirements.txt` is a generated runtime-only export for pip and Docker. Frontend dependencies are pinned in `frontend/package-lock.json`. See the [development guide](docs/development.md) for system prerequisites, individual checks, dependency updates and the current typing/linting scope.
 
 ## Documentation
 

@@ -2,31 +2,31 @@
   <div class="favorites-view">
     <div class="view-header">
       <div>
-        <h1>{{ tx("Mes Favoris") }}</h1>
-        <p class="subtitle">{{ tx("Vos animés enregistrés et suivis pour le téléchargement automatique.") }}</p>
+        <h1>{{ tx('Mes Favoris') }}</h1>
+        <p class="subtitle">
+          {{ tx('Vos animés enregistrés et suivis pour le téléchargement automatique.') }}
+        </p>
       </div>
-      <button class="btn-secondary" @click="libraryStore.fetchFavorites"> {{ tx("Actualiser") }} </button>
+      <button class="btn-secondary" @click="libraryStore.fetchFavorites">
+        {{ tx('Actualiser') }}
+      </button>
     </div>
 
     <!-- Loading -->
     <div v-if="libraryStore.isLoading && !libraryStore.favorites.length" class="loading-state">
       <div class="spinner"></div>
-      <p>{{ tx("Chargement des favoris...") }}</p>
+      <p>{{ tx('Chargement des favoris...') }}</p>
     </div>
 
     <!-- Empty State -->
     <div v-else-if="!libraryStore.favorites.length" class="empty-state glass-panel">
       <p>{{ tx("Vous n'avez aucun animé en favori pour l'instant.") }}</p>
-      <router-link to="/" class="btn-primary">{{ tx("Découvrir les sorties") }}</router-link>
+      <router-link to="/" class="btn-primary">{{ tx('Découvrir les sorties') }}</router-link>
     </div>
 
     <!-- Favorites Grid -->
     <div v-else class="favorites-grid">
-      <div
-        v-for="fav in libraryStore.favorites"
-        :key="fav.url"
-        class="favorite-card glass-panel"
-      >
+      <div v-for="fav in libraryStore.favorites" :key="fav.url" class="favorite-card glass-panel">
         <div class="card-thumb" @click="openAnime(fav)">
           <img :src="fav.imageUrl" :alt="tx(fav.title)" />
           <span class="badge badge-source card-source">{{ tx(fav.source) }}</span>
@@ -44,13 +44,19 @@
                 :checked="fav.autoDownload"
                 @change="libraryStore.toggleAutoDownload(fav.url, fav.autoDownload)"
               />
-              <span>{{ tx("Téléchargement auto") }}</span>
+              <span>{{ tx('Téléchargement auto') }}</span>
             </label>
           </div>
 
           <div class="card-actions">
-            <button class="btn-primary btn-sm" @click="openAnime(fav)"> {{ tx("Voir la fiche") }} </button>
-            <button class="btn-icon" :title="tx('Retirer des favoris')" @click="removeFavorite(fav)">
+            <button class="btn-primary btn-sm" @click="openAnime(fav)">
+              {{ tx('Voir la fiche') }}
+            </button>
+            <button
+              class="btn-icon"
+              :title="tx('Retirer des favoris')"
+              @click="removeFavorite(fav)"
+            >
               🗑
             </button>
           </div>
@@ -61,24 +67,24 @@
 </template>
 
 <script setup lang="ts">
-import { tx } from '@/utils/locale';
-import { onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { useLibraryStore } from '@/stores/library';
-import type { FavoriteItem } from '@/types';
+import { tx } from '@/utils/locale'
+import { onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useLibraryStore } from '@/stores/library'
+import type { FavoriteItem } from '@/types'
 
-const router = useRouter();
-const libraryStore = useLibraryStore();
+const router = useRouter()
+const libraryStore = useLibraryStore()
 
 onMounted(() => {
-  libraryStore.fetchFavorites();
-});
+  libraryStore.fetchFavorites()
+})
 
 function openAnime(fav: FavoriteItem) {
   router.push({
     path: '/anime',
     query: { url: fav.url, source: fav.source || 'french-manga' },
-  });
+  })
 }
 
 async function removeFavorite(fav: FavoriteItem) {
@@ -87,7 +93,7 @@ async function removeFavorite(fav: FavoriteItem) {
     title: fav.title,
     imageUrl: fav.imageUrl,
     source: fav.source,
-  });
+  })
 }
 </script>
 

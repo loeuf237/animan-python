@@ -1,5 +1,8 @@
 <template>
-  <router-link class="anime-card" :to="{path: '/anime', query: {url: anime.url, source: anime.source || 'french-manga'}}">
+  <router-link
+    class="anime-card"
+    :to="{ path: '/anime', query: { url: anime.url, source: anime.source || 'french-manga' } }"
+  >
     <div class="anime-card-poster">
       <img
         :src="anime.imageUrl || '/static/placeholder.jpg'"
@@ -32,16 +35,16 @@
 </template>
 
 <script setup lang="ts">
-import { tx } from '@/utils/locale';
-import type { AnimeResult } from '@/types';
+import { tx } from '@/utils/locale'
+import type { AnimeResult } from '@/types'
 
-const props = defineProps<{
-  anime: AnimeResult;
-}>();
+defineProps<{
+  anime: AnimeResult
+}>()
 
 function onImageError(event: Event) {
-  const target = event.target as HTMLImageElement;
-  target.src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&q=80';
+  const target = event.target as HTMLImageElement
+  target.src = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&q=80'
 }
 </script>
 

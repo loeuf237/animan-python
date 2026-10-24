@@ -1,17 +1,18 @@
 """Authenticate every request to the Android loopback engine, including sockets."""
 from http.cookies import SimpleCookie
 import hmac
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 class AndroidSessionMiddleware:
-    def __init__(self, app, token):
+    def __init__(self, app: ASGIApp, token: str) -> None:
         if len(token) < 32:
             raise ValueError("Android session token is too short")
         from animan.diagnostics import remember_secret
         remember_secret(token)
         self.app, self.token = app, token
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in ("http", "websocket"):
             return await self.app(scope, receive, send)
         headers = {key.lower(): value for key, value in scope.get("headers", [])}

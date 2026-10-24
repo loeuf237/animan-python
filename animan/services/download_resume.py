@@ -4,6 +4,9 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 
 RESUME_OVERLAP = 65536
@@ -13,7 +16,7 @@ class ResumeMismatch(ConnectionError):
     """The new route serves different bytes from the existing partial file."""
 
 
-def read_metadata(path):
+def read_metadata(path: Path) -> dict[str, Any]:
     try:
         if path.stat().st_size > 4096:
             return {}
@@ -23,19 +26,19 @@ def read_metadata(path):
         return {}
 
 
-def write_metadata(path, data):
+def write_metadata(path: Path, data: Mapping[str, Any]) -> None:
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(json.dumps(data), encoding="utf-8")
     os.replace(temp, path)
 
 
-def representation(headers, total):
+def representation(headers: Mapping[str, str], total: int) -> dict[str, str | int]:
     etag = headers.get("etag", "")
     validator = etag if etag and not etag.startswith("W/") else headers.get("last-modified", "")
     return {"validator": validator, "total": total}
 
 
-def response_range(headers, expected_start):
+def response_range(headers: Mapping[str, str], expected_start: int) -> tuple[int, int]:
     match = re.fullmatch(r"bytes\s+(\d+)-(\d+)/(\d+|\*)",
                          headers.get("content-range", "").strip(), re.IGNORECASE)
     if not match:
@@ -50,7 +53,7 @@ def response_range(headers, expected_start):
     return total, length
 
 
-def prepare_hls_cache(directory, playlist_url, playlist_text):
+def prepare_hls_cache(directory: Path, playlist_url: str, playlist_text: str) -> None:
     # A changed playlist/variant must never reuse segments solely by their index.
     # Exact identity is deliberately conservative when signed URLs are renewed.
     fingerprint = hashlib.sha256(json.dumps([playlist_url, playlist_text]).encode()).hexdigest()
@@ -61,7 +64,7 @@ def prepare_hls_cache(directory, playlist_url, playlist_text):
     write_metadata(manifest, {"fingerprint": fingerprint})
 
 
-def segment_digest(path):
+def segment_digest(path: Path) -> dict[str, str | int]:
     digest = hashlib.sha256()
     with path.open('rb') as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b''):
@@ -69,12 +72,12 @@ def segment_digest(path):
     return {'size': path.stat().st_size, 'sha256': digest.hexdigest()}
 
 
-def valid_cached_segment(path):
+def valid_cached_segment(path: Path) -> bool:
     metadata = read_metadata(path.with_suffix('.json'))
     return path.is_file() and path.stat().st_size > 0 and metadata == segment_digest(path)
 
 
-def commit_segment(staging, destination):
+def commit_segment(staging: Path, destination: Path) -> None:
     # Persist bytes before the identity record. A crash in between results in a
     # safe re-download, never reuse of an uncommitted partial segment.
     with staging.open('rb') as source:
@@ -83,7 +86,7 @@ def commit_segment(staging, destination):
     write_metadata(destination.with_suffix('.json'), segment_digest(destination))
 
 
-def publish_file(staging, destination):
+def publish_file(staging: Path, destination: Path) -> None:
     """Publish completed bytes without replacing a destination created meanwhile."""
     import errno
     try:
@@ -104,7 +107,7 @@ def publish_file(staging, destination):
         staging.unlink()
 
 
-def media_resource(url):
+def media_resource(url: str) -> str:
     from urllib.parse import urlsplit, urlunsplit
     parsed = urlsplit(url)
     # Signed query parameters can expire while the resource stays identical.
